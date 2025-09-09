@@ -1,2 +1,73 @@
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Project specific
 /rag
+.rag
+example.pdf
+*.pdf
+
+# Vector database storage
+/qdrant_storage
+qdrant_storage/
+notebooks/qdrant_storage/
+
+# Cache directories
+/cache
+cache/
+notebooks/cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data directories (processed data, models, etc.)
+data/processed/
+data/raw/*.pdf
+data/raw/*.docx
+data/raw/*.txt
+*.pkl
+*.pickle
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Poetry
+poetry.lock
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp//

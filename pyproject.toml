@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "rag"
+version = "0.1.0"
+description = ""
+authors = ["alvarezcondeluis <alvarezcondeluis@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "3.10.18"
+ocrmypdf = "^16.10.4"
+# Your preferred (newer) version
+pypdf = "^6.0.0" 
+pikepdf = "^9.10.2"
+python-dotenv = "^1.1.1"
+llama-parse = "^0.6.62"
+unstructured = "^0.18.14"
+unstructured-inference = "^1.0.5"
+pdf2image = "^1.17.0"
+unstructured-pytesseract = "^0.3.15"
+pdfplumber = "^0.11.7"
+# Your preferred (newer) version
+pandas = "^2.3.2" 
+ollama = "^0.5.3"
+fastembed = "^0.7.3"
+pypdf2 = "^3.0.1"
+qdrant-client = "^1.15.1"
+sentence-transformers = "^5.1.0"
+llama-index-core = "^0.13.5"
+llama-index-llms-ollama = "^0.7.1"
+llama-index-embeddings-huggingface = "^0.6.0"
+llama-index-vector-stores-qdrant = "^0.8.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

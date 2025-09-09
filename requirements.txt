@@ -1,0 +1,12 @@
+ocrmypdf
+pypdf
+pikepdf
+python-dotenv
+llama-parse
+unstructured
+unstructured_inference
+pdf2image
+unstructured_pytesseract
+pdfplumber
+pandas
+pypdf
