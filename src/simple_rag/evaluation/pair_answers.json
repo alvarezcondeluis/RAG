@@ -1,0 +1,256 @@
+[
+    {
+      "question": "What is the name of the network architecture proposed in the 'Attention Is All You Need' paper?",
+      "ground_truth": "The paper proposes a new simple network architecture called the Transformer. [cite: 17]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [17]
+    },
+    {
+      "question": "What mechanisms does the Transformer architecture replace entirely from dominant sequence transduction models?",
+      "ground_truth": "The Transformer architecture dispenses with recurrence and convolutions entirely, relying solely on attention mechanisms. [cite: 17]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [17]
+    },
+    {
+      "question": "What is Multi-Head Attention?",
+      "ground_truth": "Multi-Head Attention allows the model to jointly attend to information from different representation subspaces at different positions by running multiple attention layers, or heads, in parallel. [cite: 123, 124, 128]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [123, 124, 128, 132]
+    },
+    {
+      "question": "How many identical layers are in the encoder and decoder stacks for the base model?",
+      "ground_truth": "Both the encoder and the decoder are composed of a stack of N=6 identical layers. [cite: 78, 83]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [78, 83]
+    },
+    {
+      "question": "What optimizer was used to train the models?",
+      "ground_truth": "The paper used the Adam optimizer with β1=0.9, β2=0.98 and ε=10⁻⁹. [cite: 210]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [210]
+    },
+    {
+      "question": "What BLEU score did the big Transformer model achieve on the WMT 2014 English-to-German translation task?",
+      "ground_truth": "The big Transformer model achieved a BLEU score of 28.4 on the WMT 2014 English-to-German translation task. [cite: 19, 228]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [19, 228]
+    },
+    {
+      "question": "What are the two sub-layers in each encoder layer?",
+      "ground_truth": "Each encoder layer has two sub-layers: a multi-head self-attention mechanism and a simple, position-wise fully connected feed-forward network. [cite: 78, 79]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [78, 79]
+    },
+    {
+      "question": "What value for label smoothing was used during training?",
+      "ground_truth": "During training, the authors employed label smoothing with a value of ε_ls = 0.1. [cite: 224]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [224]
+    },
+    {
+      "question": "How many parallel attention heads were used in the Multi-Head Attention mechanism?",
+      "ground_truth": "The paper employs h=8 parallel attention layers, or heads. [cite: 132]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [132]
+    },
+    {
+      "question": "What dropout rate was used for the base model?",
+      "ground_truth": "For the base model, a dropout rate of P_drop = 0.1 was used. [cite: 223]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [223]
+    },
+    {
+      "question": "What is the dimensionality of the model's sub-layers and embedding layers?",
+      "ground_truth": "All sub-layers and embedding layers in the model produce outputs of dimension d_model = 512. [cite: 82]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [82]
+    },
+    {
+      "question": "How does the per-layer complexity of self-attention compare to that of recurrent layers?",
+      "ground_truth": "A self-attention layer has a complexity of O(n²·d) per layer, whereas a recurrent layer's complexity is O(n·d²). Self-attention layers are generally faster when the sequence length 'n' is smaller than the representation dimension 'd'. [cite: 160, 184, 186]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [160, 184, 186]
+    },
+    {
+      "question": "What are the two most commonly used attention functions mentioned in the paper?",
+      "ground_truth": "The two most commonly used attention functions are additive attention and dot-product (multiplicative) attention. [cite: 117]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [117]
+    },
+    {
+      "question": "How does the maximum path length for dependencies in a self-attention layer compare to a recurrent layer?",
+      "ground_truth": "A self-attention layer connects all positions with a constant number of sequential operations, resulting in a maximum path length of O(1), whereas a recurrent layer requires O(n) sequential operations and has a path length of O(n). [cite: 160, 183]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [160, 183]
+    },
+    {
+      "question": "How did the performance of learned positional embeddings compare to the sinusoidal version?",
+      "ground_truth": "The paper found that the two versions produced nearly identical results. [cite: 172, 255]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [172, 255]
+    },
+    {
+      "question": "How does the Transformer's training cost for the English-to-French task compare to the previous state-of-the-art model?",
+      "ground_truth": "The big Transformer model achieved a new state-of-the-art BLEU score at less than 1/4 the training cost of the previous best model. [cite: 231]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [231]
+    },
+    {
+      "question": "What are the three ways Multi-Head Attention is used in the Transformer model?",
+      "ground_truth": "Multi-Head Attention is used in three ways: in encoder-decoder attention layers, in the encoder's self-attention layers, and in the decoder's self-attention layers. [cite: 135, 136, 139, 141]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [135, 136, 139, 141]
+    },
+    {
+      "question": "Why is the dot-product attention in the Transformer model 'scaled'?",
+      "ground_truth": "The dot products are scaled by 1/√dk to counteract the effect of large dot products pushing the softmax function into regions where it has extremely small gradients, which can happen for larger values of dk. [cite: 113, 121]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [113, 121]
+    },
+    {
+      "question": "How does the model make use of the order of the sequence if it contains no recurrence or convolution?",
+      "ground_truth": "The model injects information about the relative or absolute position of tokens by adding 'positional encodings' to the input embeddings at the bottom of the encoder and decoder stacks. [cite: 162, 163]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [162, 163]
+    },
+    {
+      "question": "What is the purpose of masking in the decoder's self-attention sub-layer?",
+      "ground_truth": "Masking is used in the decoder's self-attention sub-layer to prevent positions from attending to subsequent positions, which preserves the auto-regressive property of the model. [cite: 86, 142, 143]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [86, 142, 143]
+    },
+    {
+      "question": "What is the key advantage of the Transformer's architecture regarding training time?",
+      "ground_truth": "The Transformer's architecture allows for significantly more parallelization because it dispenses with recurrence, which requires sequential computation. This results in requiring significantly less time to train compared to previous models. [cite: 18, 32, 34, 38]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [17, 18, 32, 34, 38]
+    },
+    {
+      "question": "What is the role of residual connections in the Transformer architecture?",
+      "ground_truth": "Residual connections are employed around each of the sub-layers, and their output is then passed through layer normalization. The output of each sub-layer is LayerNorm(x + Sublayer(x)). [cite: 80, 81]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [80, 81, 85]
+    },
+    {
+      "question": "Why did the authors choose to use a sinusoidal positional encoding instead of a learned one, despite finding nearly identical results?",
+      "ground_truth": "The authors chose the sinusoidal version because they hypothesized it might allow the model to extrapolate to sequence lengths longer than those encountered during training. [cite: 172, 173]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [172, 173]
+    },
+    {
+      "question": "What is the auto-regressive property of the decoder and how is it maintained?",
+      "ground_truth": "The auto-regressive property means that predictions for a given position 'i' can only depend on known outputs at positions less than 'i'. This is maintained by offsetting the output embeddings and using masking in the self-attention sub-layer. [cite: 53, 87]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [53, 86, 87, 142]
+    },
+    {
+      "question": "What is the motivation for using self-attention as described in the paper?",
+      "ground_truth": "The authors were motivated by three desiderata: the total computational complexity per layer, the amount of computation that can be parallelized, and the path length between long-range dependencies in the network. [cite: 176, 177, 178]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [176, 177, 178]
+    },
+    {
+      "question": "Does the Transformer model's decoder have the exact same sub-layers as the encoder?",
+      "ground_truth": "No, in addition to the two sub-layers found in each encoder layer, the decoder inserts a third sub-layer that performs multi-head attention over the output of the encoder stack. [cite: 84]",
+      "question_type": "Negative",
+      "ground_truth_context_ids": [78, 83, 84]
+    },
+    {
+      "question": "Is the learning rate constant during training?",
+      "ground_truth": "No, the learning rate is varied over the course of training. It increases linearly for the first 'warmup_steps' and then decreases proportionally to the inverse square root of the step number. [cite: 211, 214]",
+      "question_type": "Negative",
+      "ground_truth_context_ids": [211, 214]
+    },
+    {
+      "question": "Does the Transformer architecture use any convolutional layers?",
+      "ground_truth": "No, the Transformer architecture is based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. [cite: 17]",
+      "question_type": "Negative",
+      "ground_truth_context_ids": [17]
+    },
+    {
+      "question": "Does a single convolutional layer with a kernel width k < n connect all pairs of input and output positions?",
+      "ground_truth": "No, a single convolutional layer with a kernel width k < n does not connect all pairs of input and output positions. Doing so requires a stack of multiple convolutional layers. [cite: 189, 190]",
+      "question_type": "Negative",
+      "ground_truth_context_ids": [189, 190]
+    },
+    {
+      "question": "Are the linear transformations in the Position-wise Feed-Forward Networks the same from layer to layer?",
+      "ground_truth": "No, while the linear transformations are the same across different positions within the same layer, they use different parameters from layer to layer. [cite: 150]",
+      "question_type": "Negative",
+      "ground_truth_context_ids": [150]
+    },
+    {
+      "question": "Did the authors use checkpoint averaging for the base models?",
+      "ground_truth": "Yes, for the base models, they used a single model obtained by averaging the last 5 checkpoints. [cite: 233]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [233]
+    },
+    {
+      "question": "What beam size was used during inference?",
+      "ground_truth": "The authors used beam search with a beam size of 4. [cite: 235]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [235]
+    },
+    {
+      "question": "On what task, besides machine translation, was the Transformer evaluated?",
+      "ground_truth": "The Transformer was also successfully evaluated on English constituency parsing. [cite: 21, 257]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [21, 257]
+    },
+    {
+      "question": "What is the function of the position-wise feed-forward network in each layer?",
+      "ground_truth": "It is a fully connected feed-forward network applied to each position separately and identically, consisting of two linear transformations with a ReLU activation in between. [cite: 146, 147]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [146, 147]
+    },
+    {
+      "question": "How did the Transformer perform on the English constituency parsing task compared to the BerkeleyParser when trained only on the WSJ dataset?",
+      "ground_truth": "The Transformer outperformed the BerkeleyParser even when training only on the WSJ training set of 40,000 sentences. [cite: 271]",
+      "question_type": "Comparative",
+      "ground_truth_context_ids": [271]
+    },
+    {
+      "question": "Is it true that reducing the number of attention heads always improves model performance?",
+      "ground_truth": "No, while single-head attention is 0.9 BLEU worse than the best setting, quality also drops off with too many heads. [cite: 251]",
+      "question_type": "Negative",
+      "ground_truth_context_ids": [251]
+    },
+    {
+      "question": "What training data was used for the WMT 2014 English-German task?",
+      "ground_truth": "The standard WMT 2014 English-German dataset was used, consisting of about 4.5 million sentence pairs. [cite: 199]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [199]
+    },
+    {
+      "question": "How is the learning rate determined according to the formula in the paper?",
+      "ground_truth": "The learning rate increases linearly for the first 'warmup_steps' and then decreases proportionally to the inverse square root of the step number. [cite: 214]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [211, 212, 214]
+    },
+    {
+      "question": "What is the primary drawback of recurrent models that the Transformer architecture avoids?",
+      "ground_truth": "Recurrent models have an inherently sequential nature which precludes parallelization within training examples, a fundamental constraint that the Transformer avoids. [cite: 32, 34]",
+      "question_type": "Conceptual",
+      "ground_truth_context_ids": [32, 34, 37]
+    },
+    {
+      "question": "What does the paper conclude about the future of attention-based models?",
+      "ground_truth": "The authors state they are excited about the future of attention-based models and plan to apply them to other tasks, including different input and output modalities like images, audio, and video. [cite: 277, 278]",
+      "question_type": "Simple Fact",
+      "ground_truth_context_ids": [277, 278]
+    },
+    
+    {
+      "question": "According to row (A) in Table 3, what happens to the BLEU score on the dev set when the number of attention heads is reduced to 1?",
+      "ground_truth": "When the number of attention heads is reduced to 1, the BLEU score on the dev set drops to 24.9, which the paper notes is 0.9 BLEU worse than the best setting.",
+      "question_type": "Table Analysis",
+      "ground_truth_context_ids": [247, 251]
+    },
+    {
+      "question": "Based on the decoder stack shown in Figure 1, what is the name of the first multi-head attention block, and what is its primary purpose?",
+      "ground_truth": "The first block in the decoder stack is the 'Masked Multi-Head Attention' layer. Its primary purpose is to prevent positions from attending to subsequent positions, which preserves the auto-regressive property of the model by ensuring that predictions for a given position can only depend on known, previous outputs.",
+      "question_type": "Diagram Interpretation",
+      "ground_truth_context_ids": [75, 86, 87, 142, 143]
+    }
+    
+  ]

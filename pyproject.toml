@@ -29,6 +29,13 @@ llama-index-core = "^0.13.5"
 llama-index-llms-ollama = "^0.7.1"
 llama-index-embeddings-huggingface = "^0.6.0"
 llama-index-vector-stores-qdrant = "^0.8.3"
+neo4j = "^5.28.2"
+llama-index-graph-stores-neo4j = "^0.5.1"
+ragas = "^0.3.4"
+pymupdf = "^1.26.4"
+pillow = "^11.3.0"
+docling = "^2.54.0"
+vllm = "^0.10.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.2"
