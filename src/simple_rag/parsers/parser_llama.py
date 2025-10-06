@@ -212,18 +212,20 @@ class LlamaParseProcessor(ParserProcessor):
         Returns:
             Path to the created output file
         """
-        return self.generate_markdown_output(docs, output_path)
+        markdown_content = self.generate_markdown_output(docs)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(markdown_content, encoding="utf-8")
+        return output_path
     
-    def generate_markdown_output(self, docs: List[Any], output_path: Path) -> Path:
+    def generate_markdown_output(self, docs: List[Any]) -> str:
         """
-        Generate a single markdown file from parsed documents with table of contents.
+        Generate markdown content from parsed documents with table of contents.
         
         Args:
             docs: List of parsed document objects
-            output_path: Path for the output markdown file
             
         Returns:
-            Path to the created markdown file
+            Generated markdown content as string
         """
         toc = ["# Parsed Output", "## Table of Contents"]
         parts = []
@@ -250,10 +252,8 @@ class LlamaParseProcessor(ParserProcessor):
             )
 
         final_md = "\n".join(toc) + "\n" + "".join(parts)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(final_md, encoding="utf-8")
         
-        return output_path
+        return final_md
     
     def process_pdf_slice(
         self,

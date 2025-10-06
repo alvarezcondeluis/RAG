@@ -53,7 +53,7 @@ class UnstructuredParserProcessor(ParserProcessor):
         self.combine_text_under_n_chars = combine_text_under_n_chars
         self.new_after_n_chars = new_after_n_chars
     
-    def obtain_image_summary(self, image_base64: str, mime_type: str = "image/png") -> str:
+    def obtain_image_summary(self, image_base64: str, mime_type: str = "image/png", model: str = "gemma3:4b") -> str:
         """
         Generate a summary of an image using Ollama's vision model.
         
@@ -65,10 +65,11 @@ class UnstructuredParserProcessor(ParserProcessor):
             Text summary of the image content
         """
         try:
+            prompt = """Extract the information related to charts, mention of risks (For example a risk vector with the risk value highlighted), tables from this image. If there is no relevant information, return 'No relevant information'."""
             # Use ollama library to generate image description
             response = ollama.generate(
-                model="qwen2.5vl:7b",
-                prompt="Describe this image in detail, focusing on any text, diagrams, charts, or important visual elements that would be relevant for document analysis. Make it brief so that there is not an excess of information of about 200 words maximum",
+                model=model,
+                prompt=prompt,
                 images=[image_base64]
             )
             
@@ -184,7 +185,7 @@ class UnstructuredParserProcessor(ParserProcessor):
         
         return output_path
     
-    def preprocess_chunks(self, chunks: List[Any], verbose: bool = False, document_path = None) -> Dict[str, Any]:
+    def preprocess_chunks(self, chunks: List[Any], verbose: bool = False, document_path = None, model = "gemma3:4b") -> Dict[str, Any]:
         """
         Preprocess chunks by grouping text elements from Title to Title and creating separate image chunks.
         
@@ -222,7 +223,7 @@ class UnstructuredParserProcessor(ParserProcessor):
                     element_text = getattr(element, "text", "").strip()
                     element_page = getattr(element.metadata, "page_number", chunk_page) if hasattr(element, 'metadata') else chunk_page
                     
-                    if element_type == "Image":
+                    if element_type == "Image" or element_type == "FigureCaption":
                         # Create separate image chunk
                         image_info = {
                             "chunk_id": f"image_{chunk_idx}_{elem_idx}",
@@ -247,7 +248,7 @@ class UnstructuredParserProcessor(ParserProcessor):
                             
                             image_summary = self.obtain_image_summary(
                                 image_info["image_data"], 
-                                image_info.get("mime_type", "image/png")
+                                image_info.get("mime_type", "image/png"), model
                             )
                             
                             image_info["ai_summary"] = image_summary
@@ -506,6 +507,62 @@ class UnstructuredParserProcessor(ParserProcessor):
             return enhanced_element
         
         return caption_element
+
+    def get_image_chunks(self, chunks: List[Any], verbose: bool = False) -> List[Dict[str, Any]]:
+        """
+        Extract only the image chunks from parsed document chunks without AI processing.
+        
+        Args:
+            chunks: List of elements from unstructured partition_pdf
+            verbose: Whether to print progress messages
+            
+        Returns:
+            List of image chunk dictionaries with raw image data
+        """
+        image_chunks = []
+        
+        if verbose:
+            print("🔍 Extracting image chunks...")
+        
+        for chunk_idx, chunk in enumerate(chunks):
+            chunk_page = getattr(chunk.metadata, "page_number", None) if hasattr(chunk, 'metadata') else None
+            
+            # Check if chunk has orig_elements in metadata
+            if hasattr(chunk, 'metadata') and hasattr(chunk.metadata, 'orig_elements'):
+                orig_elements = chunk.metadata.orig_elements
+                
+                for elem_idx, element in enumerate(orig_elements):
+                    element_type = type(element).__name__
+                    
+                    if element_type == "Image":
+                        element_text = getattr(element, "text", "").strip()
+                        element_page = getattr(element.metadata, "page_number", chunk_page) if hasattr(element, 'metadata') else chunk_page
+                        
+                        # Create image chunk
+                        image_info = {
+                            "chunk_id": f"image_{chunk_idx}_{elem_idx}",
+                            "original_chunk_id": chunk_idx,
+                            "page": element_page,
+                            "type": "image",
+                            "text": element_text,
+                            "section_title": "Image Content"
+                        }
+                        
+                        # Add image data if available
+                        if hasattr(element, 'metadata') and hasattr(element.metadata, 'image_base64'):
+                            image_info["image_data"] = element.metadata.image_base64
+                        if hasattr(element, 'metadata') and hasattr(element.metadata, 'image_mime_type'):
+                            image_info["mime_type"] = element.metadata.image_mime_type
+                            
+                        if verbose and "image_data" in image_info:
+                            print(f"🖼️  Found image {elem_idx} in chunk {chunk_idx} on page {element_page}")
+                        
+                        image_chunks.append(image_info)
+        
+        if verbose:
+            print(f"📊 Found {len(image_chunks)} image chunks")
+        
+        return image_chunks
 
     def extract_content_by_type(self, chunks: List[Any], process_images: bool = True, verbose: bool = False) -> Dict[str, Any]:
         """

@@ -8,7 +8,9 @@
 .rag
 example.pdf
 *.pdf
-
+/data
+/RAG//notebooks/extracted_content
+/extracted_content
 # Vector database storage
 /qdrant_storage
 qdrant_storage/

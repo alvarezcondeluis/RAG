@@ -2,9 +2,9 @@ import time
 import json
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
-from parsers.unstructured_parser import UnstructuredParserProcessor
-from parsers.parser_llama import LlamaParseProcessor
-from parsers.utils.slicer import slice_pdf_pages
+from simple_rag.parsers.unstructured_parser import UnstructuredParserProcessor
+from simple_rag.parsers.parser_llama import LlamaParseProcessor
+from simple_rag.parsers.utils.slicer import slice_pdf_pages
 
 
 class MainParserProcessor:
