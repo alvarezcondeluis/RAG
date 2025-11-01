@@ -3,14 +3,14 @@ from qdrant_client import models
 
 class Retriever:
     
-    def __init__(self, vector_db, embeddata):
+    def __init__(self, vector_db, embed_model):
         self.vector_db = vector_db
-        self.embeddata = embeddata
+        self.embed_model = embed_model
         
 
 
     def search(self, query, limit=5):
-        query_embedding = self.embeddata.model.get_query_embedding(query)
+        query_embedding = self.embed_model.get_query_embedding(query)
 
         start_time = time.time()
         results = self.vector_db.qdrant_client.search(

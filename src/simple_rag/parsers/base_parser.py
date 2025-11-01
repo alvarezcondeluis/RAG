@@ -34,33 +34,7 @@ class ParserProcessor(ABC):
             Exception: If parsing fails
         """
         pass
-    
-    @abstractmethod
-    def normalize_markdown(self, md: str) -> str:
-        """
-        Normalize markdown text with consistent formatting.
-        
-        Args:
-            md: Raw markdown text
-            
-        Returns:
-            Normalized markdown text
-        """
-        pass
-    
-    @abstractmethod
-    def generate_output(self, docs: List[Any], output_path: Path) -> Path:
-        """
-        Generate output file from parsed documents.
-        
-        Args:
-            docs: List of parsed document objects
-            output_path: Path for the output file
-            
-        Returns:
-            Path to the created output file
-        """
-        pass
+  
     
     def slice_pdf(self, pdf_path: Path, start_page: int, end_page: int, output_path: Path) -> Path:
         """
