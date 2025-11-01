@@ -56,49 +56,25 @@ class LlamaParseProcessor(ParserProcessor):
         self.result_type = result_type
         self.language = language
         self.num_workers = num_workers
-        self.parsing_instruction = parsing_instruction or (
-            "Preserve the document structure and content maintaining, mathematical equations \n"
-            "Pay special attention also to the table structure and content so that it matches the original one (headers included)"
-        )
-        
+        self.parsing_instruction = parsing_instruction
+       
         # Initialize LlamaParse client
         self._init_parser()
     
     def _init_parser(self):
         """Initialize the LlamaParse client with current configuration."""
+        
+
         self.parser = LlamaParse(
             api_key=self.api_key,
             result_type=self.result_type,
             language=self.language,
             num_workers=self.num_workers,
-            parsing_instruction=self.parsing_instruction
-        )
-    
-    def slice_pdf(self, pdf_path: Path, start_page: int, end_page: int, output_path: Path) -> Path:
-        """
-        Extract a range of pages from a PDF file.
+            parse_mode="parse_page_with_agent",
+            output_tables_as_HTML=True,
+            user_prompt= self.parsing_instruction
+            )
         
-        Args:
-            pdf_path: Path to the source PDF
-            start_page: Starting page number (1-indexed)
-            end_page: Ending page number (1-indexed, inclusive)
-            output_path: Path for the sliced PDF output
-            
-        Returns:
-            Path to the created slice file
-        """
-        reader = PdfReader(str(pdf_path))
-        writer = PdfWriter()
-        
-        for p in range(start_page - 1, end_page):
-            if p < len(reader.pages):
-                writer.add_page(reader.pages[p])
-        
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "wb") as f:
-            writer.write(f)
-        
-        return output_path
     
     def parse_document(self, file_path: Path, verbose: bool = True) -> List[Any]:
         """
@@ -138,6 +114,31 @@ class LlamaParseProcessor(ParserProcessor):
             if verbose:
                 print(f"[llamaparse] exception: {repr(e)}")
             raise
+
+    def generate_markdown_output(self, docs: List[Any]) -> str:
+        """
+        Generate markdown output from parsed documents.
+        
+        Args:
+            docs: List of parsed document objects
+
+        Returns:
+            Markdown string
+        """
+        # Combine all document text into a single markdown string
+        markdown_parts = []
+        for doc in docs:
+            # Extract text from document (LlamaParse docs have a 'text' attribute)
+            text = getattr(doc, "text", "") or ""
+            if text.strip():
+                # Normalize the markdown
+                normalized_text = self.normalize_markdown(text)
+                markdown_parts.append(normalized_text)
+        
+        # Join all parts with double newline separator
+        complete_markdown = "\n\n".join(markdown_parts)
+        
+        return complete_markdown
     
     def normalize_markdown(self, md: str) -> str:
         """
@@ -200,60 +201,8 @@ class LlamaParseProcessor(ParserProcessor):
         s = re.sub(r"\s+", "-", s)
         return s[:80] or "chunk"
     
-    def generate_output(self, docs: List[Any], output_path: Path) -> Path:
-        """
-        Generate output file from parsed documents (implements abstract method).
-        For LlamaParse, this generates markdown with table of contents.
-        
-        Args:
-            docs: List of parsed document objects
-            output_path: Path for the output file
-            
-        Returns:
-            Path to the created output file
-        """
-        markdown_content = self.generate_markdown_output(docs)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(markdown_content, encoding="utf-8")
-        return output_path
+
     
-    def generate_markdown_output(self, docs: List[Any]) -> str:
-        """
-        Generate markdown content from parsed documents with table of contents.
-        
-        Args:
-            docs: List of parsed document objects
-            
-        Returns:
-            Generated markdown content as string
-        """
-        toc = ["# Parsed Output", "## Table of Contents"]
-        parts = []
-
-        for i, d in enumerate(docs):
-            raw = (getattr(d, "text", "") or "").strip()
-            if not raw:
-                continue
-            
-            md = self.normalize_markdown(raw)
-
-            # build a visible section header so chunk boundaries are obvious
-            meta = dict(getattr(d, "metadata", {}) or {})
-            page = meta.get("page_number") or meta.get("page") or "n/a"
-            
-            # use first heading in the chunk as title, else "Chunk i"
-            m = re.search(r"(?m)^\s*#{1,6}\s+(.+)$", md)
-            title = m.group(1).strip() if m else f"Chunk {i}"
-            anchor = f"chunk-{i}-{self.safe_anchor(title)}"
-
-            toc.append(f"- [Chunk {i} — p. {page}: {title}](#{anchor})")
-            parts.append(
-                f"\n\n---\n\n<a id='{anchor}'></a>\n\n## Chunk {i} — Page {page}\n\n{md}"
-            )
-
-        final_md = "\n".join(toc) + "\n" + "".join(parts)
-        
-        return final_md
     
     def process_pdf_slice(
         self,

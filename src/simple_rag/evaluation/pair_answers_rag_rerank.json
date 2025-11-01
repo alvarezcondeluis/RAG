@@ -1,0 +1,99 @@
+[
+  {
+    "question": "What is the expense ratio of VHYAX?",
+    "ground_truth": "The expense ratio of VHYAX (Vanguard High Dividend Yield Index Fund Admiral Shares) is 0.08% as of 02/28/25.",
+    "difficulty": "easy",
+    "query_type": "fact_retrieval",
+    "metadata_dependency": "high",
+    "ground_truth_contexts": [
+      "Expense ratio as of 02/28/25: 0.08%",
+      "Ticker symbol: VHYAX"
+    ],
+    "answer": "The expense ratio of VHYAX is 0.08%.",
+    "contexts": [
+      "High Dividend Yield Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 02/28/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $14,523MM          | 0.08%                          | VHYAX           | 13.0%           | 02/07/19         |          5023 |",
+      "Value Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 04/29/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $147MM             | 0.17%                          | VIVAX           | 8.8%            | 11/02/92         |          0006 |",
+      "Long-Term Investment-Grade Fund\n## Fund facts\n\n| Risk level Low High   | Total net assets   | Expense ratio as of 05/29/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|-----------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4 5             | $953MM             | 0.21%                          | VWESX           | 41.6%           | 07/09/73         |          0028 |"
+    ]
+  },
+  {
+    "question": "When was the Vanguard High Dividend Yield Index Fund Admiral Shares launched?",
+    "ground_truth": "The fund was launched on February 7, 2019 (inception date: 02/07/19).",
+    "difficulty": "easy",
+    "query_type": "fact_retrieval",
+    "metadata_dependency": "medium",
+    "ground_truth_contexts": [
+      "Inception date: 02/07/19"
+    ],
+    "answer": "There is no specific information in the provided context regarding the launch date of the Vanguard High Dividend Yield Index Fund Admiral Shares.",
+    "contexts": [
+      "High Dividend Yield Index Fund\n## Investment objective\n\nVanguard High Dividend Yield Index Fund seeks to track the performance of a benchmark index that measures the investment return of common stocks of companies that are characterized by high dividend yields.",
+      "## VanguardHigh Dividend Yield Index Fund\n\nDomestic stock fund | Admiral™ Shares",
+      "High Dividend Yield Index Fund\n## VanguardHigh Dividend Yield Index Fund\n\nDomestic stock fund | Admiral™ Shares"
+    ]
+  },
+  {
+    "question": "What is the fund number for the High Dividend Yield Index Fund?",
+    "ground_truth": "The fund number is 5023.",
+    "difficulty": "easy",
+    "query_type": "fact_retrieval",
+    "metadata_dependency": "medium",
+    "ground_truth_contexts": [
+      "Fund number: 5023"
+    ],
+    "answer": "The fund number for the High Dividend Yield Index Fund is 5023.",
+    "contexts": [
+      "High Dividend Yield Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 02/28/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $14,523MM          | 0.08%                          | VHYAX           | 13.0%           | 02/07/19         |          5023 |",
+      "High Dividend Yield Index Fund\n## Investment strategy\n\nThe fund employs a 'passive management'-or indexing-investment approach designed to track the performance of the FTSE High Dividend Yield Index. The fund attempts to replicate the target index by investing all, or substantially all, of its assets in the stocks that make up the index, holding each stock in approximately the same proportion as its weighting in the index.\n\n* Partial return since fund started, February 7, 2019.",
+      "High Dividend Yield Index Fund\n## Investment objective\n\nVanguard High Dividend Yield Index Fund seeks to track the performance of a benchmark index that measures the investment return of common stocks of companies that are characterized by high dividend yields."
+    ]
+  },
+  {
+    "question": "What is the total net assets of VHYAX?",
+    "ground_truth": "The total net assets of VHYAX is $14,523 million (approximately $14.5 billion).",
+    "difficulty": "easy",
+    "query_type": "fact_retrieval",
+    "metadata_dependency": "high",
+    "ground_truth_contexts": [
+      "Total net assets: $14,523 MM"
+    ],
+    "answer": "The total net assets of VHYAX is $14,523MM.",
+    "contexts": [
+      "High Dividend Yield Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 02/28/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $14,523MM          | 0.08%                          | VHYAX           | 13.0%           | 02/07/19         |          5023 |",
+      "Value Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 04/29/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $147MM             | 0.17%                          | VIVAX           | 8.8%            | 11/02/92         |          0006 |",
+      "Long-Term Investment-Grade Fund\n## Fund facts\n\n| Risk level Low High   | Total net assets   | Expense ratio as of 05/29/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|-----------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4 5             | $953MM             | 0.21%                          | VWESX           | 41.6%           | 07/09/73         |          0028 |"
+    ]
+  },
+  {
+    "question": "What is the turnover rate of the High Dividend Yield Index Fund?",
+    "ground_truth": "The turnover rate is 13.0%.",
+    "difficulty": "easy",
+    "query_type": "fact_retrieval",
+    "metadata_dependency": "medium",
+    "ground_truth_contexts": [
+      "Turnover rate: 13.0%"
+    ],
+    "answer": "The turnover rate of the High Dividend Yield Index Fund is 13.0%.",
+    "contexts": [
+      "High Dividend Yield Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 02/28/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $14,523MM          | 0.08%                          | VHYAX           | 13.0%           | 02/07/19         |          5023 |",
+      "High Dividend Yield Index Fund\n## Investment strategy\n\nThe fund employs a 'passive management'-or indexing-investment approach designed to track the performance of the FTSE High Dividend Yield Index. The fund attempts to replicate the target index by investing all, or substantially all, of its assets in the stocks that make up the index, holding each stock in approximately the same proportion as its weighting in the index.\n\n* Partial return since fund started, February 7, 2019.",
+      "High Dividend Yield Index Fund\n## Investment objective\n\nVanguard High Dividend Yield Index Fund seeks to track the performance of a benchmark index that measures the investment return of common stocks of companies that are characterized by high dividend yields."
+    ]
+  },
+  {
+    "question": "What is the risk level of VHYAX?",
+    "ground_truth": "VHYAX has a risk level of 2 on a scale from Low (1) to High (5).",
+    "difficulty": "easy",
+    "query_type": "fact_retrieval",
+    "metadata_dependency": "medium",
+    "ground_truth_contexts": [
+      "Risk level: Low 1 2 3 4 5 High"
+    ],
+    "answer": "The risk level of VHYAX is 2.",
+    "contexts": [
+      "High Dividend Yield Index Fund\n## Fund facts\n\n| Risk level Low   | Total net assets   | Expense ratio as of 02/28/25   | Ticker symbol   | Turnover rate   | Inception date   |   Fund number |\n|------------------|--------------------|--------------------------------|-----------------|-----------------|------------------|---------------|\n| 1 2 3 4          | $14,523MM          | 0.08%                          | VHYAX           | 13.0%           | 02/07/19         |          5023 |",
+      "Value Index Fund\n## Risk Level (1-5): 4",
+      "High Dividend Yield Index Fund\n## Risk Level (1-5): 4"
+    ]
+  }
+]

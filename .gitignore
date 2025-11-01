@@ -20,6 +20,8 @@ notebooks/qdrant_storage/
 # Cache directories
 /cache
 cache/
+notebooks/etf_factSheet/
+notebooks/factShee/
 notebooks/cache/
 __pycache__/
 *.pyc
