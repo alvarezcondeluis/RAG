@@ -8,7 +8,19 @@ load_dotenv()
 # Set environment variables to increase RAGAS timeouts
 os.environ["RAGAS_TIMEOUT"] = "600"  # 10 minutes
 os.environ["RAGAS_DO_NOT_TRACK"] = "true"  # Disable telemetry
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.llms import Ollama
 
+from ragas import evaluate
+from ragas.metrics import (
+    faithfulness,
+    answer_correctness,
+    context_recall,
+    context_precision,
+    answer_relevancy,
+)
+from ragas.llms import LangchainLLMWrapper
+from ragas.embeddings import LangchainEmbeddingsWrapper
 from langchain_community.chat_models import ChatOllama
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -39,10 +51,12 @@ class RAGEvaluator:
     def __init__(
         self,
         collection_name: str = "simple_rag",
-        embedding_model: str = "BAAI/bge-large-en-v1.5",
+        embedding_model: str = "BAAI/bge-base-en-v1.5",
         llm_model: str = "llama3:8b",
         judge_llm_model: str = "llama3:8b",
         judge_llm_provider: str = "ollama",
+        ragas_embedding_provider: str = "ollama",
+        ollama_embedding_model: str = "nomic-embed-text",
         cache_folder: str = "./cache",
         retriever_k: int = 15,
         rerank_k: int = 3,
@@ -52,13 +66,15 @@ class RAGEvaluator:
         
         Args:
             collection_name: Qdrant collection name
-            embedding_model: HuggingFace embedding model name
+            embedding_model: HuggingFace embedding model name (for RAG system)
             llm_model: Ollama LLM model for RAG system
             judge_llm_model: LLM model name for RAGAS judge
                            - For Ollama: "llama3.1:8b", "qwen2.5:14b", etc.
                            - For Gemini: "gemini-1.5-flash", "gemini-1.5-pro", etc.
             judge_llm_provider: Provider for RAGAS judge LLM ("ollama" or "gemini")
-            cache_folder: Cache folder for embedding models
+            ragas_embedding_provider: Provider for RAGAS embeddings ("ollama" or "huggingface")
+            ollama_embedding_model: Ollama embedding model name (e.g., "nomic-embed-text", "mxbai-embed-large")
+            cache_folder: Cache folder for HuggingFace embedding models
             retriever_k: Number of contexts to retrieve
             rerank_k: Number of contexts to rerank
         """
@@ -67,6 +83,8 @@ class RAGEvaluator:
         self.llm_model = llm_model
         self.judge_llm_model = judge_llm_model
         self.judge_llm_provider = judge_llm_provider.lower()
+        self.ragas_embedding_provider = ragas_embedding_provider.lower()
+        self.ollama_embedding_model = ollama_embedding_model
         self.cache_folder = cache_folder
         
         # Initialize RAGAS judge LLM based on provider
@@ -100,18 +118,30 @@ class RAGEvaluator:
                 "Must be 'ollama' or 'gemini'."
             )
         
-        # Initialize embeddings for RAGAS
-        self.ragas_embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model,
-            cache_folder=cache_folder,
-            model_kwargs={'trust_remote_code': True}
-        )
+        # Initialize embeddings for RAGAS based on provider
+        if self.ragas_embedding_provider == "ollama":
+            print(f"Using Ollama embeddings for RAGAS: {ollama_embedding_model}")
+            self.ragas_embeddings = OllamaEmbeddings(
+                model=ollama_embedding_model
+            )
+        elif self.ragas_embedding_provider == "huggingface":
+            print(f"Using HuggingFace embeddings for RAGAS: {embedding_model}")
+            self.ragas_embeddings = HuggingFaceEmbeddings(
+                model_name=embedding_model,
+                cache_folder=cache_folder,
+                model_kwargs={'trust_remote_code': True}
+            )
+        else:
+            raise ValueError(
+                f"Invalid ragas_embedding_provider: {ragas_embedding_provider}. "
+                "Must be 'ollama' or 'huggingface'."
+            )
         
         # RAG system components (initialized lazily)
         self.rag_system = None
         self.retriever = None
         self.retriever_k = retriever_k  # Number of contexts to retrieve
-        self.judge_llm = None  # Separate judge LLM (initialized lazily)
+        # Note: self.judge_llm is already initialized above
         self.results_df = None
         self.evaluation_data = []
         self.rerank_k = rerank_k
@@ -137,6 +167,26 @@ class RAGEvaluator:
         self.rag_system = RAG(retriever=self.retriever, llm_name=self.llm_model)
         
         print("  ✓ RAG system initialized successfully")
+    
+    def warmup_models(self):
+        """
+        Warmup the RAG system LLM.
+        
+        This ensures the model is loaded into memory and responsive before
+        running the actual evaluation, which helps avoid timeouts on the
+        first real query.
+        """
+        print("\n[Warmup] Warming up RAG system LLM...")
+        
+        # Warmup RAG system
+        self._initialize_rag_system()
+        
+        try:
+            warmup_response = self.rag_system.warmup()
+            print(f"  ✓ RAG LLM response: {warmup_response[:50]}...")
+            print("  ✓ Warmup complete!\n")
+        except Exception as e:
+            print(f"  ⚠ RAG LLM warmup failed: {e}\n")
     
     def generate_rag_outputs(self, benchmark_json_path: str, num_questions: int = None):
         """
@@ -222,6 +272,123 @@ class RAGEvaluator:
         print(f"    Answer: {self.evaluation_data[0]['answer'][:80]}...")
         print(f"    Contexts retrieved: {len(self.evaluation_data[0]['contexts'])}")
     
+    def generate_rag_outputs_gemini(self, benchmark_json_path: str, gemini_api_key: str, 
+                                     model_name: str = "gemini-2.5-flash", 
+                                     temperature: float = 0.0,
+                                     num_questions: int = None):
+        """
+        PHASE 1: Run RAG system on all questions using Gemini API with rate limiting.
+        
+        Rate limit: 10 requests per minute (6 seconds between requests).
+        
+        Args:
+            benchmark_json_path: Path to benchmark JSON file
+            gemini_api_key: Google API key for Gemini
+            model_name: Gemini model to use (default: gemini-2.5-flash)
+            temperature: Temperature for generation (default: 0.0)
+            num_questions: Optional limit on number of questions to process
+        """
+        print(f"\n[Phase 1] Generating RAG outputs with Gemini API...")
+        print(f"  - Model: {model_name}")
+        print(f"  - Rate limit: 10 requests/minute (6s delay between calls)")
+        
+        # Print current working directory and file path info
+        import os
+        import time
+        print(f"  - Current working directory: {os.getcwd()}")
+        print(f"  - Benchmark JSON path (provided): {benchmark_json_path}")
+        
+        # Check if file exists
+        if not os.path.exists(benchmark_json_path):
+            # Try to find the file with absolute path
+            abs_path = os.path.abspath(benchmark_json_path)
+            print(f"  - Absolute path: {abs_path}")
+            raise FileNotFoundError(
+                f"Benchmark JSON file not found!\n"
+                f"  Provided path: {benchmark_json_path}\n"
+                f"  Absolute path: {abs_path}\n"
+                f"  Current directory: {os.getcwd()}"
+            )
+        
+        print(f"  ✓ Found benchmark file: {os.path.abspath(benchmark_json_path)}")
+        
+        # Initialize RAG system
+        self._initialize_rag_system()
+        
+        # Load benchmark data
+        try:
+            with open(benchmark_json_path, 'r', encoding='utf-8') as f:
+                benchmark_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON file: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error reading benchmark file: {e}")
+        
+        questions_list = benchmark_data.get("questions", [])
+        if not questions_list:
+            raise ValueError("No 'questions' field found in benchmark JSON or it's empty")
+        
+        if num_questions:
+            questions_list = questions_list[:num_questions]
+            print(f"  - Testing with first {num_questions} questions")
+        else:
+            num_questions = len(questions_list)
+            print(f"  - Evaluating all {num_questions} questions")
+        
+        # Calculate estimated time
+        estimated_time_seconds = num_questions * 6  # 6 seconds per request
+        estimated_time_minutes = estimated_time_seconds / 60
+        print(f"  - Estimated time: {estimated_time_minutes:.1f} minutes ({estimated_time_seconds}s)")
+        
+        self.evaluation_data = [] # Reset data
+        
+        for idx, item in enumerate(questions_list):
+            print(f"  Processing question {idx+1}/{num_questions}...")
+            
+            try:
+                # Get the RAG system's output using Gemini
+                rag_output = self._query_rag_gemini(
+                    item["question"], 
+                    gemini_api_key=gemini_api_key,
+                    model_name=model_name,
+                    temperature=temperature
+                )
+                
+                # Store everything in our evaluation list
+                # Start with all original fields from the JSON
+                eval_item = dict(item)  # Copy all original fields
+                
+                # Rename 'contexts' to 'ground_truth_contexts' to avoid confusion
+                if "contexts" in eval_item:
+                    eval_item["ground_truth_contexts"] = eval_item.pop("contexts")
+                
+                # Add RAG outputs
+                print(f"    Answer for question {idx+1}: {rag_output['answer'][:80]}...")
+                eval_item["answer"] = rag_output["answer"]
+                eval_item["contexts"] = rag_output["contexts"]
+                
+                self.evaluation_data.append(eval_item)
+                
+                # Rate limiting: Wait 6 seconds between requests (10 requests/minute)
+                # Don't wait after the last request
+                if idx < num_questions - 1:
+                    print(f"    ⏳ Waiting 6 seconds before next request (rate limit)...")
+                    time.sleep(6)
+                    
+            except Exception as e:
+                print(f"    ⚠ Error processing question {idx+1}: {e}")
+                # Continue with next question instead of failing completely
+                continue
+        
+        if not self.evaluation_data:
+            raise RuntimeError("No questions were successfully processed!")
+        
+        print(f"  ✓ RAG output generation complete. Processed {len(self.evaluation_data)}/{num_questions} questions.")
+        print(f"\n  Sample output (first question):")
+        print(f"    Question: {self.evaluation_data[0]['question'][:80]}...")
+        print(f"    Answer: {self.evaluation_data[0]['answer'][:80]}...")
+        print(f"    Contexts retrieved: {len(self.evaluation_data[0]['contexts'])}")
+    
     def save_rag_outputs(self, output_json_path: str):
         """
         PHASE 2: Save RAG outputs back to JSON file.
@@ -284,219 +451,33 @@ class RAGEvaluator:
             "contexts": rag_response.get('contexts', []) # Contexts from RAG
         }
     
-    def compute_retrieval_metrics(self):
+    def _query_rag_gemini(self, question: str, gemini_api_key: str, 
+                          model_name: str = "gemini-2.5-flash", 
+                          temperature: float = 0.0) -> dict:
         """
-        PHASE 3: Compute retrieval metrics (Context Precision & Context Recall).
-        These metrics compare retrieved contexts with ground truth contexts.
+        Query the RAG system using Gemini API with reranking and return answer with contexts.
         
+        Args:
+            question: Question to ask
+            gemini_api_key: Google API key for Gemini
+            model_name: Gemini model to use
+            temperature: Temperature for generation
+            
         Returns:
-            dict with average scores
+            dict with 'answer' and 'contexts' keys
         """
-        if not self.evaluation_data:
-            raise ValueError("No evaluation data. Run generate_rag_outputs() first.")
-        
-        print(f"\n[Phase 3] Computing retrieval metrics...")
-        
-        for idx, item in enumerate(self.evaluation_data):
-            print(f"  Processing {idx+1}/{len(self.evaluation_data)}...")
-            
-            retrieved_contexts = item.get("contexts", [])
-            ground_truth_contexts = item.get("ground_truth_contexts", [])
-            
-            # Context Precision: What fraction of retrieved contexts are relevant?
-            # We check if retrieved context appears in ground truth contexts
-            precision = self._calculate_context_precision(retrieved_contexts, ground_truth_contexts)
-            
-            # Context Recall: What fraction of ground truth contexts were retrieved?
-            recall = self._calculate_context_recall(retrieved_contexts, ground_truth_contexts)
-            
-            # Store metrics
-            item["context_precision"] = precision
-            item["context_recall"] = recall
-        
-        # Calculate averages
-        avg_precision = sum(item["context_precision"] for item in self.evaluation_data) / len(self.evaluation_data)
-        avg_recall = sum(item["context_recall"] for item in self.evaluation_data) / len(self.evaluation_data)
-        
-        print(f"\n  ✓ Retrieval metrics computed")
-        print(f"    - Avg Context Precision: {avg_precision:.4f}")
-        print(f"    - Avg Context Recall: {avg_recall:.4f}")
+        # Get answer from RAG system using Gemini with reranking
+        rag_response = self.rag_system.query_gemini_rerank(
+            question=question,
+            gemini_api_key=gemini_api_key,
+            model_name=model_name,
+            temperature=temperature
+        )
         
         return {
-            "context_precision": avg_precision,
-            "context_recall": avg_recall
+            "answer": rag_response.get('answer', 'Error: No answer returned'),
+            "contexts": rag_response.get('contexts', []) # Contexts from RAG
         }
-    
-    def _calculate_context_precision(self, retrieved_contexts: List[str], ground_truth_contexts: List[str]) -> float:
-        """
-        Calculate what fraction of retrieved contexts are relevant.
-        A retrieved context is relevant if it has significant overlap with any ground truth context.
-        """
-        if not retrieved_contexts:
-            return 0.0
-        
-        relevant_count = 0
-        for ret_ctx in retrieved_contexts:
-            # Check if this retrieved context overlaps with any ground truth context
-            if self._has_context_overlap(ret_ctx, ground_truth_contexts):
-                relevant_count += 1
-        
-        return relevant_count / len(retrieved_contexts)
-    
-    def _calculate_context_recall(self, retrieved_contexts: List[str], ground_truth_contexts: List[str]) -> float:
-        """
-        Calculate what fraction of ground truth contexts were retrieved.
-        """
-        if not ground_truth_contexts:
-            return 1.0  # If no ground truth, consider it perfect
-        
-        retrieved_count = 0
-        for gt_ctx in ground_truth_contexts:
-            # Check if this ground truth context appears in retrieved contexts
-            if self._has_context_overlap(gt_ctx, retrieved_contexts):
-                retrieved_count += 1
-        
-        return retrieved_count / len(ground_truth_contexts)
-    
-    def _has_context_overlap(self, context: str, context_list: List[str], threshold: float = 0.5) -> bool:
-        """
-        Check if a context has significant overlap with any context in the list.
-        Uses simple token overlap ratio.
-        """
-        context_tokens = set(context.lower().split())
-        
-        for other_context in context_list:
-            other_tokens = set(other_context.lower().split())
-            
-            if not context_tokens or not other_tokens:
-                continue
-            
-            # Calculate Jaccard similarity
-            intersection = len(context_tokens & other_tokens)
-            union = len(context_tokens | other_tokens)
-            
-            if union > 0:
-                similarity = intersection / union
-                if similarity >= threshold:
-                    return True
-        
-        return False
-    
-    def compute_llm_judged_metrics(self):
-        """
-        PHASE 4: Compute LLM-judged metrics (Faithfulness & Answer Correctness).
-        Uses the judge LLM to evaluate answer quality.
-        
-        Returns:
-            dict with average scores
-        """
-        if not self.evaluation_data:
-            raise ValueError("No evaluation data. Run generate_rag_outputs() first.")
-        
-        print(f"\n[Phase 4] Computing LLM-judged metrics...")
-        self._initialize_judge_llm()
-        
-        for idx, item in enumerate(self.evaluation_data):
-            print(f"  Processing {idx+1}/{len(self.evaluation_data)}...")
-            
-            question = item["question"]
-            answer = item["answer"]
-            contexts = item["contexts"]
-            ground_truth = item["ground_truth"]
-            
-            # Faithfulness: Is the answer faithful to the retrieved contexts?
-            faithfulness_score = self._evaluate_faithfulness(question, answer, contexts)
-            
-            # Answer Correctness: How correct is the answer compared to ground truth?
-            correctness_score = self._evaluate_answer_correctness(question, answer, ground_truth)
-            
-            # Store metrics
-            item["faithfulness"] = faithfulness_score
-            item["answer_correctness"] = correctness_score
-        
-        # Calculate averages
-        avg_faithfulness = sum(item["faithfulness"] for item in self.evaluation_data) / len(self.evaluation_data)
-        avg_correctness = sum(item["answer_correctness"] for item in self.evaluation_data) / len(self.evaluation_data)
-        
-        print(f"\n  ✓ LLM-judged metrics computed")
-        print(f"    - Avg Faithfulness: {avg_faithfulness:.4f}")
-        print(f"    - Avg Answer Correctness: {avg_correctness:.4f}")
-        
-        return {
-            "faithfulness": avg_faithfulness,
-            "answer_correctness": avg_correctness
-        }
-    
-    def _evaluate_faithfulness(self, question: str, answer: str, contexts: List[str]) -> float:
-        """
-        Evaluate if the answer is faithful to the retrieved contexts.
-        Returns a score between 0 and 1.
-        """
-        contexts_text = "\n\n".join([f"Context {i+1}: {ctx}" for i, ctx in enumerate(contexts)])
-        
-        prompt = f"""You are an expert evaluator. Your task is to evaluate if an answer is faithful to the provided contexts.
-
-        Question: {question}
-
-        Retrieved Contexts:
-        {contexts_text}
-
-        Answer: {answer}
-
-        Evaluate if the answer is faithful to the contexts. An answer is faithful if:
-        1. All claims in the answer can be verified from the contexts
-        2. The answer does not add information not present in the contexts
-        3. The answer does not contradict the contexts
-
-        Provide a faithfulness score between 0 and 1, where:
-        - 0 = Completely unfaithful (contradicts or invents information)
-        - 0.5 = Partially faithful (some claims supported, some not)
-        - 1 = Completely faithful (all claims supported by contexts)
-
-        Respond with ONLY a number between 0 and 1, nothing else."""
-        
-        try:
-            response = self.judge_llm.invoke([HumanMessage(content=prompt)])
-            score_text = response.content.strip()
-            score = float(score_text)
-            return max(0.0, min(1.0, score))  # Clamp between 0 and 1
-        except Exception as e:
-            print(f"    Warning: Faithfulness evaluation failed: {e}")
-            return 0.5  # Default to neutral score
-    
-    def _evaluate_answer_correctness(self, question: str, answer: str, ground_truth: str) -> float:
-        """
-        Evaluate how correct the answer is compared to ground truth.
-        Returns a score between 0 and 1.
-        """
-        prompt = f"""You are an expert evaluator. Your task is to evaluate the correctness of an answer compared to the ground truth.
-
-        Question: {question}
-
-        Ground Truth Answer: {ground_truth}
-
-        Generated Answer: {answer}
-
-        Evaluate how correct the generated answer is. Consider:
-        1. Factual accuracy compared to ground truth
-        2. Completeness of the answer
-        3. Semantic similarity (same meaning even if different words)
-
-        Provide a correctness score between 0 and 1, where:
-        - 0 = Completely incorrect
-        - 0.5 = Partially correct
-        - 1 = Completely correct
-
-        Respond with ONLY a number between 0 and 1, nothing else."""
-        
-        try:
-            response = self.judge_llm.invoke([HumanMessage(content=prompt)])
-            score_text = response.content.strip()
-            score = float(score_text)
-            return max(0.0, min(1.0, score))  # Clamp between 0 and 1
-        except Exception as e:
-            print(f"    Warning: Answer correctness evaluation failed: {e}")
-            return 0.5  # Default to neutral score
     
     def save_evaluation_results(self, output_json_path: str, output_csv_path: str = None):
         """
@@ -539,24 +520,235 @@ class RAGEvaluator:
         # Print summary statistics
         self._print_summary_statistics()
     
-    def _print_summary_statistics(self):
-        """Print summary statistics of all metrics."""
-        print(f"\n{'='*60}")
-        print("EVALUATION SUMMARY")
-        print(f"{'='*60}")
+    def evaluate_with_ragas(self, rag_output_json_path: str = None):
+        """
+        Evaluate RAG outputs using RAGAS framework.
         
-        metrics = ["context_precision", "context_recall", "faithfulness", "answer_correctness"]
+        Args:
+            rag_output_json_path: Path to JSON file with RAG outputs.
+                                 Expected format:
+                                 [
+                                   {
+                                     "question": "...",
+                                     "answer": "...",
+                                     "contexts": ["...", "..."],
+                                     "ground_truth": "..."
+                                   },
+                                   ...
+                                 ]
         
-        for metric in metrics:
-            if metric in self.evaluation_data[0]:
-                scores = [item[metric] for item in self.evaluation_data if metric in item]
-                if scores:
-                    avg = sum(scores) / len(scores)
-                    min_score = min(scores)
-                    max_score = max(scores)
-                    print(f"\n{metric.replace('_', ' ').title()}:")
-                    print(f"  Average: {avg:.4f}")
-                    print(f"  Min: {min_score:.4f}")
-                    print(f"  Max: {max_score:.4f}")
+        Returns:
+            dict with RAGAS evaluation results
+        """
+        # Load data
+        if not self.evaluation_data and rag_output_json_path:
+            print(f"[RAGAS] Loading evaluation data from: {rag_output_json_path}")
+            try:
+                with open(rag_output_json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Handle both list format and dict with 'questions' key
+                    if isinstance(data, list):
+                        self.evaluation_data = data
+                    elif isinstance(data, dict) and 'questions' in data:
+                        self.evaluation_data = data['questions']
+                    else:
+                        raise ValueError("JSON must be a list or dict with 'questions' key")
+                print(f"✓ Loaded {len(self.evaluation_data)} questions\n")
+            except FileNotFoundError:
+                raise FileNotFoundError(f"File not found: {rag_output_json_path}")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}")
         
-        print(f"\n{'='*60}")
+        if not self.evaluation_data:
+            raise ValueError("No evaluation data available")
+        
+        print(f"[RAGAS] Starting evaluation...")
+        print(f"  Questions: {len(self.evaluation_data)}")
+        print(f"  LLM: {self.judge_llm_model}")
+        print(f"  Embeddings: {self.embedding_model}\n")
+        
+        # Prepare dataset
+        dataset_dict = {
+            "question": [],
+            "answer": [],
+            "contexts": [],
+            "ground_truth": []
+        }
+        
+        for item in self.evaluation_data:
+            # Validate and clean contexts
+            contexts = item.get("contexts", [])
+            if not isinstance(contexts, list):
+                contexts = [str(contexts)]
+            # Ensure all contexts are strings
+            contexts = [str(ctx) for ctx in contexts]
+            
+            dataset_dict["question"].append(str(item["question"]))
+            dataset_dict["answer"].append(str(item["answer"]))
+            dataset_dict["contexts"].append(contexts)
+            dataset_dict["ground_truth"].append(str(item["ground_truth"]))
+        
+        # Create HuggingFace Dataset
+        dataset = Dataset.from_dict(dataset_dict)
+        print(f"✓ Dataset prepared ({len(dataset)} samples)\n")
+        
+        # Initialize LLM and embeddings for RAGAS
+        print("Initializing RAGAS LLM and embeddings...")
+        ragas_llm = Ollama(model=self.judge_llm_model)
+        ragas_embeddings = OllamaEmbeddings(model=self.ollama_embedding_model)
+        
+        llm = LangchainLLMWrapper(ragas_llm)
+        embeddings = LangchainEmbeddingsWrapper(ragas_embeddings)
+        
+        # Initialize metrics - pass LLM and/or embeddings as needed
+        print("Initializing metrics...")
+        from ragas.metrics import (
+            Faithfulness,
+            AnswerCorrectness,
+            ContextRecall,
+            ContextPrecision,
+            AnswerRelevancy
+        )
+        
+        metrics = [
+            Faithfulness(llm=llm),
+            AnswerCorrectness(llm=llm),
+            ContextRecall(llm=llm),
+            ContextPrecision(llm=llm),
+            AnswerRelevancy(llm=llm, embeddings=embeddings)
+        ]
+        
+        # Run evaluation
+        print("Running evaluation (this may take several minutes)...\n")
+        try:
+            result = evaluate(
+                dataset,
+                metrics=metrics,
+                llm=llm,  # Pass LLM explicitly
+                embeddings=embeddings,  # Pass embeddings explicitly
+                raise_exceptions=False  # Continue on errors
+            )
+            
+            # Print results
+            print("\n" + "="*60)
+            print("RAGAS EVALUATION RESULTS")
+            print("="*60)
+            print(f"  Faithfulness:        {result.get('faithfulness', 'N/A'):.4f}")
+            print(f"  Answer Correctness:  {result.get('answer_correctness', 'N/A'):.4f}")
+            print(f"  Answer Relevancy:    {result.get('answer_relevancy', 'N/A'):.4f}")
+            print(f"  Context Recall:      {result.get('context_recall', 'N/A'):.4f}")
+            print(f"  Context Precision:   {result.get('context_precision', 'N/A'):.4f}")
+            print("="*60 + "\n")
+            
+            return result
+            
+        except Exception as e:
+            print(f"\n✗ Evaluation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    def evaluate_with_ragas_subset(self, rag_output_json_path: str = None, num_samples: int = 10):
+        """
+        Evaluate a subset of RAG outputs using RAGAS framework (for quick testing).
+        
+        Args:
+            rag_output_json_path: Optional path to JSON file with RAG outputs
+            num_samples: Number of samples to evaluate (default: 10)
+        
+        Returns:
+            dict with RAGAS evaluation results
+        """
+        # Load data if needed
+        if not self.evaluation_data:
+            if rag_output_json_path:
+                print(f"\n[RAGAS Evaluation] Loading evaluation data from: {rag_output_json_path}")
+                try:
+                    with open(rag_output_json_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        # Handle both list format and dict with 'questions' key
+                        if isinstance(data, list):
+                            self.evaluation_data = data
+                        elif isinstance(data, dict) and 'questions' in data:
+                            self.evaluation_data = data['questions']
+                        else:
+                            raise ValueError("JSON must be a list or dict with 'questions' key")
+                    print(f"  ✓ Loaded {len(self.evaluation_data)} questions from JSON")
+                except FileNotFoundError:
+                    raise FileNotFoundError(f"RAG output JSON file not found: {rag_output_json_path}")
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON file: {e}")
+            else:
+                raise ValueError("No evaluation data. Either run generate_rag_outputs() first or provide rag_output_json_path.")
+        
+        # Take subset
+        subset_data = self.evaluation_data[:num_samples]
+        
+        print(f"\n[RAGAS Evaluation] Starting evaluation with RAGAS framework (SUBSET)...")
+        print(f"  - Total questions available: {len(self.evaluation_data)}")
+        print(f"  - Evaluating subset: {len(subset_data)} questions")
+        print(f"  - Judge LLM: {self.judge_llm_model} ({self.judge_llm_provider})")
+        print(f"  - Embedding model: {self.embedding_model}")
+        
+        # Prepare dataset for RAGAS
+        dataset_dict = {
+            "question": [],
+            "answer": [],
+            "contexts": [],
+            "ground_truth": []
+        }
+        
+        for item in subset_data:
+            # Ensure contexts is a list of strings
+            contexts = item.get("contexts", [])
+            if callable(contexts):
+                raise ValueError(f"contexts is a method/callable, not a list. Check your JSON data.")
+            if not isinstance(contexts, list):
+                contexts = [str(contexts)]
+            
+            dataset_dict["question"].append(item["question"])
+            dataset_dict["answer"].append(item["answer"])
+            dataset_dict["contexts"].append(contexts)
+            dataset_dict["ground_truth"].append(item["ground_truth"])
+        
+        # Create HuggingFace Dataset
+        dataset = Dataset.from_dict(dataset_dict)
+        
+        print(f"\n  ✓ Dataset prepared with {len(dataset)} samples")
+        print(f"\n  Starting RAGAS evaluation (this may take a few minutes)...")
+        print(f"  - Using LLM: {type(self.judge_llm).__name__}")
+        print(f"  - Using Embeddings: {type(self.ragas_embeddings).__name__}")
+        
+        # Run RAGAS evaluation (pass LLM and embeddings directly)
+        try:
+            result = evaluate(
+                dataset,
+                metrics=[
+                    faithfulness,
+                    answer_correctness,
+                    context_recall,
+                    context_precision,
+                ],
+                llm=self.judge_llm,
+                embeddings=self.ragas_embeddings,
+            )
+            
+            print(f"\n  ✓ RAGAS evaluation complete!")
+            
+            # Print results
+            print(f"\n{'='*60}")
+            print(f"RAGAS EVALUATION RESULTS (SUBSET: {num_samples} samples)")
+            print(f"{'='*60}")
+            print(f"  Faithfulness:        {result['faithfulness']:.4f}")
+            print(f"  Answer Correctness:  {result['answer_correctness']:.4f}")
+            print(f"  Context Recall:      {result['context_recall']:.4f}")
+            print(f"  Context Precision:   {result['context_precision']:.4f}")
+            print(f"{'='*60}\n")
+            
+            return result
+            
+        except Exception as e:
+            print(f"\n  ✗ RAGAS evaluation failed: {e}")
+            raise
+    
+    

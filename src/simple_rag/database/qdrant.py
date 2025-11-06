@@ -11,7 +11,7 @@ def batch_iterate(iterable, batch_size):
         yield iterable[i:i + batch_size]
 
 class QdrantDatabase:
-    def __init__(self, collection_name, vector_size=1024, batch_size=512, auto_start_qdrant=True):
+    def __init__(self, collection_name, vector_size=768, batch_size=512, auto_start_qdrant=True):
         self.collection_name = collection_name
         self.vector_size = vector_size
         self.batch_size = batch_size

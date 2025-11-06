@@ -17,6 +17,14 @@
       "metadata_dependency": "medium"
     },
     {
+      "question": "When was the Vanguard High Dividend Yield Index Fund inception date?",
+      "ground_truth": "The fund was launched on February 7, 2019 (inception date: 02/07/19).",
+      "contexts": ["Inception date: 02/07/19"],
+      "difficulty": "easy",
+      "query_type": "fact_retrieval",
+      "metadata_dependency": "medium"
+    },
+    {
       "question": "What is the fund number for the High Dividend Yield Index Fund?",
       "ground_truth": "The fund number is 5023.",
       "contexts": ["Fund number: 5023"],
@@ -43,6 +51,14 @@
     {
       "question": "What is the risk level of VHYAX?",
       "ground_truth": "VHYAX has a risk level of 2 on a scale from Low (1) to High (5).",
+      "contexts": ["Risk level: Low 1 2 3 4 5 High"],
+      "difficulty": "easy",
+      "query_type": "fact_retrieval",
+      "metadata_dependency": "medium"
+    },
+    {
+      "question": "What is the risk level of High Dividend Yield Index Fund?",
+      "ground_truth": "The risk level of High Dividend Yield Index Fund is 2 on a scale from Low (1) to High (5).",
       "contexts": ["Risk level: Low 1 2 3 4 5 High"],
       "difficulty": "easy",
       "query_type": "fact_retrieval",
