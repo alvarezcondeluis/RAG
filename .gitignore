@@ -16,7 +16,7 @@ example.pdf
 /qdrant_storage
 qdrant_storage/
 notebooks/qdrant_storage/
-
+notebooks/10k_images_vs_benchmarks/*
 # Cache directories
 /cache
 cache/
@@ -76,3 +76,6 @@ logs/
 *.temp
 temp/
 tmp//
+
+.deepeval
+.latest*

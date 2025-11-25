@@ -80,7 +80,7 @@ class QdrantDatabase:
             max_wait = 30
             wait_interval = 1
             elapsed = 0
-            
+             
             while elapsed < max_wait:
                 if self._is_qdrant_running():
                     print(f"✓ Qdrant server started successfully (took {elapsed}s)")

@@ -1,6 +1,4 @@
 import os
-import json
-import re
 import ollama
 import base64
 from pathlib import Path
@@ -10,21 +8,15 @@ from PIL import Image
 from tqdm import tqdm
 import cv2
 import numpy as np
-import logging
-from pathlib import Path
-from typing import List, Dict, Any
-from tqdm import tqdm
-import warnings
+from IPython.display import display
 from docling.datamodel.base_models import InputFormat
-from docling_core.types.doc import ImageRefMode
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode, EasyOcrOptions, TesseractOcrOptions, OcrMacOptions
-from docling.datamodel.settings import settings
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 from .base_parser import ParserProcessor
 import socket
 import subprocess
 import time
-import itertools
+import shutil
 
 class DoclingParserProcessor(ParserProcessor):
     """
@@ -76,16 +68,13 @@ class DoclingParserProcessor(ParserProcessor):
             generate_page_images=self.generate_page_images,
             generate_picture_images=self.generate_picture_images,
             images_scale=self.images_scale,
-        )
-        self.corrupted_pdfs = 0
-        
+        )          
         # Initialize the DocumentConverter
         self.doc_converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=self.pipeline_options)
             }
         )
-
     
     def ensure_ollama_is_running(self):
         """
@@ -121,14 +110,14 @@ class DoclingParserProcessor(ParserProcessor):
 
 
     def obtain_image_summary_specific(self, image_data: Image.Image, model: str = "gemma3:4b", prompt: str = """Obtain the information of the distribution of the assets into a bulleted list
-    The instruction is to only answer with that list""") -> str:
+            The instruction is to only answer with that list""") -> str:
             """
             Generate a summary of an image using Ollama's vision model.
             
             Args:
                 image_data: PIL Image object
                 model: Ollama model to use for image analysis
-                
+                prompt: Prompt to use for image analysis
             Returns:
                 Text summary of the image content
             """
@@ -152,40 +141,6 @@ class DoclingParserProcessor(ParserProcessor):
             except Exception as e:
                 return f"[Image analysis error: {str(e)}]"
 
-    
-    def obtain_image_summary(self, image_data: Image.Image, model: str = "llama3.2-vision:latest") -> str:
-        """
-        Generate a summary of an image using Ollama's vision model.
-        
-        Args:
-            image_data: PIL Image object
-            model: Ollama model to use for image analysis
-            
-        Returns:
-            Text summary of the image content
-        """
-        try:
-            # Convert PIL Image to base64
-            buffered = BytesIO()
-            image_data.save(buffered, format="PNG")
-            image_base64 = base64.b64encode(buffered.getvalue()).decode()
-            
-            prompt = """Extract the information of the image with special focus on risk indicators and other relevant information
-                        about some ETF and Index fund images and charts. Answer briefly without leaving relevant information.
-                        The answer has to be ready to be added to a markdown file. 
-                        In the case of the risk one the answer has to be the Risk is ... and the rest of the information found in the next line.    """
-            
-            # Use ollama library to generate image description
-            response = ollama.generate(
-                model=model,
-                prompt=prompt,
-                images=[image_base64]
-            )
-            
-            return response.get("response", "[Image description unavailable]")
-            
-        except Exception as e:
-            return f"[Image analysis error: {str(e)}]"
 
     def save_markdown(self, markdown_content: str, folder: Path, file_name: str, verbose: bool = True):
         """
@@ -219,7 +174,6 @@ class DoclingParserProcessor(ParserProcessor):
     
     def parse_document(self, doc_path: Path):
 
-
         IMAGE_RESOLUTION_SCALE = 2.0
 
         # Define pipeline options for PDF processing
@@ -250,21 +204,8 @@ class DoclingParserProcessor(ParserProcessor):
             result = doc_converter_global.convert(doc_path)
         
         except Exception as e:
-            try:
-                # Open with PyMuPDF and save to an in-memory buffer
-                pdf_bytes = Path(doc_path).read_bytes()
-                pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                
-                output_buffer = BytesIO()
-                pdf_doc.save(output_buffer)
-                output_buffer.seek(0)
-                
-                # Retry conversion with the repaired PDF bytes
-                result = doc_converter_global.convert(output_buffer)
-                
-            except Exception as e_inner:
-                
-                raise e_inner # Re-raise the exception if the fallback also fails
+            print(f"[docling] exception: {repr(e)}")
+            raise
 
         return result
  
@@ -284,6 +225,7 @@ class DoclingParserProcessor(ParserProcessor):
             picture_count = 0
             table_count = 0
             summary = ""
+            expense_chart_image = None
 
             images = []
             for element, _level in result.document.iterate_items():
@@ -293,11 +235,15 @@ class DoclingParserProcessor(ParserProcessor):
                         image = element.get_image(result.document)
                         width,height = image.size
                         if 300 < width < 320 or 240 < height < 260:
+                            tqdm.write(f"Processing ETF expense ratio chart: {width}x{height}")
+                            display(image)
+                            expense_chart_image = image
                             summary = self.obtain_image_summary_specific(image, model="gemma3:4b", prompt="Extract the numerical data from the chart briefly with the title of each of the bars")
+                            tqdm.write(f"Expense ratio chart summary: {summary}")
                     elif 'table' in str(type(element)).lower():
                         table_count += 1
                          
-            
+            # Lets add the summary of the image into the correct section
             target = "## Expense ratio comparison"
             content = target + "\n\n" + summary 
             text = result.document.export_to_markdown()
@@ -316,7 +262,17 @@ class DoclingParserProcessor(ParserProcessor):
             else:
                 # Fallback: If the target section wasn't found, just append the summary
                 text += "\n\n" + content
-
+            
+            # Embed the expense ratio chart image at the end of the document
+            if expense_chart_image:
+                # Convert the detected chart image to base64 and embed in markdown
+                tqdm.write("Embedding expense ratio chart image in markdown")
+                buffered = BytesIO()
+                expense_chart_image.save(buffered, format="PNG")
+                img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                
+                text += "\n\n## Expense Ratio Chart:\n\n"
+                text += f"![Expense Ratio Chart](data:image/png;base64,{img_b64})\n"
             
             return text 
         except Exception as e:
@@ -324,7 +280,7 @@ class DoclingParserProcessor(ParserProcessor):
                 print(f"[docling] exception: {repr(e)}")
             raise
 
-    def process_etf_factSheets(self, input_folder: str, output_folder: str):
+    def process_etf_factSheets(self, input_folder: str, output_folder: str, num_files: int = 20):
         """
         Process ETF fact sheets from a folder.
         
@@ -335,20 +291,31 @@ class DoclingParserProcessor(ParserProcessor):
         try:
             # Get the list of files in the input folder
             files = os.listdir(input_folder)
-            files = files[:20]
+            files = files[:num_files]
             # Process each file
             for file in tqdm(files):
                 if file.endswith(".pdf"):
                     # Get the full path of the file
-                    file_path = os.path.join(input_folder, file)
+                    file_path = Path(input_folder) / file
                     
                     # Process the file
-
                     result = self.parse_document(file_path)
                     content = self.process_etf(result, True)
                     
-                    # Save the processed file
-                    self.save_markdown(content, Path(output_folder), file, True)
+                    # Prepare output paths
+                    output_folder_path = Path(output_folder)
+                    output_md_path = output_folder_path / f"{file_path.stem}.md"
+                    output_pdf_path = output_folder_path / file_path.name
+                    output_folder_path.mkdir(parents=True, exist_ok=True)
+                    
+                    # Save the markdown file
+                    with open(output_md_path, 'w') as f:
+                        f.write(content)
+                    
+                    # Copy the original PDF to the output folder
+                    shutil.copy2(file_path, output_pdf_path)
+                    
+                    tqdm.write(f"SUCCESS: Saved {output_md_path.name} and {output_pdf_path.name}")
         except Exception as e:
             
             print(f"[docling] exception: {repr(e)}")
@@ -356,19 +323,32 @@ class DoclingParserProcessor(ParserProcessor):
 
     def detect_risk_from_image(self, image: Image.Image) -> int | None:
         """
-        Analyzes an image of the risk meter using a specific BGR color 
-        and returns the detected risk level (1-5).
+        Analyzes a risk meter image by detecting a specific colored highlight box
+        and determining its position on a 1-5 scale.
+        
+        This method uses computer vision to:
+        1. Convert the image to OpenCV BGR format
+        2. Isolate pixels matching a specific color 
+        3. Find the largest contour (the highlighted risk box)
+        4. Calculate the horizontal position of the box center
+        5. Map the position to a risk level (1-5)
+        
+        Args:
+            image: PIL Image object containing the risk meter visualization
+            
+        Returns:
+            int: Risk level from 1 (lowest) to 5 (highest)
+            None: If no highlight box is detected in the image
+            
+        Note:
+            The method assumes the risk scale is divided into 5 equal horizontal segments.
+            The target color is BGR (104, 90, 0) with a tolerance of ±20 for each channel.
         """
         # Convert PIL Image to OpenCV format (which is BGR)
         open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-        # --- Define the specific color range in BGR ---
-        # The user-provided RGB is (125, 103, 0). In BGR, this is (0, 103, 125).
+        
         target_bgr_color = np.array([104, 90, 0])
         
-        # Define a tolerance or "delta" to account for slight color variations.
-        # A delta of 20 means we'll accept colors from (0-20, 103-20, 125-20) up to
-        # (0+20, 103+20, 125+20). You can make this smaller for more precision.
         delta = 20
         
         # Calculate the lower and upper bounds for the color range
@@ -404,7 +384,90 @@ class DoclingParserProcessor(ParserProcessor):
         # Clamp the value between 1 and 5 to be safe
         return max(1, min(5, risk_level))
 
-    def process_fund_factSheets(self, input_folder: str, output_folder: str, crop_width_percent: float = 0.15):
+    def _process_fund_images(self, result: Any, crop_width_percent: float = 0.15) -> Dict[str, Any]:
+        """
+        Extract and process images from a fund factsheet document.
+        
+        This method:
+        1. Extracts all pictures and the first table image from the document
+        2. Detects the risk level from the first image (cropped)
+        3. Generates AI summaries for asset allocation images
+        4. Identifies and extracts the growth chart image
+        
+        Args:
+            result: Docling conversion result containing the parsed document
+            crop_width_percent: Percentage of image width to crop for risk detection (default: 0.15)
+            
+        Returns:
+            Dictionary containing:
+                - 'risk': Detected risk level (1-5)
+                - 'summaries': List of AI-generated summaries for asset allocation images
+                - 'chart_image': PIL Image of the growth chart (or None if not found)
+        """
+        images = []
+        picture_count = 0
+        table_count = 0
+        
+        # Extract images from document elements
+        for element, _level in result.document.iterate_items():
+            if hasattr(element, 'get_image'):
+                if 'picture' in str(type(element)).lower():
+                    picture_count += 1
+                    images.append(element.get_image(result.document))
+                elif 'table' in str(type(element)).lower():
+                    table_count += 1
+                    if table_count == 1:
+                        images.append(element.get_image(result.document))
+        
+        summaries = []
+        chart_image = None
+        risk = None
+        counter = 0
+        
+        print(f"Total images extracted: {len(images)}")
+        
+        # Process each image
+        for i, image in enumerate(images):
+            width, height = image.size
+            
+            if i == 0:
+                # First image: detect risk level from cropped left portion
+                tqdm.write("Processing risk meter image (cropped)")
+                crop_box = (0, 0, int(width * crop_width_percent), height)
+                cropped_image = image.crop(crop_box)
+                
+                risk = self.detect_risk_from_image(cropped_image)
+            else:
+                tqdm.write(f"Image {i}: Height={height}, Width={width}")
+                
+                # Asset allocation image (small, specific dimensions)
+                if 110 < height < 135 and 390 < width < 420:
+                    tqdm.write("Processing asset allocation image")
+                    display(image)
+                    summary = self.obtain_image_summary_specific(image)
+                    summaries.append(summary)
+                    tqdm.write(f"Asset allocation summary: {summary}")
+                
+                # Growth chart image (larger, specific dimensions)
+                elif 105 < height < 150 and 690 < width < 720:
+                    counter += 1
+                    if counter == 1:
+                        tqdm.write("Growth chart image detected")
+                        
+                        chart_image = image
+                    else:
+                        tqdm.write("WARNING: Multiple chart images detected; using the first match")
+                        break
+                else:
+                    tqdm.write("Other image type detected")
+        
+        return {
+            'risk': risk,
+            'summaries': summaries,
+            'chart_image': chart_image
+        }
+
+    def process_fund_factSheets(self, input_folder: str, output_folder: str, crop_width_percent: float = 0.15, num_files: int = 20):
     
         # --- 1. Configuration ---
         input_path = Path(input_folder)
@@ -412,16 +475,12 @@ class DoclingParserProcessor(ParserProcessor):
         # --- 2. Find all relevant documents ---
         all_pdfs = input_path.glob("*.pdf")
 
-        # Filter for files where the name contains BOTH "factsheet" and "fund"
-        # We use .lower() to make the search case-insensitive
-        
-
         files_to_process = []
         for pdf in all_pdfs:
             if "factsheet" in pdf.name.lower() and "fund" in pdf.name.lower():
                 files_to_process.append(pdf)
 
-        files_to_process = files_to_process[:20]
+        files_to_process = files_to_process[:num_files]
         # --- 3. Main Processing Loop ---
         for doc_path in tqdm(files_to_process, desc="Processing Documents"):
         
@@ -430,90 +489,69 @@ class DoclingParserProcessor(ParserProcessor):
                 tqdm.write("Processing document "+ str(doc_path))
                 result = self.parse_document(doc_path)
                 
-                picture_count = 0
-                table_count = 0
-
-                images = []
-                for element, _level in result.document.iterate_items():
-                    if hasattr(element, 'get_image'):
-                        if 'picture' in str(type(element)).lower():
-                            picture_count += 1
-                            images.append(element.get_image(result.document))
-                            
-                        elif 'table' in str(type(element)).lower():
-                            table_count += 1
-                            if table_count == 1:
-                                images.append(element.get_image(result.document))
-                summaries = []     
-                print(len(images)) 
-                chart_image = None
-                counter = 0
-                for i, image in enumerate(images):
-                    #image.show(title=f"Image {i}")  # Opens in system default viewer
-                    width, height = image.size
-                    if i == 0:                 
-                        
-                        crop_box = (0, 0, int(width * crop_width_percent), height)
-                        cropped_image = image.crop(crop_box)
-                        risk = self.detect_risk_from_image(cropped_image)
-                    else:
-                        
-                        tqdm.write(str(i))
-                        tqdm.write(f"Height: {height}, Width: {width}")  
-                        if 110 < height < 135 and 390 < width < 420:
-                            summary = self.obtain_image_summary_specific(image)
-                            summaries.append(summary)
-                            tqdm.write(summary)
-
-                        elif 105 < height < 150 and 690 < width < 720:
-                            image.show(title="Chart Image")
-                            counter += 1
-                            chart_image = image
-                            if counter == 2:
-                                tqdm.write("ERROR: Multiple chart images detected; using the first match and skipping the rest.")
-                                break
-                        else:
-                            tqdm.write("Other Image")
-                            image.show(title="Other Image")
-                        
+                # Process images and extract information
+                image_data = self._process_fund_images(result, crop_width_percent)
+                risk = image_data['risk']
+                summaries = image_data['summaries']
+                chart_image = image_data['chart_image']
+                
                 text = result.document.export_to_markdown()
 
 
                 # Define possible target texts to search for
                 possible_targets = [
-                    "## Sector Diversification",
                     "## Largest state concentrations",
                     "## Geographic diversification",
                     "## Asset allocation",
-                    "## Market allocation–stocks"
+                    "## Market allocation–stocks",
+                    "## Market allocation-stocks",
+                    "## Sector Diversification",
+                    "## Allocation of underlying funds†",
+                    "## Allocation of underlying funds"
+                    "## Distribution by credit quality",
+                    "## Distribution by credit quality†"
                 ]
                 
-                # Find which target text exists in the document
-                target_text = None
+                # Find all target texts that exist in the document and match with summaries
+                found_targets = []
                 for possible_target in possible_targets:
                     if possible_target in text:
-                        target_text = possible_target
-                        break
+                        found_targets.append(possible_target)
                 
-                # Only perform replacement if a target was found
-                if target_text:
-                    # Create the new text block (original text + your summary)
-                    replacement_block = f"{target_text}\n\n{summaries[0]}"
-                    # Perform the replacement
-                    text = text.replace(target_text, replacement_block)
+                # Match found targets with available summaries
+                if found_targets and summaries:
+                    num_replacements = min(len(found_targets), len(summaries))
+                    tqdm.write(f"Found {len(found_targets)} target section(s) and {len(summaries)} summary(ies)")
+                    
+                    # Perform replacements for each matched pair
+                    for i in range(num_replacements):
+                        target_text = found_targets[i]
+                        summary = summaries[i]
+                        replacement_block = f"{target_text}\n\n{summary}"
+                        text = text.replace(target_text, replacement_block, 1)  # Replace only first occurrence
+                        tqdm.write(f"Replaced '{target_text}' with summary {i+1}")
+                    
+                    # Warn if there are unmatched summaries or targets
+                    if len(summaries) > num_replacements:
+                        tqdm.write(f"Warning: {len(summaries) - num_replacements} summary(ies) not used (no matching target section)")
+                    if len(found_targets) > num_replacements:
+                        tqdm.write(f"Warning: {len(found_targets) - num_replacements} target section(s) not replaced (no matching summary)")
                 else:
-                    tqdm.write("Warning: None of the target sections found in document")
+                    if not found_targets:
+                        tqdm.write("Warning: None of the target sections found in document")
+                    if not summaries:
+                        tqdm.write("Warning: No summaries generated from images")
 
                 # --- Now, append the other information as before ---
 
                 tqdm.write("Number of summaries: " + str(len(summaries)))
-
+                for summary in summaries:
+                    tqdm.write(summary)
                 text += ("\n\n## Risk Level (1-5): " + str(risk))
                 
                 if chart_image:
                     # Convert the detected chart image to base64 and embed in markdown
-                    tqdm.write("Chart image found")
-                    chart_image.show(title="Chart Image")
+                    tqdm.write("Embedding chart image in markdown")
                     buffered = BytesIO()
                     chart_image.save(buffered, format="PNG")
                     img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -524,21 +562,22 @@ class DoclingParserProcessor(ParserProcessor):
                 
                 output_folder = Path(output_folder)
                 output_md_path = output_folder / f"{doc_path.stem}.md"
+                output_pdf_path = output_folder / doc_path.name
                 output_folder.mkdir(parents=True, exist_ok=True)
-                
                 
                 with open(output_md_path, 'w') as f:
                     f.write(text)
+                
+                # Copy the original PDF to the output folder
+                shutil.copy2(doc_path, output_pdf_path)
 
                 # Log the success message
-                tqdm.write(f"SUCCESS: Saved {output_md_path.name} with risk level '{risk}'")
+                tqdm.write(f"SUCCESS: Saved {output_md_path.name} and {output_pdf_path.name} with risk level '{risk}'")
 
                 
             except Exception as e:
                 tqdm.write(f"ERROR processing {doc_path.name}: {e}")
         
-        
-    
     def normalize_markdown(self, md: str) -> str:
         """
         Normalize markdown text with consistent formatting.
