@@ -2,23 +2,23 @@
   "questions": [
     {
       "question": "What is the expense ratio of VHYAX?",
-      "ground_truth": "The expense ratio of VHYAX (Vanguard High Dividend Yield Index Fund Admiral Shares) is 0.08% as of 02/28/25.",
+      "ground_truth": "The expense ratio of VHYAX (High Dividend Yield Index Fund Admiral Shares) is 0.08% as of 02/28/25.",
       "contexts": ["Expense ratio as of 02/28/25: 0.08%", "Ticker symbol: VHYAX"],
       "difficulty": "easy",
       "query_type": "fact_retrieval",
       "metadata_dependency": "high"
     },
     {
-      "question": "When was the Vanguard High Dividend Yield Index Fund Admiral Shares launched?",
-      "ground_truth": "The fund was launched on February 7, 2019 (inception date: 02/07/19).",
+      "question": "When was the High Dividend Yield Index Fund Admiral Shares launched?",
+      "ground_truth": "The High Dividend Yield Index Fund was launched on February 7, 2019 (inception date: 02/07/19).",
       "contexts": ["Inception date: 02/07/19"],
       "difficulty": "easy",
       "query_type": "fact_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "When was the Vanguard High Dividend Yield Index Fund inception date?",
-      "ground_truth": "The fund was launched on February 7, 2019 (inception date: 02/07/19).",
+      "question": "When was the High Dividend Yield Index Fund inception date?",
+      "ground_truth": "The High Dividend Yield Index Fund was launched on February 7, 2019 (inception date: 02/07/19).",
       "contexts": ["Inception date: 02/07/19"],
       "difficulty": "easy",
       "query_type": "fact_retrieval",
@@ -105,32 +105,32 @@
       "metadata_dependency": "medium"
     },
     {
-      "question": "What was the fund's return in Q2 2025?",
-      "ground_truth": "The fund returned 4.13% in Q2 2025 (quarter ended June 30, 2025).",
+      "question": "What was VHYAX's return in Q2 2025?",
+      "ground_truth": "VHYAX returned 4.13% in Q2 2025 (quarter ended June 30, 2025).",
       "contexts": ["Total returns Quarter: Fund 4.13%", "Periods ended June 30, 2025"],
       "difficulty": "medium",
       "query_type": "performance_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What was the fund's year-to-date return as of June 30, 2025?",
-      "ground_truth": "The fund's year-to-date return as of June 30, 2025 was 5.90%.",
+      "question": "What was VHYAX's year-to-date return as of June 30, 2025?",
+      "ground_truth": "VHYAX's year-to-date return as of June 30, 2025 was 5.90%.",
       "contexts": ["Total returns Year to date: Fund 5.90%", "Periods ended June 30, 2025"],
       "difficulty": "medium",
       "query_type": "performance_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What was the fund's three-year annualized return as of June 30, 2025?",
-      "ground_truth": "The fund's three-year annualized return as of June 30, 2025 was 12.81%.",
+      "question": "What was VHYAX's three-year annualized return as of June 30, 2025?",
+      "ground_truth": "VHYAX's three-year annualized return as of June 30, 2025 was 12.81%.",
       "contexts": ["Total returns Three years: Fund 12.81%", "Periods ended June 30, 2025"],
       "difficulty": "medium",
       "query_type": "performance_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What was the fund's five-year annualized return as of June 30, 2025?",
-      "ground_truth": "The fund's five-year annualized return as of June 30, 2025 was 14.50%.",
+      "question": "What was VHYAX's five-year annualized return as of June 30, 2025?",
+      "ground_truth": "VHYAX's five-year annualized return as of June 30, 2025 was 14.50%.",
       "contexts": ["Total returns Five years: Fund 14.50%", "Periods ended June 30, 2025"],
       "difficulty": "medium",
       "query_type": "performance_retrieval",
@@ -138,7 +138,7 @@
     },
     {
       "question": "Did VHYAX outperform or underperform its benchmark in 2024?",
-      "ground_truth": "VHYAX slightly underperformed its benchmark in 2024. The fund returned 17.59% while the FTSE High Dividend Yield Index returned 17.65%, a difference of -0.06%.",
+      "ground_truth": "VHYAX slightly underperformed its benchmark in 2024. VHYAX returned 17.59% while the FTSE High Dividend Yield Index returned 17.65%, a difference of -0.06%.",
       "contexts": ["Annual returns - 2024: Fund 17.59%, Benchmark 17.65%"],
       "difficulty": "hard",
       "query_type": "comparative_analysis",
@@ -146,15 +146,15 @@
     },
     {
       "question": "What is the tracking error of VHYAX for the one-year period ending June 30, 2025?",
-      "ground_truth": "The tracking error (difference from benchmark) is -0.07% for the one-year period. The fund returned 15.52% while the benchmark returned 15.59%.",
+      "ground_truth": "The tracking error (difference from benchmark) is -0.07% for the one-year period. VHYAX returned 15.52% while the benchmark returned 15.59%.",
       "contexts": ["Total returns One year: Fund 15.52%, Benchmark 15.59%"],
       "difficulty": "hard",
       "query_type": "comparative_analysis",
       "metadata_dependency": "medium"
     },
     {
-      "question": "How did the fund perform relative to its benchmark in 2019?",
-      "ground_truth": "In 2019, the fund returned 16.67% while the benchmark returned 16.75%, underperforming by -0.08%.",
+      "question": "How did VHYAX perform relative to its benchmark in 2019?",
+      "ground_truth": "In 2019, VHYAX returned 16.67% while the benchmark returned 16.75%, underperforming by -0.08%.",
       "contexts": ["Annual returns - 2019: Fund 16.67%, Benchmark 16.75%"],
       "difficulty": "hard",
       "query_type": "comparative_analysis",
@@ -185,7 +185,15 @@
       "metadata_dependency": "medium"
     },
     {
-      "question": "What percentage of the fund is invested in the top 10 holdings?",
+      "question": "What are all 10 of the largest holdings in High Dividend Yield Index Fund?",
+      "ground_truth": "The top 10 holdings are: 1) Broadcom Inc., 2) JPMorgan Chase & Co., 3) Exxon Mobil Corp., 4) Walmart Inc., 5) Procter & Gamble Co., 6) Johnson & Johnson, 7) Home Depot Inc., 8) AbbVie Inc., 9) Bank of America Corp., and 10) UnitedHealth Group Inc.",
+      "contexts": ["Ten largest holdings list"],
+      "difficulty": "medium",
+      "query_type": "holdings_retrieval",
+      "metadata_dependency": "medium"
+    },
+    {
+      "question": "What percentage of VHYAX is invested in the top 10 holdings?",
       "ground_truth": "The top 10 holdings represent 25.4% of total net assets.",
       "contexts": ["Top 10 as % of total net assets: 25.4%"],
       "difficulty": "easy",
@@ -209,40 +217,40 @@
       "metadata_dependency": "medium"
     },
     {
-      "question": "What is the fund's allocation to the Technology sector?",
-      "ground_truth": "The fund has a 12.3% allocation to the Technology sector.",
+      "question": "What is VHYAX's allocation to the Technology sector?",
+      "ground_truth": "VHYAX has a 12.3% allocation to the Technology sector.",
       "contexts": ["Sector Diversification - Technology: 12.3%"],
       "difficulty": "easy",
       "query_type": "holdings_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What is the fund's allocation to the Energy sector?",
-      "ground_truth": "The fund has an 8.3% allocation to the Energy sector.",
+      "question": "What is VHYAX's allocation to the Energy sector?",
+      "ground_truth": "VHYAX has an 8.3% allocation to the Energy sector.",
       "contexts": ["Sector Diversification - Energy: 8.3%"],
       "difficulty": "easy",
       "query_type": "holdings_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What are the fund's allocations to Consumer Discretionary and Consumer Staples sectors?",
-      "ground_truth": "The fund has a 10.0% allocation to Consumer Discretionary and a 10.0% allocation to Consumer Staples.",
+      "question": "What are VHYAX's allocations to Consumer Discretionary and Consumer Staples sectors?",
+      "ground_truth": "VHYAX has a 10.0% allocation to Consumer Discretionary and a 10.0% allocation to Consumer Staples.",
       "contexts": ["Sector Diversification - Consumer Discretionary: 10.0%, Consumer Staples: 10.0%"],
       "difficulty": "medium",
       "query_type": "holdings_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What is the fund's allocation to Healthcare?",
-      "ground_truth": "The fund has a 12.1% allocation to the Healthcare sector.",
+      "question": "What is VHYAX's allocation to Healthcare?",
+      "ground_truth": "VHYAX has a 12.1% allocation to the Healthcare sector.",
       "contexts": ["Sector Diversification - Healthcare: 12.1%"],
       "difficulty": "easy",
       "query_type": "holdings_retrieval",
       "metadata_dependency": "medium"
     },
     {
-      "question": "What percentage of the fund is allocated to Industrials?",
-      "ground_truth": "The fund has a 13.4% allocation to the Industrials sector.",
+      "question": "What percentage of High Dividend Yield Index Fund is allocated to Industrials?",
+      "ground_truth": "High Dividend Yield Index Fund has a 13.4% allocation to the Industrials sector.",
       "contexts": ["Sector Diversification - Industrials: 13.4%"],
       "difficulty": "easy",
       "query_type": "holdings_retrieval",
@@ -257,8 +265,16 @@
       "metadata_dependency": "medium"
     },
     {
+      "question": "Is Bank of America in the top 5 holdings of High Dividend Yield Index Fund?",
+      "ground_truth": "No, Bank of America Corp. is the 9th largest holding, not in the top 5. The top 5 are: Broadcom, JPMorgan Chase, Exxon Mobil, Walmart, and Procter & Gamble.",
+      "contexts": ["Ten largest holdings: 9 Bank of America Corp.", "Top 5: Broadcom, JPMorgan, Exxon, Walmart, P&G"],
+      "difficulty": "medium",
+      "query_type": "holdings_analysis",
+      "metadata_dependency": "medium"
+    },
+    {
       "question": "What investment strategy does VHYAX use?",
-      "ground_truth": "VHYAX uses a passive management (indexing) investment approach designed to track the FTSE High Dividend Yield Index. The fund attempts to replicate the index by investing all or substantially all of its assets in the stocks that make up the index, holding each stock in approximately the same proportion as its weighting in the index.",
+      "ground_truth": "VHYAX uses a passive management (indexing) investment approach designed to track the FTSE High Dividend Yield Index. VHYAX attempts to replicate the index by investing all or substantially all of its assets in the stocks that make up the index, holding each stock in approximately the same proportion as its weighting in the index.",
       "contexts": ["Investment strategy: passive management/indexing", "Replicates FTSE High Dividend Yield Index"],
       "difficulty": "easy",
       "query_type": "strategy_retrieval",
@@ -266,7 +282,7 @@
     },
     {
       "question": "What index does the High Dividend Yield Index Fund track?",
-      "ground_truth": "The fund tracks the FTSE High Dividend Yield Index, which measures the investment return of common stocks of U.S. companies that are characterized by high dividend yields.",
+      "ground_truth": "The High Dividend Yield Index Fund tracks the FTSE High Dividend Yield Index, which measures the investment return of common stocks of U.S. companies that are characterized by high dividend yields.",
       "contexts": ["Benchmark: FTSE High Dividend Yield Index"],
       "difficulty": "easy",
       "query_type": "strategy_retrieval",
@@ -290,14 +306,14 @@
     },
     {
       "question": "What is stock market risk as it relates to VHYAX?",
-      "ground_truth": "Stock market risk is the chance that stock prices overall will decline. Stock markets tend to move in cycles, with periods of rising stock prices and periods of falling stock prices. The fund's target index may, at times, become focused in stocks of a particular sector, category, or group of companies, which could cause the fund to underperform the overall stock market or perform differently from the overall stock market.",
+      "ground_truth": "Stock market risk is the chance that stock prices overall will decline. Stock markets tend to move in cycles, with periods of rising stock prices and periods of falling stock prices. VHYAX's target index may, at times, become focused in stocks of a particular sector, category, or group of companies, which could cause VHYAX to underperform the overall stock market or perform differently from the overall stock market.",
       "contexts": ["Stock market risk description from Plain talk about risk section"],
       "difficulty": "medium",
       "query_type": "risk_analysis",
       "metadata_dependency": "low"
     },
     {
-      "question": "What is investment style risk for this fund?",
+      "question": "What is investment style risk for VHYAX?",
       "ground_truth": "Investment style risk is the chance that returns from dividend-paying stocks will trail returns from the overall stock market. Specific types of stocks tend to go through cycles of doing better—or worse—than the stock market in general. These periods have, in the past, lasted for as long as several years.",
       "contexts": ["Investment style risk description from Plain talk about risk section"],
       "difficulty": "medium",
@@ -306,7 +322,7 @@
     },
     {
       "question": "What is asset concentration risk?",
-      "ground_truth": "Asset concentration risk is the chance that the fund's performance may be hurt disproportionately by the poor performance of relatively few stocks. The fund tends to invest a high percentage of its assets in its top 10 holdings. As a result, the fund's performance may be hurt disproportionately by the poor performance of relatively few stocks.",
+      "ground_truth": "Asset concentration risk is the chance that VHYAX's performance may be hurt disproportionately by the poor performance of relatively few stocks. VHYAX tends to invest a high percentage of its assets in its top 10 holdings. As a result, VHYAX's performance may be hurt disproportionately by the poor performance of relatively few stocks.",
       "contexts": ["Asset concentration risk description from Plain talk about risk section"],
       "difficulty": "medium",
       "query_type": "risk_analysis",
@@ -314,7 +330,7 @@
     },
     {
       "question": "What are the index-related risks for VHYAX?",
-      "ground_truth": "The index-related risks include: (1) Passive management risk - the fund is managed using an indexing strategy and will not buy or sell a security unless it is added to or removed from the target index, (2) Tracking error risk - the fund's performance may deviate from the performance of its target index, (3) Index provider risk - errors or imperfections in the index data may occur from time to time and may not be identified and corrected by the index provider, and (4) Index replicating risk - the fund may not be able to invest in all securities in the target index or hold them in the same proportion.",
+      "ground_truth": "The index-related risks include: (1) Passive management risk - VHYAX is managed using an indexing strategy and will not buy or sell a security unless it is added to or removed from the target index, (2) Tracking error risk - VHYAX's performance may deviate from the performance of its target index, (3) Index provider risk - errors or imperfections in the index data may occur from time to time and may not be identified and corrected by the index provider, and (4) Index replicating risk - VHYAX may not be able to invest in all securities in the target index or hold them in the same proportion.",
       "contexts": ["Index-related risks descriptions from Plain talk about risk section"],
       "difficulty": "hard",
       "query_type": "risk_analysis",
@@ -330,7 +346,7 @@
     },
     {
       "question": "If I invested $10,000 in VHYAX at inception, how much would it be worth as of December 31, 2024?",
-      "ground_truth": "A $10,000 investment made at the fund's inception (February 7, 2019) would have grown to $17,929 as of December 31, 2024.",
+      "ground_truth": "A $10,000 investment made at VHYAX's inception (February 7, 2019) would have grown to $17,929 as of December 31, 2024.",
       "contexts": ["Growth of $10,000 investment: $17,929 Fund as of 12/31/24", "Inception date: 02/07/19"],
       "difficulty": "medium",
       "query_type": "calculation_based",
@@ -369,16 +385,8 @@
       "metadata_dependency": "low"
     },
     {
-      "question": "What share class is this factsheet for?",
-      "ground_truth": "This factsheet is for the Admiral Shares class of the Vanguard High Dividend Yield Index Fund.",
-      "contexts": ["Vanguard High Dividend Yield Index Fund - Admiral Shares", "Ticker: VHYAX"],
-      "difficulty": "easy",
-      "query_type": "disambiguation",
-      "metadata_dependency": "high"
-    },
-    {
       "question": "Is VHYAX an ETF or a mutual fund?",
-      "ground_truth": "VHYAX is a mutual fund, specifically the Admiral Shares class of the Vanguard High Dividend Yield Index Fund. It is not an ETF.",
+      "ground_truth": "VHYAX is a mutual fund, specifically the Admiral Shares class of the High Dividend Yield Index Fund. It is not an ETF.",
       "contexts": ["Admiral Shares", "Fund number", "Domestic stock fund designation"],
       "difficulty": "medium",
       "query_type": "disambiguation",
@@ -408,14 +416,7 @@
       "query_type": "policy_retrieval",
       "metadata_dependency": "low"
     },
-    {
-      "question": "What do the performance figures represent?",
-      "ground_truth": "Figures for periods of less than one year are cumulative returns. All other figures represent average annual returns. Performance figures include the reinvestment of all dividends and any capital gains distributions. All returns are net of expenses.",
-      "contexts": ["Performance figures explanation"],
-      "difficulty": "medium",
-      "query_type": "policy_retrieval",
-      "metadata_dependency": "low"
-    },
+    
     {
       "question": "Why can't you invest directly in an index?",
       "ground_truth": "The performance of an index is not an exact representation of any particular investment, as you cannot invest directly in an index.",
@@ -473,8 +474,8 @@
       "metadata_dependency": "low"
     },
     {
-      "question": "What is the fund's allocation to international stocks?",
-      "ground_truth": "The fund does not hold international stocks. It is a domestic stock fund that invests in U.S. companies.",
+      "question": "What is VHYAX's allocation to international stocks?",
+      "ground_truth": "VHYAX does not hold international stocks. VHYAX is a domestic stock fund that invests in U.S. companies.",
       "contexts": ["Domestic stock fund designation", "FTSE High Dividend Yield Index tracks U.S. companies"],
       "difficulty": "medium",
       "query_type": "negative_case",
@@ -482,7 +483,7 @@
     },
     {
       "question": "Does VHYAX invest in bonds or fixed income securities?",
-      "ground_truth": "No, VHYAX does not invest in bonds or fixed income securities. It is a domestic stock fund that invests in common stocks of U.S. companies.",
+      "ground_truth": "No, VHYAX does not invest in bonds or fixed income securities. VHYAX is a domestic stock fund that invests in common stocks of U.S. companies.",
       "contexts": ["Domestic stock fund", "Investment in common stocks"],
       "difficulty": "medium",
       "query_type": "negative_case",
