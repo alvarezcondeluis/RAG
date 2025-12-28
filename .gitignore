@@ -23,6 +23,10 @@ cache/
 notebooks/etf_factSheet/
 notebooks/factShee/
 notebooks/cache/
+notebooks/charts
+notebooks/filings
+notebooks/summaries
+notebooks/vanguard
 __pycache__/
 *.pyc
 *.pyo
