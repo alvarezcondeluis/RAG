@@ -17,10 +17,6 @@ class FundInfoExtractor:
         except Exception:
             return None
 
-    # --- EXTRACTION METHODS ---
-
-
-    import re
 
     def extract_ticker(self):
         """

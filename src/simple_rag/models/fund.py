@@ -4,12 +4,22 @@ import pandas as pd
 
 
 @dataclass
-class PerformanceSnapshot:
+class AverageReturnSnapshot:
 
     return_1y: str
     return_5y: str
     return_10y: str
     return_inception: str
+
+@dataclass
+class FinancialHighlights:
+    turnover: float
+    expense_ratio: float
+    total_return: float
+    net_assets: float
+    net_assets_value_begining: float
+    net_assets_value_end: float
+    net_income_ratio: float
 
 @dataclass
 class FundData:
@@ -28,7 +38,8 @@ class FundData:
     advisory_fees: str = "N/A"
     n_holdings: str = "N/A"
     annual_returns: Optional[Dict[str,float]] = None
-    performance: Optional[Dict[str, PerformanceSnapshot]] = field(default_factory=dict)
+    performance: Optional[Dict[str, AverageReturnSnapshot]] = field(default_factory=dict)
+    financial_highlights: Optional[Dict[str, FinancialHighlights]] = None
     managers: Optional[List[str]] = field(default_factory=list)
     performance_commentary: str = "N/A"
     summary_prospectus: str = "N/A"
