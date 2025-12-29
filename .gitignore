@@ -27,6 +27,7 @@ notebooks/charts
 notebooks/filings
 notebooks/summaries
 notebooks/vanguard
+notebooks/ishares
 __pycache__/
 *.pyc
 *.pyo

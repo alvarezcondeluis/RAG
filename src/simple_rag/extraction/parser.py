@@ -7,6 +7,177 @@ import pandas as pd
 import re
 from IPython.display import display, Markdown
 
+def compute_annual_returns(df: pd.DataFrame):
+        """
+        Compute annual returns for the first fund column in the performance DataFrame.
+        Automatically detects format:
+        - Text Month Year (e.g., "Jan 23") -> Parses as Month 2023
+        - Quarterly/Monthly (MM/DD/YY format) -> uses year-end values
+        - Annual data (YYYY format) -> uses consecutive years
+        
+        Args:
+            df: DataFrame with columns [date/year column, fund values...]
+        
+        Returns:
+            Dictionary: {year: return_percentage}
+        """
+        annual_returns = {}
+        
+        # Get the date column name (first column)
+        date_col = df.columns[0]
+        
+        # Get the first fund column (second column in the dataframe)
+        if len(df.columns) < 2:
+            print("DataFrame doesn't have enough columns")
+            return annual_returns
+        
+        fund_column = df.columns[1]
+        
+        # Make a copy to avoid warnings
+        df = df.copy()
+        
+        # --- 1. DETECT FORMAT ---
+        first_value = str(df[date_col].iloc[0]).strip()
+        
+        # Check for "Jan 23" format: Starts with 3 letters + space + 2 digits
+        # Regex explanation: ^[A-Za-z]{3} (Month) \s+ (Space) \d{2}$ (2-digit Year)
+        is_text_month_year = bool(re.match(r'^[A-Za-z]{3}\s+\d{2}$', first_value))
+        
+        # Check for Standard Date format (MM/DD/YY)
+        is_standard_date = '/' in first_value or '-' in first_value
+        
+        is_month_hyphen_year = bool(re.match(r'^[A-Za-z]{3}-\d{2}$', first_value))
+        
+
+        # Group them as "Date Logic" vs "Year Integer Logic"
+        use_date_logic = is_text_month_year or is_standard_date
+        
+        print(f"Detected format: {'Text Month-Year' if is_text_month_year else ('Standard Date' if is_standard_date else 'Year (YYYY)')}")
+        
+        if use_date_logic:
+            # --- 2. HANDLE DATES ---
+            try:
+                # Explicitly handle "Jan 23" to ensure it parses as Year 2023, not Day 23
+                if is_text_month_year:
+                    # %b = Abbreviated month (Jan), %y = 2-digit year (23)
+                    df['parsed_date'] = pd.to_datetime(df[date_col], format='%b %y', errors='coerce')
+                elif is_month_hyphen_year:
+                    # %b = Abbreviated month (Jan), %y = 2-digit year (23)
+                    df['parsed_date'] = pd.to_datetime(df[date_col], format='%b-%y', errors='coerce')
+                else:
+                    # Let pandas guess for standard MM/DD/YYYY
+                    df['parsed_date'] = pd.to_datetime(df[date_col], errors='coerce')
+                
+                if df['parsed_date'].isna().all():
+                    print("Failed to parse dates")
+                    return annual_returns
+                
+                df['year'] = df['parsed_date'].dt.year
+                df['month'] = df['parsed_date'].dt.month
+                
+                # Drop rows where year couldn't be extracted
+                df = df.dropna(subset=['year'])
+                df['year'] = df['year'].astype(int)
+                
+                # Always use the last available data point for each year
+                # This handles both complete years (Dec data) and incomplete years (e.g., Nov-24)
+                year_end_df = df.groupby('year').last().reset_index()
+                
+                # Get unique years
+                years = sorted(year_end_df['year'].unique())
+                
+                if len(years) < 2:
+                    print(f"Not enough years to calculate returns. Found: {years}")
+                    return annual_returns
+                
+                print(f"Found year-end data for years: {years}")
+                
+                # Calculate returns using the last available data point for each year
+                # Formula: (Year T Value - Year T-1 Value) / Year T-1 Value
+                # Note: This now works for incomplete years (e.g., Jan-24 to Nov-24)
+                for i in range(len(years) - 1):
+                    prev_year = years[i]
+                    current_year = years[i + 1]
+                    
+                    start_data = year_end_df[year_end_df['year'] == prev_year].iloc[0]
+                    end_data = year_end_df[year_end_df['year'] == current_year].iloc[0]
+                    
+                    try:
+                        start_val_str = str(start_data[fund_column])
+                        end_val_str = str(end_data[fund_column])
+                        
+                        if start_val_str in ['nan', 'None', ''] or end_val_str in ['nan', 'None', '']:
+                            continue
+                        
+                        start_val = float(start_val_str.replace('$', '').replace(',', ''))
+                        end_val = float(end_val_str.replace('$', '').replace(',', ''))
+                        
+                        if start_val == 0:
+                            continue
+                        
+                        return_pct = ((end_val - start_val) / start_val) * 100
+                        annual_returns[str(current_year)] = round(return_pct, 2)
+                        
+                        print(f"  {current_year} Return: ${start_val:,.2f} -> ${end_val:,.2f} = {return_pct:.2f}%")
+                        
+                    except (ValueError, ZeroDivisionError) as e:
+                        print(f"Error calculating return in {current_year}: {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"Error parsing date format: {e}")
+                return annual_returns
+        
+        else:
+            # --- 3. HANDLE YEAR INTEGERS (YYYY) ---
+            # (This block remains largely the same as your original logic)
+            try:
+                df['year_extracted'] = df[date_col].astype(str).str.extract(r'(\d{4})')[0]
+                df = df.dropna(subset=['year_extracted'])
+                
+                if len(df) == 0:
+                    print("No valid year data found")
+                    return annual_returns
+                
+                df['year_extracted'] = df['year_extracted'].astype(int)
+                
+                # Use the last available row for each year
+                # (Assumes data is sorted chronologically or the last entry is year-end)
+                year_end_df = df.groupby('year_extracted').last().reset_index()
+                years = sorted(year_end_df['year_extracted'].unique())
+                
+                if len(years) < 2:
+                    print(f"Not enough years to calculate returns. Found: {years}")
+                    return annual_returns
+                
+                print(f"Found years: {years}")
+                
+                for i in range(len(years) - 1):
+                    prev_year = years[i]
+                    current_year = years[i + 1]
+                    
+                    start_data = year_end_df[year_end_df['year_extracted'] == prev_year].iloc[0]
+                    end_data = year_end_df[year_end_df['year_extracted'] == current_year].iloc[0]
+                    
+                    try:
+                        start_val = float(str(start_data[fund_column]).replace('$', '').replace(',', ''))
+                        end_val = float(str(end_data[fund_column]).replace('$', '').replace(',', ''))
+                        
+                        if start_val == 0: continue
+                        
+                        return_pct = ((end_val - start_val) / start_val) * 100
+                        annual_returns[str(current_year)] = round(return_pct, 2)
+                        print(f"  {current_year} Return: ${start_val:,.2f} -> ${end_val:,.2f} = {return_pct:.2f}%")
+                        
+                    except Exception:
+                        continue
+                        
+            except Exception as e:
+                print(f"Error parsing year format: {e}")
+                return annual_returns
+        
+        return annual_returns
+
 class BlackRockFiling:
     def __init__(self, html_content: str):
         self.soup = BeautifulSoup(html_content, 'lxml')
@@ -59,7 +230,7 @@ class BlackRockFiling:
         # Initialize the data object
         
         fund = FundData(name=name, context_id=c_id, report_date=self.report_date, registrant=self.registrant)
-        if "ETF" in name: fund.share_class = "ETF"
+        
         # 1. Basic Tags (Scoped to this context)
         print("Extracting context: ", c_id)
         fund.ticker = self._get_value("dei:TradingSymbol", c_id)
@@ -68,6 +239,7 @@ class BlackRockFiling:
         share_class = self._get_value("oef:ClassName", c_id)
         if share_class:
             fund.share_class = share_class
+        if "ETF" in name: fund.share_class = "ETF Shares"
         fund.report_date = self.report_date
 
         # 2. Embedded Values (Inside larger blocks)
@@ -120,6 +292,7 @@ class BlackRockFiling:
         tag = self.soup.find(attrs={"name": tag_name, "contextref": c_id})
         if not tag: print("Tag not found: ", tag_name, c_id)
         return XBRLUtils.clean_text(tag)
+    
 
     def get_financial_highlights(self) -> pd.DataFrame:
         """
@@ -164,8 +337,8 @@ class BlackRockFiling:
             try:
                 df = pd.read_html(io.StringIO(str(table)))[0]
                 df = df.fillna('')
-                if fund_name == "ESG U.S. Corporate Bond ETF":
-                    print(df)
+               
+                
                 # Extract key metrics
                 metrics = {
                     'fund_name': fund_name,
@@ -214,7 +387,215 @@ class BlackRockFiling:
         # Convert to DataFrame
         return self._create_performance_dataframe(results)
 
-    
+    def get_financial_highlights2(self) -> pd.DataFrame:
+        """
+        Extracts Financial Highlights, handling tables where years are in columns 
+        and metrics are in rows (transposed format).
+        """
+        # Dictionary to accumulate data by fund/share class
+        fund_data = {}
+        
+        # 1. Find potential Financial Highlight tables
+        text_nodes = self.soup.find_all(string=re.compile(r'Financial Highlights', re.IGNORECASE))
+        seen_tables = set()
+        
+        print(f"Found {len(text_nodes)} potential Financial Highlights sections")
+        
+        for text_node in text_nodes:
+            if text_node is None or len(str(text_node)) > 100:
+                continue
+            
+            # Find the next table after this heading
+            heading = text_node.parent
+            table = heading.find_next('table')
+            
+            if not table or id(table) in seen_tables:
+                continue
+            seen_tables.add(id(table))
+
+            try:
+                # Read table without a header to preserve the exact layout
+                df = pd.read_html(io.StringIO(str(table)), header=None)[0]
+                df = df.fillna('')
+                if len(df) < 3:
+                    continue
+                print(f"Processing table with shape: {df.shape}")
+                
+                # 2. Identify the Structure
+                label_col_idx = 0
+                
+                # Temporary storage for this table's columns
+                table_columns = []
+                
+                # 3. Iterate through DATA columns (start from label_col_idx + 1)
+                for col_idx in range(label_col_idx + 1, df.shape[1]):
+                    col_data = df.iloc[:, col_idx]
+                    
+                    # --- A. Detect Year ---
+                    year = None
+                    year_row_idx = -1
+                    
+                    for i in range(min(5, len(col_data))):
+                        val = str(col_data.iloc[i]).strip()
+                        # Look for date pattern like MM/DD/YY and extract the year
+                        match = re.search(r'(?:20\d{2})|\/(\d{2})$', val)
+                        if match:
+                            y = match.group(1) if match.group(1) else match.group(0)
+                            year = "20" + y if len(y) == 2 else y
+                            year_row_idx = i
+                            break
+                    
+                    if not year:
+                        continue
+
+                    # --- B. Detect Fund Name ---
+                    fund_name = None
+                    
+                    if year_row_idx >= 0:
+                        fund_val = str(col_data.iloc[year_row_idx]).strip()
+                        fund_match = re.search(r'(.+?)(?=\s*Year Ended)', fund_val, re.IGNORECASE)
+                        if fund_match:
+                            fund_name = fund_match.group(1).strip()
+                    if year_row_idx > 0:
+                        prev_row_val = str(col_data.iloc[year_row_idx - 1]).strip()
+                        if prev_row_val and prev_row_val.lower() != 'nan':
+                            fund_name = prev_row_val
+
+                    if not fund_name or fund_name.lower() == 'nan' or not fund_name:
+                        row_0_val = str(col_data.iloc[0]).strip()
+                        if row_0_val and row_0_val.lower() != 'nan':
+                            fund_name = row_0_val
+
+                    if not fund_name or fund_name.lower() == 'nan' or not fund_name:
+                        row_1_val = str(col_data.iloc[1]).strip()
+                        print(f"DEBUG - Row 1 value: {row_1_val}")
+                        if row_1_val and row_1_val.lower() != 'nan':
+                            fund_name = row_1_val
+                    
+                    if not fund_name or fund_name.lower() == 'nan' or not fund_name:
+                        fund_name = "Unknown Fund"
+                        print("DEBUG - DataFrame for unknown fund:")
+                        print(df)
+                        print("DEBUG - Column data:")
+                        print(col_data)
+
+                    # --- C. Detect Share Class ---
+                    share_class = "ETF Shares" if "ETF" in fund_name else "Unknown"
+                    
+                    if share_class is None or "Unknown" in share_class:
+                        share_class = "Unknown"
+                        print("DEBUG - DataFrame for unknown share class:")
+                        print("fund_name:", fund_name)
+                        print(df)
+                    # --- D. Extract Metrics for this column ---
+                    column_metrics = {
+                        'year': year,
+                        'nav_beginning': None,
+                        'nav_end': None,
+                        'total_return': None,
+                        'expense_ratio': None,
+                        'net_income_ratio': None,
+                        'portfolio_turnover': None
+                    }
+                    
+                    for row_idx in range(len(df)):
+                        label = str(df.iloc[row_idx, label_col_idx]).strip().lower()
+                        val = str(df.iloc[row_idx, col_idx]).strip()
+                        
+                        if not label or label == 'nan' or label == '':
+                            continue
+                        if not val or val == 'nan' or val == '':
+                            continue
+                        
+                        # Skip footnote rows (they start with parentheses and contain long text)
+                        if label.startswith('(') and len(label) > 50:
+                            continue
+                                  
+                        # Value Extraction
+                        if 'net asset value' in label and 'beginning' in label:
+                            column_metrics['nav_beginning'] = val
+                        elif 'net assets, end' in label:
+                            clean_val = val.replace('$', '').replace(',', '').strip()
+                            print("Cleaned Value:", clean_val, "from label:", label)
+                            try:
+                                numeric_val = int(clean_val) * 1000
+                                column_metrics['net_assets'] = str(numeric_val)  # Store as string or keep as float
+                            except ValueError as e:
+                                print("ValueError:", e)
+                                column_metrics['net_assets'] = val  # Fallback to original if parsing fails
+                        elif 'net asset value' in label and 'end' in label:
+                            column_metrics['nav_end'] = val
+                            
+                        elif 'based on net asset value' in label:
+                            column_metrics['total_return'] = val
+                            
+                        elif 'total return' in label and not column_metrics['total_return']:
+                            column_metrics['total_return'] = val
+                            
+                        elif ('total expenses' in label or 'ratio of expenses' in label or 'ratio of total expenses' in label):
+                            column_metrics['expense_ratio'] = val
+                            
+                        elif 'net investment income' in label:
+                            column_metrics['net_income_ratio'] = val
+                            
+                        elif 'portfolio turnover' in label:
+                            column_metrics['portfolio_turnover'] = val
+
+                        elif 'distribution from net' in label:
+                            column_metrics['distribution_shares'] = val
+                    # Store this column's data
+                    table_columns.append({
+                        'fund_name': fund_name,
+                        'share_class': share_class,
+                        'metrics': column_metrics
+                    })
+                
+                # --- E. Group columns by fund/share class ---
+                for col_info in table_columns:
+                    key = (col_info['fund_name'], col_info['share_class'])
+                    
+                    if key not in fund_data:
+                        fund_data[key] = {
+                            'fund_name': col_info['fund_name'],
+                            'share_class': col_info['share_class'],
+                            'years': [],
+                            'net_assets': [],
+                            'nav_beginning': [],
+                            'nav_end': [],
+                            'total_return': [],
+                            'expense_ratio': [],
+                            'net_income_ratio': [],
+                            'portfolio_turnover': [],
+                            'distribution_shares': []
+                        }
+                    
+                    # Append this column's data to the lists
+                    metrics = col_info['metrics']
+                    fund_data[key]['years'].append(metrics['year'])
+                    fund_data[key]['net_assets'].append(metrics.get('net_assets', None))
+                    fund_data[key]['nav_beginning'].append(metrics['nav_beginning'])
+                    fund_data[key]['nav_end'].append(metrics['nav_end'])
+                    fund_data[key]['total_return'].append(metrics['total_return'])
+                    fund_data[key]['expense_ratio'].append(metrics['expense_ratio'])
+                    fund_data[key]['net_income_ratio'].append(metrics['net_income_ratio'])
+                    fund_data[key]['portfolio_turnover'].append(metrics['portfolio_turnover'])
+                    fund_data[key]['distribution_shares'].append(metrics.get('distribution_shares', None))
+
+            except Exception as e:
+                print(f"Error parsing table: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # Convert to list format expected by _create_performance_dataframe
+        results = list(fund_data.values())
+        
+        print(f"Total funds extracted: {len(results)}")
+        for result in results:
+            print(f"  {result['fund_name']} - {result['share_class']}: {len(result['years'])} years")
+        
+        return self._create_performance_dataframe(results)
+        
     def _create_performance_dataframe(self, performance_data: List[Dict]) -> pd.DataFrame:
         """
         Convert extracted performance data into a structured DataFrame.
@@ -226,6 +607,7 @@ class BlackRockFiling:
             fund_name = entry.get('fund_name', 'Unknown')
             share_class = entry.get('share_class', 'Unknown')
             years = entry.get('years', [])
+            net_assets = entry.get('net_assets', [])
             
             # Get metrics
             nav_beg = entry.get('nav_beginning', [])
@@ -234,7 +616,7 @@ class BlackRockFiling:
             exp_ratio = entry.get('expense_ratio', [])
             net_inc = entry.get('net_income_ratio', [])
             turnover = entry.get('portfolio_turnover', [])
-            
+            distribution_shares_list = entry.get('distribution_shares', [None])
             # Create a row for each year
             max_len = max(len(years), len(nav_beg), len(nav_end), len(total_ret))
             
@@ -243,12 +625,14 @@ class BlackRockFiling:
                     'fund_name': fund_name,
                     'share_class': share_class,
                     'year': years[i] if i < len(years) else None,
+                    'net_assets': net_assets[i] if i < len(net_assets) else None,
                     'nav_beginning': nav_beg[i] if i < len(nav_beg) else None,
                     'nav_end': nav_end[i] if i < len(nav_end) else None,
                     'total_return': total_ret[i] if i < len(total_ret) else None,
                     'expense_ratio': exp_ratio[i] if i < len(exp_ratio) else None,
                     'net_income_ratio': net_inc[i] if i < len(net_inc) else None,
                     'portfolio_turnover': turnover[i] if i < len(turnover) else None,
+                    'distribution_shares': distribution_shares_list[i] if i < len(distribution_shares_list) else None
                 }
                 rows.append(row)
         
