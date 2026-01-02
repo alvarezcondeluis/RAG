@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
+from decimal import Decimal
 import pandas as pd
 
 
@@ -12,6 +13,28 @@ class AverageReturnSnapshot:
     return_inception: str
 
 @dataclass
+class PortfolioHolding:
+    """Simplified holding for fund analysis"""
+    name: str
+    cusip: str
+    isin: str
+    shares: Decimal
+    market_value: Decimal
+    weight_pct: Decimal
+    asset_category: str
+    country: str
+    ticker: Optional[str] = None
+    lei: Optional[str] = None
+    asset_category_desc: Optional[str] = None
+    issuer_category: Optional[str] = None
+    issuer_category_desc: Optional[str] = None
+    currency: Optional[str] = None
+    payoff_profile: Optional[str] = None
+    is_restricted: bool = False
+    fair_value_level: Optional[str] = None
+    sector: Optional[str] = None  # You'd need to map this from company d
+
+@dataclass
 class FinancialHighlights:
     turnover: float
     expense_ratio: float
@@ -20,6 +43,17 @@ class FinancialHighlights:
     net_assets_value_begining: float
     net_assets_value_end: float
     net_income_ratio: float
+
+@dataclass
+class Derivatives:
+    date: str
+    derivatives_df: Optional[pd.DataFrame] = None
+
+
+@dataclass
+class NonDerivatives:
+    date: str
+    holdings_df: Optional[pd.DataFrame] = None
 
 @dataclass
 class FundData:
@@ -56,3 +90,5 @@ class FundData:
     maturity_allocation: Optional[pd.DataFrame] = None
     credit_rating: Optional[pd.DataFrame] = None
     issuer_allocation: Optional[pd.DataFrame] = None
+    derivatives: Optional[Derivatives] = None
+    non_derivatives: Optional[NonDerivatives] = None
