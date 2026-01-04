@@ -329,7 +329,7 @@ def match_company_ticker(
 def enrich_holdings_with_company_tickers(
     holdings: List[PortfolioHolding],
     company_map: Dict[str, Dict[str, Any]],
-    min_similarity: float = 0.92,
+    min_similarity: float = 0.75,
     verbose: bool = False,
 ) -> pd.DataFrame:
     company_prefix_index = _build_company_prefix_index(company_map)

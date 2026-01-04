@@ -2,7 +2,7 @@ import io
 from typing import List, Dict
 from bs4 import BeautifulSoup
 from ..utils.utils import XBRLUtils
-from ..models.fund import FundData
+from ..models.fund import FundData, ShareClassType
 import pandas as pd
 import re
 from IPython.display import display, Markdown
@@ -223,6 +223,29 @@ class BlackRockFiling:
     def get_cid(self, contextref: str) -> str:
         """Extracts CID from contextref"""
         return re.search(r'(C\d+)', contextref).group(1) if re.search(r'(C\d+)', contextref) else ""
+    
+    def _map_share_class(self, share_class_str: str) -> ShareClassType:
+        """Map string share class to ShareClassType enum."""
+        if not share_class_str:
+            return ShareClassType.OTHER
+        
+        share_class_str = share_class_str.strip().lower()
+        
+        # Map common variations to enum values
+        if "admiral" in share_class_str:
+            return ShareClassType.ADMIRAL
+        elif "institutional plus" in share_class_str:
+            return ShareClassType.INSTITUTIONAL_PLUS
+        elif "institutional select" in share_class_str:
+            return ShareClassType.INSTITUTIONAL_SELECT
+        elif "institutional" in share_class_str:
+            return ShareClassType.INSTITUTIONAL
+        elif "investor" in share_class_str:
+            return ShareClassType.INVESTOR
+        elif "etf" in share_class_str:
+            return ShareClassType.ETF
+        else:
+            return ShareClassType.OTHER
         
     def _extract_single_fund(self, c_id: str, name: str) -> FundData:
         """Extracts all data for a specific Context ID."""
@@ -236,10 +259,16 @@ class BlackRockFiling:
         fund.ticker = self._get_value("dei:TradingSymbol", c_id)
         fund.expense_ratio = self._get_value("oef:ExpenseRatioPct", c_id)
         fund.costs_per_10k = self._get_value("oef:ExpensesPaidAmt", c_id)
-        share_class = self._get_value("oef:ClassName", c_id)
-        if share_class:
-            fund.share_class = share_class
-        if "ETF" in name: fund.share_class = "ETF Shares"
+        share_class_str = self._get_value("oef:ClassName", c_id)
+        
+        # Map string to enum
+        if share_class_str:
+            fund.share_class = self._map_share_class(share_class_str)
+        elif "ETF" in name:
+            fund.share_class = ShareClassType.ETF
+        else:
+            fund.share_class = ShareClassType.OTHER
+        
         fund.report_date = self.report_date
 
         # 2. Embedded Values (Inside larger blocks)
@@ -338,7 +367,7 @@ class BlackRockFiling:
                 df = pd.read_html(io.StringIO(str(table)))[0]
                 df = df.fillna('')
                
-                
+               
                 # Extract key metrics
                 metrics = {
                     'fund_name': fund_name,
@@ -367,6 +396,8 @@ class BlackRockFiling:
                     
                     if 'net asset value, beginning' in first_col:
                         metrics['nav_beginning'] = row.iloc[1:].tolist()
+                    elif 'net assets,' in first_col:
+                        metrics['net_assets'] = row.iloc[1:].tolist()
                     elif 'net asset value, end' in first_col:
                         metrics['nav_end'] = row.iloc[1:].tolist()
                     elif 'total return' in first_col and 'ratio' not in first_col:
@@ -595,7 +626,56 @@ class BlackRockFiling:
             print(f"  {result['fund_name']} - {result['share_class']}: {len(result['years'])} years")
         
         return self._create_performance_dataframe(results)
+    
+     
+
+    def _clean_numeric_value(self, value, column_name: str = None) -> float:
+        """
+        Clean numeric values from financial data.
+        Handles: $, commas, %, parentheses (negative), em-dash, None, etc.
         
+        Examples:
+            '$31,195' -> 31195.0
+            '(0.02%)' -> -0.02
+            '0.40%3' -> 0.40
+            '$—' -> 0.0
+            None -> 0.0
+        """
+        if value is None or value == '' or pd.isna(value):
+            return 0.0
+        
+        str_val = str(value).strip()
+        
+        # Handle em-dash and common non-numeric values
+        if str_val in ['—', '-', 'N/A', 'n/a', 'NA', 'None', 'null']:
+            return 0.0
+        
+        # Check for negative (parentheses)
+        is_negative = str_val.startswith('(') and str_val.endswith(')')
+        if is_negative:
+            str_val = str_val[1:-1]  # Remove parentheses
+        
+        # Remove $, %, commas, spaces
+        str_val = str_val.replace('$', '').replace('%', '').replace(',', '').replace(' ', '')
+        
+        # Remove any trailing non-numeric characters (like '3' in '0.40%3')
+        import re
+        match = re.match(r'^-?\d+\.?\d*', str_val)
+        if match:
+            str_val = match.group()
+        
+        try:
+            result = float(str_val)
+            result = -result if is_negative else result
+            
+            # Special handling for expense_ratio - format to 2 decimal places
+            if column_name == 'expense_ratio' or column_name == 'net_income_ratio':
+                result = round(result, 2)
+            
+            return result
+        except (ValueError, TypeError):
+            return 0.0
+    
     def _create_performance_dataframe(self, performance_data: List[Dict]) -> pd.DataFrame:
         """
         Convert extracted performance data into a structured DataFrame.
@@ -636,7 +716,17 @@ class BlackRockFiling:
                 }
                 rows.append(row)
         
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+        
+        # Clean numeric columns
+        numeric_columns = ['net_assets', 'nav_beginning', 'nav_end', 'total_return', 
+                          'expense_ratio', 'net_income_ratio', 'portfolio_turnover']
+        
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: self._clean_numeric_value(x, col))
+        
+        return df
 
     def _get_embedded_value(self, block_name: str, target_name: str, c_id: str) -> str:
         """Finds a block, parses it, finds a tag inside."""
