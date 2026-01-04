@@ -50,7 +50,7 @@ class XBRLUtils:
             if "s&p credit ratingfootnote reference*" in headers or "moody's credit ratingfootnote reference*" in headers: return "Credit Rating"
             if "maturity" in headers: return "Maturity Allocation"
             if "issuer" in headers: return "Issuer Allocation"
-            if "portfolio composition" in str(headers): return "Portfolio Composition"
+            if "portfolio composition" in str(headers): return "Sector Allocation"
 
             # Content Checks
             if "nvidia" in df_str or "inc." in df_str: return "Top 10 Holdings"
