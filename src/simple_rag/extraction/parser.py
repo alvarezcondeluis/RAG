@@ -450,8 +450,6 @@ class BlackRockFiling:
                 df = df.fillna('')
                 if len(df) < 3:
                     continue
-                print(f"Processing table with shape: {df.shape}")
-                
                 # 2. Identify the Structure
                 label_col_idx = 0
                 
@@ -499,25 +497,20 @@ class BlackRockFiling:
 
                     if not fund_name or fund_name.lower() == 'nan' or not fund_name:
                         row_1_val = str(col_data.iloc[1]).strip()
-                        print(f"DEBUG - Row 1 value: {row_1_val}")
+                       
                         if row_1_val and row_1_val.lower() != 'nan':
                             fund_name = row_1_val
                     
                     if not fund_name or fund_name.lower() == 'nan' or not fund_name:
                         fund_name = "Unknown Fund"
-                        print("DEBUG - DataFrame for unknown fund:")
-                        print(df)
-                        print("DEBUG - Column data:")
-                        print(col_data)
+                        
 
                     # --- C. Detect Share Class ---
                     share_class = "ETF Shares" if "ETF" in fund_name else "Unknown"
                     
                     if share_class is None or "Unknown" in share_class:
                         share_class = "Unknown"
-                        print("DEBUG - DataFrame for unknown share class:")
-                        print("fund_name:", fund_name)
-                        print(df)
+                        
                     # --- D. Extract Metrics for this column ---
                     column_metrics = {
                         'year': year,
@@ -547,7 +540,7 @@ class BlackRockFiling:
                             column_metrics['nav_beginning'] = val
                         elif 'net assets, end' in label:
                             clean_val = val.replace('$', '').replace(',', '').strip()
-                            print("Cleaned Value:", clean_val, "from label:", label)
+                            
                             try:
                                 numeric_val = int(clean_val) * 1000
                                 column_metrics['net_assets'] = str(numeric_val)  # Store as string or keep as float
