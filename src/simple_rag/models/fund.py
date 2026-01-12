@@ -1,17 +1,41 @@
 from typing import Optional, Dict, List
 from decimal import Decimal
 import pandas as pd
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from enum import Enum
+import re
+from datetime import date, datetime
+from decimal import Decimal
 
 class AverageReturnSnapshot(BaseModel):
     """Snapshot of fund returns over different time periods."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    return_1y: str = Field(description="1-year return percentage from the relationship date")
-    return_5y: str = Field(description="5-year return percentage from the relationship date")
-    return_10y: str = Field(description="10-year return percentage from the relationship date")
-    return_inception: str = Field(description="Return since fund inception (percentage)")
+    return_1y: Optional[float] = Field(description="1-year return percentage from the relationship date")
+    return_5y: Optional[float] = Field(description="5-year return percentage from the relationship date")
+    return_10y: Optional[float] = Field(description="10-year return percentage from the relationship date")
+    return_inception: Optional[float] = Field(description="Return since fund inception (percentage)")
+    
+    @field_validator('return_1y', 'return_5y', 'return_10y', 'return_inception', mode='before')
+    @classmethod
+    def parse_return_fields(cls, v):
+        """Convert string return values to floats, handle None properly."""
+        if v is None:
+            return None
+        
+        if isinstance(v, (int, float, Decimal)):
+            return float(v)
+        
+        if isinstance(v, str):
+           
+            if v in ['', 'N/A', 'n/a', 'NA', 'None', 'null', '—', '-']:
+                return None
+            try:
+                return float(v)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Failed to convert '{v}' to float: {str(e)}")
+        
+        raise TypeError(f"Cannot convert type {type(v)} to float")
 
 class PortfolioHolding(BaseModel):
     """Simplified holding for fund analysis."""
@@ -58,7 +82,6 @@ class Derivatives(BaseModel):
     date: str = Field(description="Report date for derivatives data")
     derivatives_df: Optional[pd.DataFrame] = Field(None, description="DataFrame containing derivative positions")
 
-
 class NonDerivatives(BaseModel):
     """Non-derivative holdings information."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -82,28 +105,28 @@ class FundData(BaseModel):
     # Core identifiers
     name: str = Field(description="Official fund name")
     registrant: str = Field(description="Registered investment company name")
+    provider: Optional[str] = Field(description="Name of the company that hosts the fund")
     context_id: str = Field(description="SEC EDGAR context identifier")
     share_class: ShareClassType = Field(None, description="Share class designation (e.g., Admiral, Investor)")
     ticker: str = Field("N/A", description="Stock ticker symbol")
     security_exchange: Optional[str] = Field(None, description="Primary listing exchange")
     
     # Financial metrics
-    costs_per_10k: str = Field("N/A", description="Cost per $10,000 invested")
-    expense_ratio: str = Field("N/A", description="Annual expense ratio as percentage (Annual fee charged by the fund)")
-    net_assets: str = Field("N/A", description="Total net assets under management in millions")
-    turnover_rate: str = Field("N/A", description="percentage of a fund's holdings that have been replaced (bought and sold) over a one-year period")
-    advisory_fees: str = Field("N/A", description="Investment advisory fees")
-    n_holdings: str = Field("N/A", description="Total number of holdings in portfolio")
+    costs_per_10k: int = Field(0, description="Cost per $10,000 invested")
+    expense_ratio: float = Field(0.0, description="Annual expense ratio as percentage (Annual fee charged by the fund)")
+    net_assets: float = Field(0.0, description="Total net assets under management in millions")
+    turnover_rate: float = Field(0.0, description="percentage of a fund's holdings that have been replaced (bought and sold) over a one-year period")
+    advisory_fees: float = Field(0.0, description="Investment advisory fees")
+    n_holdings: int = Field(0, description="Total number of holdings in portfolio")
     
-    # Dates
-    report_date: str = Field("N/A", description="Date of the report or filing")
-    
+    report_date: Optional[date] = Field(None, description="Date of the report or filing")
     # Performance data
     annual_returns: Optional[Dict[str, float]] = Field(None, description="Annual returns by year")
     performance: Optional[Dict[str, AverageReturnSnapshot]] = Field(
         default_factory=dict,
         description="Performance snapshots for different time periods"
     )
+
     avg_annual_returns: Optional[pd.DataFrame] = Field(None, description="Average annual returns table")
     performance_table: Optional[pd.DataFrame] = Field(None, description="Detailed performance metrics table")
     
@@ -141,6 +164,77 @@ class FundData(BaseModel):
     non_derivatives: Optional[NonDerivatives] = Field(None, description="Non-derivative holdings data")
 
 
+    @field_validator('costs_per_10k', 'n_holdings', mode='before')
+    @classmethod
+    def parse_integer_fields(cls, v):
+        """Convert cleaned numeric values to integers."""
+        if isinstance(v, int):
+            return v
+        
+        if isinstance(v, (float, Decimal)):
+            return int(v)
+        
+        if isinstance(v, str):
+            v = v.replace('$', '').replace(',', '')
+            try:
+                return int(float(v))
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Failed to convert '{v}' to integer: {str(e)}")
+        
+        raise TypeError(f"Cannot convert type {type(v)} to integer")
+    
+    @field_validator('expense_ratio', 'net_assets', 'turnover_rate', 'advisory_fees', 'costs_per_10k', mode='before')
+    @classmethod
+    def parse_float_fields(cls, v):
+        """Convert cleaned numeric values to floats."""
+        if isinstance(v, (int, float, Decimal)):
+            return float(v)
+        
+        if isinstance(v, str):
+            v = v.replace('$', '').replace(',', '')
+            try:
+                return float(v)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Failed to convert '{v}' to float: {str(e)}")
+        
+        raise TypeError(f"Cannot convert type {type(v)} to float")
+    
+
+    @field_validator('report_date', mode='before')
+    @classmethod
+    def parse_date_field(cls, v):
+        """Convert string date to datetime.date object."""
+        if v is None or (isinstance(v, str) and v.strip() in ['N/A', 'n/a', 'NA', 'None', 'null', '—', '-', '']):
+            return None
+        
+        if isinstance(v, date):
+            return v
+        
+        if isinstance(v, datetime):
+            return v.date()
+        
+        if isinstance(v, str):
+            # Try common date formats
+            date_formats = [
+                '%Y-%m-%d',      # 2024-01-15
+                '%m/%d/%Y',      # 01/15/2024
+                '%d/%m/%Y',      # 15/01/2024
+                '%Y/%m/%d',      # 2024/01/15
+                '%B %d, %Y',     # January 15, 2024
+                '%b %d, %Y',     # Jan 15, 2024
+                '%Y%m%d',        # 20240115
+            ]
+            
+            for fmt in date_formats:
+                try:
+                    return datetime.strptime(v.strip(), fmt).date()
+                except ValueError:
+                    continue
+            
+            raise ValueError(f"Could not parse date from '{v}'. Expected formats: YYYY-MM-DD, MM/DD/YYYY, etc.")
+        
+        raise TypeError(f"Cannot convert type {type(v)} to date")
+    
 # Helper functions for backward compatibility
 def fund_name_exists(fund_list: List[FundData], name: str) -> bool:
     """Check if a fund name exists in the list."""
