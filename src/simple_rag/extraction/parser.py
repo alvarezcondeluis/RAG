@@ -250,63 +250,86 @@ class BlackRockFiling:
     def _extract_single_fund(self, c_id: str, name: str) -> FundData:
         """Extracts all data for a specific Context ID."""
         
-        # Initialize the data object
-        
-        fund = FundData(name=name, context_id=c_id, report_date=self.report_date, registrant=self.registrant)
-        
-        # 1. Basic Tags (Scoped to this context)
         print("Extracting context: ", c_id)
-        fund.ticker = self._get_value("dei:TradingSymbol", c_id)
-        fund.expense_ratio = self._get_value("oef:ExpenseRatioPct", c_id)
-        fund.costs_per_10k = self._get_value("oef:ExpensesPaidAmt", c_id)
+        
+        # 1. Extract all values first
+        ticker = self._get_value("dei:TradingSymbol", c_id)
+        expense_ratio = self._get_value("oef:ExpenseRatioPct", c_id)
+        costs_per_10k = self._get_value("oef:ExpensesPaidAmt", c_id)
         share_class_str = self._get_value("oef:ClassName", c_id)
+        security_exchange = self._get_value("dei:SecurityExchangeName", c_id)
+        performance_commentary = self._get_value("oef:FactorsAffectingPerfTextBlock", c_id)
+        
+        # 2. Embedded Values (Inside larger blocks)
+        stats_block = "oef:AddlFundStatisticsTextBlock"
+        net_assets = self._get_embedded_value(stats_block, "us-gaap:AssetsNet", c_id)
+        turnover_rate = self._get_embedded_value(stats_block, "us-gaap:InvestmentCompanyPortfolioTurnover", c_id)
+        advisory_fees = self._get_embedded_value(stats_block, "oef:AdvisoryFeesPaidAmt", c_id)
+        n_holdings = self._get_embedded_value(stats_block, "oef:HoldingsCount", c_id)
         
         # Map string to enum
         if share_class_str:
-            fund.share_class = self._map_share_class(share_class_str)
+            share_class = self._map_share_class(share_class_str)
         elif "ETF" in name:
-            fund.share_class = ShareClassType.ETF
+            share_class = ShareClassType.ETF
         else:
-            fund.share_class = ShareClassType.OTHER
-        
-        fund.report_date = self.report_date
-
-        # 2. Embedded Values (Inside larger blocks)
-        stats_block = "oef:AddlFundStatisticsTextBlock"
-        fund.net_assets = self._get_embedded_value(stats_block, "us-gaap:AssetsNet", c_id)
-        fund.turnover_rate = self._get_embedded_value(stats_block, "us-gaap:InvestmentCompanyPortfolioTurnover", c_id)
-        fund.advisory_fees = self._get_embedded_value(stats_block, "oef:AdvisoryFeesPaidAmt", c_id)
-        fund.n_holdings = self._get_embedded_value(stats_block, "oef:HoldingsCount", c_id)
-        fund.security_exchange = self._get_value("dei:SecurityExchangeName", c_id)
-        fund.performance_commentary = self._get_value("oef:FactorsAffectingPerfTextBlock", c_id)
+            share_class = ShareClassType.OTHER
         
         # 3. Tables (Holdings/Sectors)
         holdings_block = "oef:HoldingsTableTextBlock"
-        
         tables = self._extract_tables(c_id, holdings_block)
         
-        fund.top_holdings = tables.get("Top 10 Holdings")
-        if fund.top_holdings is None:
+        top_holdings = tables.get("Top 10 Holdings")
+        if top_holdings is None:
             table = self._extract_tables(c_id, "oef:LargestHoldingsTableTextBlock")
-            fund.top_holdings = table.get("Top 10 Holdings")
+            top_holdings = table.get("Top 10 Holdings")
         
-        fund.sector_allocation = tables.get("Sector Allocation")
-        fund.portfolio_composition = tables.get("Portfolio Composition")
-        fund.geographic_allocation = tables.get("Geographic Allocation")
-        fund.industry_allocation = tables.get("Industry Allocation")
-        fund.maturity_allocation = tables.get("Maturity Allocation")
-        fund.issuer_allocation = tables.get("Issuer Allocation")
-        fund.credit_rating = tables.get("Credit Rating")
+        sector_allocation = tables.get("Sector Allocation")
+        portfolio_composition = tables.get("Portfolio Composition")
+        geographic_allocation = tables.get("Geographic Allocation")
+        industry_allocation = tables.get("Industry Allocation")
+        maturity_allocation = tables.get("Maturity Allocation")
+        issuer_allocation = tables.get("Issuer Allocation")
+        credit_rating = tables.get("Credit Rating")
 
         # 4. Performance Table
         performance_block = "oef:LineGraphTableTextBlock"
         tables = self._extract_tables(c_id, performance_block)
-        fund.performance_table = tables.get("Performance Table")
+        performance_table = tables.get("Performance Table")
         
         # 5. Average Annual Returns
         returns_block = "oef:AvgAnnlRtrTableTextBlock"
         tables = self._extract_tables(c_id, returns_block)
-        fund.avg_annual_returns = tables.get("Average Annual Returns")
+        avg_annual_returns = tables.get("Average Annual Returns")
+        
+        # Create FundData instance with all extracted values
+        # Validators will run automatically during initialization
+        fund = FundData(
+            name=name,
+            context_id=c_id,
+            registrant=self.registrant,
+            ticker=ticker,
+            share_class=share_class,
+            report_date=self.report_date,
+            expense_ratio=expense_ratio,
+            costs_per_10k=costs_per_10k,
+            net_assets=net_assets,
+            turnover_rate=turnover_rate,
+            advisory_fees=advisory_fees,
+            n_holdings=n_holdings,
+            security_exchange=security_exchange,
+            performance_commentary=performance_commentary,
+            top_holdings=top_holdings,
+            sector_allocation=sector_allocation,
+            portfolio_composition=portfolio_composition,
+            geographic_allocation=geographic_allocation,
+            industry_allocation=industry_allocation,
+            maturity_allocation=maturity_allocation,
+            issuer_allocation=issuer_allocation,
+            credit_rating=credit_rating,
+            performance_table=performance_table,
+            avg_annual_returns=avg_annual_returns
+        )
             
         return fund
 
