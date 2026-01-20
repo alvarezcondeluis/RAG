@@ -1,0 +1,152 @@
+[
+  {
+    "question": "What is the full name of the fund with ticker VTI?",
+    "ground_truth_answer": "Vanguard Total Stock Market ETF",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name AS name",
+    "complexity": "simple"
+  },
+  {
+    "question": "Which stock exchange is VTI listed on?",
+    "ground_truth_answer": "NASDAQ",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.securityExchange AS exchange",
+    "complexity": "simple"
+  },
+  {
+    "question": "What is the expense ratio for VTI?",
+    "ground_truth_answer": "0.03%",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.expenseRatio AS expenseRatio",
+    "complexity": "simple"
+  },
+  {
+    "question": "How many holdings does the fund VTI have in total?",
+    "ground_truth_answer": "3750",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.holdings AS holdings",
+    "complexity": "simple"
+  },
+  {
+    "question": "What is the portfolio turnover rate for VTI?",
+    "ground_truth_answer": "0.04",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.turnoverRate AS turnoverRate",
+    "complexity": "simple"
+  },
+  {
+    "question": "What are the advisory fees for VTI?",
+    "ground_truth_answer": "0.01%",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.advisoryFees AS advisoryFees",
+    "complexity": "simple"
+  },
+  {
+    "question": "Calculate the cost per 10k investment for VTI.",
+    "ground_truth_answer": "3",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.costsPer10k AS cost",
+    "complexity": "simple"
+  },
+  {
+    "question": "Find the ticker symbol for the fund named 'Vanguard Total Stock Market ETF'.",
+    "ground_truth_answer": "VTI",
+    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Total Stock Market ETF'}) RETURN f.ticker AS ticker",
+    "complexity": "simple"
+  },
+  {
+    "question": "Which Trust issues the fund VTI?",
+    "ground_truth_answer": "Vanguard Index Funds",
+    "expected_cypher": "MATCH (t:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN t.name AS trustName",
+    "complexity": "medium"
+  },
+  {
+    "question": "Who is the provider that manages the VTI fund?",
+    "ground_truth_answer": "Vanguard",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN p.name AS providerName",
+    "complexity": "medium"
+  },
+  {
+    "question": "What share class does VTI belong to?",
+    "ground_truth_answer": "ETF",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.name AS shareClass",
+    "complexity": "medium"
+  },
+  {
+    "question": "Get the description of the share class for VTI.",
+    "ground_truth_answer": "Exchange Traded Fund",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.description AS description",
+    "complexity": "medium"
+  },
+  {
+    "question": "Return both the expense ratio and the turnover rate for VTI.",
+    "ground_truth_answer": "Expense Ratio: 0.03%, Turnover: 4%",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.expenseRatio AS expenseRatio, f.turnoverRate AS turnoverRate",
+    "complexity": "medium"
+  },
+  {
+    "question": "What is the net assets value recorded for the fund VTI?",
+    "ground_truth_answer": "1300000000",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(p:Profile) RETURN p.netAssets AS netAssets",
+    "complexity": "medium"
+  },
+  {
+    "question": "List the tickers of all funds managed by the provider 'Vanguard'.",
+    "ground_truth_answer": "['VTI', 'VOO', 'BND']",
+    "expected_cypher": "MATCH (p:Provider {name: 'Vanguard'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker AS ticker",
+    "complexity": "hard"
+  },
+  {
+    "question": "Find all funds with an expense ratio less than 0.05.",
+    "ground_truth_answer": "['VTI', 'VOO']",
+    "expected_cypher": "MATCH (f:Fund) WHERE f.expenseRatio < 0.05 RETURN f.ticker AS ticker",
+    "complexity": "medium"
+  },
+  {
+    "question": "What is the security exchange and the number of holdings for VTI?",
+    "ground_truth_answer": "NASDAQ, 3750",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.securityExchange AS exchange, f.holdings AS holdings",
+    "complexity": "medium"
+  },
+  {
+    "question": "Does VTI have a turnover rate higher than 10%?",
+    "ground_truth_answer": "False",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.turnoverRate > 0.10 AS isHighTurnover",
+    "complexity": "medium"
+  },
+  {
+    "question": "Which funds are issued by 'Vanguard Index Funds' trust?",
+    "ground_truth_answer": "['VTI', 'VTV']",
+    "expected_cypher": "MATCH (t:Trust {name: 'Vanguard Index Funds'})-[:ISSUES]->(f:Fund) RETURN f.name AS fundName",
+    "complexity": "medium"
+  },
+  {
+    "question": "Retrieve the full metadata (name, exchange, expenses) for VTI.",
+    "ground_truth_answer": "{object}",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f",
+    "complexity": "simple"
+  },
+  {
+    "question": "What is the total number of holdings for the fund issued by Vanguard Index Funds with ticker VTI?",
+    "ground_truth_answer": "3750",
+    "expected_cypher": "MATCH (t:Trust {name: 'Vanguard Index Funds'})-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN f.holdings AS holdings",
+    "complexity": "hard"
+  },
+  {
+    "question": "Show me the costs per 10k for all funds listed on NASDAQ.",
+    "ground_truth_answer": "[{'ticker': 'VTI', 'cost': 3}]",
+    "expected_cypher": "MATCH (f:Fund) WHERE f.securityExchange = 'NASDAQ' RETURN f.ticker AS ticker, f.costsPer10k AS cost",
+    "complexity": "medium"
+  },
+  {
+    "question": "Who manages the trust for the fund with turnover rate 0.04?",
+    "ground_truth_answer": "Vanguard",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE f.turnoverRate = 0.04 RETURN p.name AS providerName",
+    "complexity": "hard"
+  },
+  {
+    "question": "What is the latest update timestamp for VTI?",
+    "ground_truth_answer": "1715623400",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.updatedAt AS updatedAt",
+    "complexity": "simple"
+  },
+  {
+    "question": "Are there any funds with more than 5000 holdings?",
+    "ground_truth_answer": "['VT']",
+    "expected_cypher": "MATCH (f:Fund) WHERE f.holdings > 5000 RETURN f.name AS fundName",
+    "complexity": "medium"
+  }
+]

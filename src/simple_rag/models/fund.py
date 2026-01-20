@@ -7,6 +7,21 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 
+class ContentChunk(BaseModel):
+    """A chunk of content with title, text, and embedding."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    id: str = Field(description="Unique identifier for the chunk")
+    title: str = Field(description="Title or heading of the chunk")
+    text: str = Field(description="Text content of the chunk")
+    embedding: Optional[List[float]] = Field(None, description="Vector embedding of the chunk")
+
+class ChartData(BaseModel):
+    """A chart with title, type, and SVG content."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    title: str = Field(..., description="Title of the chart")
+    image_type: str = Field("performance", description="Type (performance, allocation, etc.)")
+    svg_content: str = Field(..., description="The raw XML string of the SVG")
+
 class AverageReturnSnapshot(BaseModel):
     """Snapshot of fund returns over different time periods."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -41,8 +56,8 @@ class PortfolioHolding(BaseModel):
     """Simplified holding for fund analysis."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
     name: str = Field(description="Security name")
-    cusip: str = Field(description="CUSIP identifier")
-    isin: str = Field(description="ISIN identifier")
+    cusip: Optional[str] = Field(None, description="CUSIP identifier")
+    isin: Optional[str] = Field(None, description="ISIN identifier")
     shares: Decimal = Field(description="Number of shares held")
     market_value: Decimal = Field(description="Market value of the holding")
     weight_pct: Decimal = Field(description="Percentage weight in portfolio")
@@ -110,7 +125,7 @@ class FundData(BaseModel):
     share_class: ShareClassType = Field(None, description="Share class designation (e.g., Admiral, Investor)")
     ticker: str = Field("N/A", description="Stock ticker symbol")
     security_exchange: Optional[str] = Field(None, description="Primary listing exchange")
-    
+    series_id: Optional[str] = Field(None, description="Series identifier")
     # Financial metrics
     costs_per_10k: int = Field(0, description="Cost per $10,000 invested")
     expense_ratio: float = Field(0.0, description="Annual expense ratio as percentage (Annual fee charged by the fund)")
@@ -144,10 +159,26 @@ class FundData(BaseModel):
     
     # Fund strategy and risk
     performance_commentary: str = Field("N/A", description="Management commentary on performance")
+    performance_commentary_embedding: Optional[List[float]] = Field(None, description="Embedding for performance commentary")
     summary_prospectus: str = Field("N/A", description="Summary prospectus text")
     strategies: str = Field("N/A", description="Investment strategies description")
+    strategies_chunks: Optional[List[ContentChunk]] = Field(
+        default_factory=list,
+        description="List of strategy content chunks with embeddings"
+    )
     risks: str = Field("N/A", description="Principal risks disclosure")
+    risks_chunks: Optional[List[ContentChunk]] = Field(
+        default_factory=list,
+        description="List of risk content chunks with embeddings"
+    )
     objective: str = Field("N/A", description="Investment objective")
+    objective_embedding: Optional[List[float]] = Field(None, description="Embedding for investment objective")
+    
+    # Charts and visualizations
+    charts: Optional[List[ChartData]] = Field(
+        default_factory=list,
+        description="List of charts and visualizations (SVG format)"
+    )
     
     # Allocation tables
     geographic_allocation: Optional[pd.DataFrame] = Field(None, description="Geographic/country allocation breakdown")

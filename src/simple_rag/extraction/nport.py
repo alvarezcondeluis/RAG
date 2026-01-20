@@ -62,6 +62,34 @@ ISSUER_CATEGORY_MAP = {
 }
 
 
+def _is_valid_cusip(cusip: Optional[str]) -> bool:
+    """
+    Validate CUSIP code - filter out invalid/placeholder values.
+    
+    Args:
+        cusip: CUSIP string to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if not cusip or not isinstance(cusip, str):
+        return False
+    
+    cusip = cusip.strip()
+    
+    # Invalid patterns
+    if cusip == '000000000':  # Placeholder for cash/unknown
+        return False
+    if cusip == '999999999':  # Another common placeholder
+        return False
+    if len(cusip) != 9:  # CUSIP must be exactly 9 characters
+        return False
+    if not cusip[:8].isalnum():  # First 8 chars must be alphanumeric
+        return False
+    
+    return True
+
+
 def process_portfolio_holdings(investments: List) -> List[PortfolioHolding]:
     """
     Extract and enrich portfolio information from InvestmentOrSecurity objects
@@ -92,11 +120,14 @@ def process_portfolio_holdings(investments: List) -> List[PortfolioHolding]:
         # Map issuer category
         issuer_type = ISSUER_CATEGORY_MAP.get(inv.issuer_category, inv.issuer_category)
         
+        # Validate CUSIP - set to None if invalid
+        cusip = inv.cusip if _is_valid_cusip(inv.cusip) else None
+        
         # Create enriched holding
         holding = PortfolioHolding(
             name=inv.name,
             ticker=ticker,
-            cusip=inv.cusip,
+            cusip=cusip,
             isin=isin,
             lei=inv.lei if hasattr(inv, 'lei') else None,
             shares=float(inv.balance) if inv.balance else 0,

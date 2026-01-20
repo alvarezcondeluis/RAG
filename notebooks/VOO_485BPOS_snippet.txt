@@ -1,0 +1,1 @@
+<class 'edgar.documents.document.Document'>.__repr__ returned empty string
