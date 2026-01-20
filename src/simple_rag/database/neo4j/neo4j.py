@@ -2,7 +2,10 @@ import subprocess
 import time
 import os
 from typing import Optional, List, Dict, Any
+from datetime import date
 import logging
+import numpy as np
+from tqdm import tqdm
 from neo4j import GraphDatabase, Driver, Session
 from neo4j.exceptions import ServiceUnavailable, AuthError
 from .config import settings
@@ -46,6 +49,15 @@ class Neo4jDatabase:
 
         if auto_start:
             self._ensure_neo4j_running()
+        
+        # Ensure Neo4j is actually ready before connecting
+        max_wait_attempts = 10
+        for attempt in range(max_wait_attempts):
+            if self._is_neo4j_running():
+                break
+            if attempt < max_wait_attempts - 1:  # Don't sleep on last attempt
+                logger.info(f"Waiting for Neo4j to be ready... (attempt {attempt + 1}/{max_wait_attempts})")
+                time.sleep(3)
         
         self._connect()
     
@@ -132,8 +144,17 @@ class Neo4jDatabase:
             )
             self.driver.verify_connectivity()
             logger.info(f"Connected to Neo4j at {self.uri}")
+        except ServiceUnavailable as e:
+            logger.error(f"Neo4j service unavailable at {self.uri}. Is Neo4j running?")
+            logger.error(f"Try: docker ps to check if Neo4j container is running")
+            raise
+        except AuthError as e:
+            logger.error(f"Authentication failed for Neo4j. Check username/password.")
+            raise
         except Exception as e:
             logger.error(f"Failed to connect to Neo4j: {e}")
+            logger.error(f"Connection URI: {self.uri}")
+            logger.error(f"Username: {self.username}")
             raise
     
     def close(self):
@@ -244,6 +265,8 @@ class Neo4jDatabase:
             "CREATE CONSTRAINT trust_name_unique IF NOT EXISTS FOR (t:Trust) REQUIRE t.name IS UNIQUE",
             "CREATE CONSTRAINT provider_name_unique IF NOT EXISTS FOR (p:Provider) REQUIRE p.name IS UNIQUE",
             
+            "CREATE CONSTRAINT sector_name_unique IF NOT EXISTS FOR (s:Sector) REQUIRE s.name IS UNIQUE"
+            "CREATE CONSTRAINT region_name_unique IF NOT EXISTS FOR (r:Region) REQUIRE r.name IS UNIQUE"
             # Managers should be unique nodes
             "CREATE CONSTRAINT manager_name_unique IF NOT EXISTS FOR (m:Manager) REQUIRE m.name IS UNIQUE",
         ]
@@ -288,112 +311,685 @@ class Neo4jDatabase:
         
     def create_fund(self, fund: FundData):
         """
-        Create or update a Fund node with all its relationships.
-        
-        Args:
-            fund: FundData object containing all fund information
-            
-        Returns:
-            Dict with created nodes or None if error
+        Create a Fund and a time-specific Profile, linking all chunks to the Profile.
+        PRESERVES HISTORY: Different report dates = Different profiles/risks.
         """
         try:
-            print(f"📊 Creating fund: {fund.ticker} - {fund.name}")
+            # 1. VALIDATION & DEFAULTS
+            if not fund.ticker:
+                print(f"⚠️ Skipping fund with no ticker: {fund.name}")
+                return None
             
-            # Create performance ID by combining ticker and report_date
-            perf_id = f"{fund.ticker}_{fund.report_date.isoformat()}" if fund.report_date else fund.ticker
+            # Format Date for ID generation (e.g., "2024-09-30")
+            date_str = fund.report_date.isoformat() if fund.report_date else "LATEST"
             
-            params = {
-                # Identity
-                "ticker": fund.ticker,
-                "name": fund.name,
-                "trust": fund.registrant,
-                "provider": fund.provider,
-                "exchange": fund.security_exchange,
-                "perf_id": perf_id,
-                # Classification
-                "share_class": fund.share_class,
-                # Metrics
-                "net_assets": fund.net_assets,
-                "expense_ratio": fund.expense_ratio,
-                "costs_per_10k": fund.costs_per_10k,
-                "advisory_fees": fund.advisory_fees,
-                "turnover_rate": fund.turnover_rate,
-                "n_holdings": fund.n_holdings,
-                "report_date": fund.report_date,
-                # Profile
-                "embedding": fund.embedding,
-                "summary_prospectus": fund.summary_prospectus,
-                "risks": fund.risks,
-                "objective": fund.objective,
-                "strategies": fund.strategies,
-                "performance_commentary": fund.performance_commentary,
-            }
+            # 2. GENERATE IDs (Time-Aware)
+            # We append the date to IDs so we don't overwrite history
+            profile_id = f"{fund.ticker}_{date_str}"
+            obj_id = f"{fund.ticker}_{date_str}_obj"
+            perf_id = f"{fund.ticker}_{date_str}_perf"
 
+            print(f"📊 Creating Profile {date_str} for: {fund.ticker}")
+
+            # 3. PREPARE LISTS FOR CYPHER (Time-Aware IDs)
+            # We intentionally modify the chunk ID to include the date here
+            risk_list_data = []
+            if hasattr(fund, 'risks_chunks') and fund.risks_chunks:
+                for chunk in fund.risks_chunks:
+                    # Skip chunks without required fields
+                    if not hasattr(chunk, 'id') or not hasattr(chunk, 'text'):
+                        continue
+                    risk_list_data.append({
+                        # unique_id: "VTSAX_2024-09-30_risk_0"
+                        "id": f"{getattr(chunk, 'id', 'unknown')}_{date_str}", 
+                        "title": getattr(chunk, 'title', 'Untitled'),
+                        "text": chunk.text,
+                        "vector": getattr(chunk, 'embedding', None)
+                    })
+
+            strategy_list_data = []
+            if hasattr(fund, 'strategies_chunks') and fund.strategies_chunks:
+                for chunk in fund.strategies_chunks:
+                    # Skip chunks without required fields
+                    if not hasattr(chunk, 'id') or not hasattr(chunk, 'text'):
+                        continue
+                    strategy_list_data.append({
+                        "id": f"{getattr(chunk, 'id', 'unknown')}_{date_str}", 
+                        "title": getattr(chunk, 'title', 'Untitled'),
+                        "text": chunk.text,
+                        "vector": getattr(chunk, 'embedding', None)
+                    })
+
+            # 4. CYPHER QUERY
             query = """
+            // --- A. STATIC FUND NODES (Merge ensures we reuse existing) ---
             MERGE (t:Trust {name: $trust})
             MERGE (p:Provider {name: $provider})
             MERGE (f:Fund {ticker: $ticker})
             MERGE (sc:ShareClass {name: $share_class})
-            ON CREATE SET
-                f.name = $name,
-                f.security_exchange = $exchange,
-                f.share_class = $share_class,
-                f.net_assets = $net_assets,
-                f.expense_ratio = $expense_ratio,
-                f.costs_per_10k = $costs_per_10k,
-                f.advisory_fees = $advisory_fees,
-                f.turnover_rate = $turnover_rate,
-                f.n_holdings = $n_holdings,
-                f.report_date = $report_date,
-                f.created_at = timestamp()
-            ON MATCH SET
-                f.name = $name,
-                f.security_exchange = $exchange,
-                f.share_class = $share_class,
-                f.net_assets = $net_assets,
-                f.expense_ratio = $expense_ratio,
-                f.costs_per_10k = $costs_per_10k,
-                f.advisory_fees = $advisory_fees,
-                f.turnover_rate = $turnover_rate,
-                f.n_holdings = $n_holdings,
-                f.report_date = $report_date,
-                f.updated_at = timestamp()
             
+            // Connect Static Relationships
             MERGE (t)-[:ISSUES]->(f)
             MERGE (p)-[:MANAGES]->(t)
-            MERGE (f)-[:DEFINED_BY]->(prof)
-            ON CREATE SET
-                prof.created_at = timestamp()
-                prof.summary_prospectus = $summary_prospectus,
-                prof.risks = $risks,
-                prof.objective = $objective,
-                prof.strategies = $strategies,
-                prof.performance_commentary = $performance_commentary,
-            ON MATCH SET
-                prof.updated_at = timestamp()
-                prof.summary_prospectus = $summary_prospectus,
-                prof.risks = $risks,
-                prof.objective = $objective,
-                prof.strategies = $strategies,
-                prof.performance_commentary = $performance_commentary,
             MERGE (f)-[:HAS_SHARE_CLASS]->(sc)
             
-            RETURN f, t, p
+            // Update Static Properties (Name might change rarely)
+            SET f.name = $name,
+                f.securityExchange = $exchange,
+                f.costsPer10k = $costs_per_10k,
+                f.advisoryFees = $advisory_fees,
+                f.numberHoldings = $n_holdings,
+                f.expenseRatio = $expense_ratio,
+                f.turnoverRate = $turnover_rate,
+                f.netAssets = $net_assets,
+                f.updatedAt = timestamp()
+
+            // --- B. TEMPORAL PROFILE NODE (Create new if date differs) ---
+            MERGE (prof:Profile {id: $profile_id})
+            ON CREATE SET
+                prof.summaryProspectus = $summary_prospectus,
+                prof.createdAt = timestamp()
+            ON MATCH SET
+                prof.summaryProspectus = $summary_prospectus,
+                prof.updatedAt = timestamp()
+            
+            // Connect Fund to Profile (History kept via 'date' property on rel)
+            MERGE (f)-[rel:DEFINED_BY]->(prof)
+            SET rel.date = $report_date
+
+            // --- C. SINGLE NODES (Objective & Performance) ---
+            // Connected to PROFILE, not Fund
+            
+            FOREACH (_ IN CASE WHEN $objective_text IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (obj:Objective {id: $obj_id})
+                SET obj.text = $objective_text,
+                    obj.embedding = $objective_vector
+                MERGE (prof)-[:HAS_OBJECTIVE]->(obj)
+            )
+
+            FOREACH (_ IN CASE WHEN $perf_text IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (perf:PerformanceCommentary {id: $perf_id})
+                SET perf.text = $perf_text,
+                    perf.embedding = $perf_vector
+                MERGE (prof)-[:HAS_PERFORMANCE]->(perf)
+            )
+
+            // --- D. CHUNK NODES (Risks & Strategies) ---
+            // Connected to PROFILE
+
+            WITH prof, f
+            UNWIND $risk_list as r_item
+            MERGE (rc:RiskChunk {id: r_item.id})
+            SET rc.title = r_item.title,
+                rc.text  = r_item.text,
+                rc.embedding = r_item.vector
+            MERGE (prof)-[:HAS_RISK]->(rc)
+
+            WITH prof, f
+            UNWIND $strat_list as s_item
+            MERGE (sc:StrategyChunk {id: s_item.id})
+            SET sc.title = s_item.title,
+                sc.text  = s_item.text,
+                sc.embedding = s_item.vector
+            MERGE (prof)-[:HAS_STRATEGY]->(sc)
+            
+            RETURN f.ticker as ticker
+            """
+
+            # 5. PARAMETERS
+            params = {
+                # Static
+                "ticker": fund.ticker,
+                "name": fund.name or "Unknown",
+                "trust": fund.registrant or "Unknown",
+                "provider": fund.provider or "Unknown",
+                "exchange": fund.security_exchange or "N/A",
+                "share_class": fund.share_class or "N/A",
+                "costs_per_10k": getattr(fund, 'costs_per_10k', 0),
+                "advisory_fees": getattr(fund, 'advisory_fees', 0.0),
+                "n_holdings": getattr(fund, 'n_holdings', 0),
+                
+                # Profile (Temporal)
+                "profile_id": profile_id,
+                "report_date": fund.report_date,
+                "net_assets": fund.net_assets or 0.0,
+                "expense_ratio": fund.expense_ratio or 0.0,
+                "turnover_rate": fund.turnover_rate or 0.0,
+                "summary_prospectus": getattr(fund, 'summary_prospectus', ""),
+                
+                # Single Nodes - Handle missing attributes safely
+                "obj_id": obj_id,
+                "objective_text": getattr(fund, 'objective', None) if getattr(fund, 'objective', None) not in [None, "N/A", ""] else None,
+                "objective_vector": getattr(fund, 'objective_embedding', None),
+                
+                "perf_id": perf_id,
+                "perf_text": getattr(fund, 'performance_commentary', None) if getattr(fund, 'performance_commentary', None) not in [None, "N/A", ""] else None,
+                "perf_vector": getattr(fund, 'performance_commentary_embedding', None),
+                
+                # Lists - Already safe since we check fund.risks_chunks and fund.strategies_chunks above
+                "risk_list": risk_list_data,
+                "strat_list": strategy_list_data
+            }
+
+            with self.driver.session() as session:
+                result = session.run(query, params)
+                return result.single()
+
+        except Exception as e:
+            print(f"❌ Error creating fund {fund.ticker}: {e}")
+            return None
+    
+    def create_indexes(self, dimensions=768):
+        """
+        Creates Indexes and Constraints, then VERIFIES they are online.
+        """
+        print("⚙️  Initializing Graph Schema & Indexes...")
+
+        # 1. VECTOR INDEXES (For Similarity Search)
+        vector_queries = [
+            f"""
+            CREATE VECTOR INDEX risk_vector_index IF NOT EXISTS
+            FOR (n:Risk) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """,
+            f"""
+            CREATE VECTOR INDEX strategy_vector_index IF NOT EXISTS
+            FOR (n:Strategy) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """,
+            f"""
+            CREATE VECTOR INDEX objective_vector_index IF NOT EXISTS
+            FOR (n:Objective) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """,
+            f"""
+            CREATE VECTOR INDEX commentary_vector_index IF NOT EXISTS
+            FOR (n:PerformanceCommentary) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """
+        ]
+
+        # 2. CONSTRAINTS (Crucial for Ingestion Speed & Data Integrity)
+        constraint_queries = [
+            # Core Entities
+            "CREATE CONSTRAINT fund_ticker_unique IF NOT EXISTS FOR (f:Fund) REQUIRE f.ticker IS UNIQUE",
+            "CREATE CONSTRAINT share_class_unique IF NOT EXISTS FOR (s:ShareClass) REQUIRE s.ticker IS UNIQUE",
+            
+            # Temporal / Structure
+            "CREATE CONSTRAINT profile_id_unique IF NOT EXISTS FOR (p:Profile) REQUIRE p.id IS UNIQUE",
+            "CREATE CONSTRAINT portfolio_id_unique IF NOT EXISTS FOR (p:Portfolio) REQUIRE p.id IS UNIQUE", # Added Portfolio
+            
+            # The "Performance Saver" for your 14k holdings
+            "CREATE CONSTRAINT holding_id_unique IF NOT EXISTS FOR (h:Holding) REQUIRE h.id IS UNIQUE",
+            
+            # Text Chunks
+            "CREATE CONSTRAINT section_risk_unique IF NOT EXISTS FOR (r:Risk) REQUIRE r.id IS UNIQUE",
+            "CREATE CONSTRAINT section_strat_unique IF NOT EXISTS FOR (s:Strategy) REQUIRE s.id IS UNIQUE",
+            "CREATE CONSTRAINT section_obj_unique IF NOT EXISTS FOR (o:Objective) REQUIRE o.id IS UNIQUE",
+            "CREATE CONSTRAINT section_comm_unique IF NOT EXISTS FOR (c:PerformanceCommentary) REQUIRE c.id IS UNIQUE",
+            "CREATE CONSTRAINT perf_id_unique IF NOT EXISTS FOR (tp:TrailingPerformance) REQUIRE tp.id IS UNIQUE"
+        ]
+
+        # 3. FULLTEXT INDEXES (For Keyword Search)
+        fulltext_queries = [
+            """
+            CREATE FULLTEXT INDEX section_keyword_index IF NOT EXISTS
+            FOR (n:Section) ON EACH [n.text]
+            """
+        ]
+
+        try:
+            with self.driver.session() as session:
+                # A. Run Creations
+                print("   ... Applying Vector Indexes")
+                for q in vector_queries: session.run(q)
+                
+                print("   ... Applying Unique Constraints")
+                for q in constraint_queries: session.run(q)
+                
+                print("   ... Applying Fulltext Indexes")
+                for q in fulltext_queries: session.run(q)
+
+                # B. VERIFICATION STEP (The Debugger)
+                print("\n🔎 VERIFYING INDEX STATUS:")
+                print(f"{'INDEX NAME':<30} | {'TYPE':<15} | {'STATE':<10} | {'PROVIDER'}")
+                print("-" * 75)
+
+                result = session.run("SHOW INDEXES")
+                
+                # We count them to ensure they match expectations
+                count = 0
+                for record in result:
+                    data = record.data()
+                    name = data.get("name", "")
+                    itype = data.get("type", "")
+                    state = data.get("state", "")
+                    provider = (
+                        data.get("provider")
+                        or data.get("indexProvider")
+                        or data.get("indexProviderDescriptor")
+                        or ""
+                    )
+                    
+                    # Filter out internal Neo4j indexes (token lookups) for cleaner output
+                    if "token" not in provider:
+                        print(f"{name:<30} | {itype:<15} | {state:<10} | {provider}")
+                        count += 1
+                
+                print("-" * 75)
+                print(f"✅ Total User Indexes Found: {count}\n")
+                
+        except Exception as e:
+            print(f"❌ Error managing indexes: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def add_managers(self, fund_ticker: str, managers: List[Dict[str, Any]]):
+        """
+        Add managers to a fund by creating Person nodes and MANAGED_BY relationships.
+        
+        Args:
+            fund_ticker: The ticker of the fund to add managers to
+            managers: List of manager dictionaries with keys:
+                     - name: Manager name (required)
+                     - role: Manager role (optional)
+                     - since: Start date (optional)
+        """
+        try:
+            print(f"👥 Adding {len(managers)} managers to fund {fund_ticker}")
+            
+            for manager in managers:
+                if not manager:
+                    print(f"⚠️ Skipping manager without name: {manager}")
+                    continue
+                
+                # Create Person node and link to fund
+                query = """
+                MATCH (f:Fund {ticker: $fund_ticker})
+                MERGE (p:Person {name: $manager_name})
+                ON CREATE SET
+                    p.createdAt = timestamp()
+                ON MATCH SET
+                    p.updatedAt = timestamp()
+                MERGE (f)-[r:MANAGED_BY]->(p)
+                SET r.createdAt = timestamp()
+                RETURN p, f, r
+                """
+                
+                params = {
+                    "fund_ticker": fund_ticker,
+                    "manager_name": manager,
+                }
+                
+                result = self._execute_write(query, params)
+                if result:
+                    print(f"✅ Added manager: {manager} to {fund_ticker}")
+                else:
+                    print(f"⚠️ Failed to add manager: {manager}")
+            
+        except Exception as e:
+            print(f"❌ Error adding managers to fund {fund_ticker}: {e}")
+            logger.error(f"Failed to add managers to fund {fund_ticker}: {e}", exc_info=True)
+
+    def add_financial_highlight(
+        self,
+        fund_ticker: str,
+        year: int,
+        turnover: float,
+        expense_ratio: float,
+        total_return: float,
+        net_assets: float,
+        net_assets_value_begining: float,
+        net_assets_value_end: float,
+        net_income_ratio: float
+    ):
+        """
+        Add financial highlights to a fund for a specific year.
+        
+        Args:
+            fund_ticker: The ticker of the fund
+            year: The year for these financial highlights (e.g., 2024)
+            turnover: Portfolio turnover rate (percentage)
+            expense_ratio: Total expense ratio (percentage)
+            total_return: Total return for the period (percentage)
+            net_assets: Total net assets under management (in millions)
+            net_assets_value_begining: Price of one share at period start
+            net_assets_value_end: Price of one share at period end
+            net_income_ratio: Net investment income ratio (percentage)
+        
+        Returns:
+            The created FinancialHighlights node or None if failed
+        """
+        try:
+            highlights_id = f"{fund_ticker}_{year}_highlights"
+            
+            query = """
+            MATCH (f:Fund {ticker: $fund_ticker})
+            MERGE (fh:FinancialHighlight {id: $highlights_id})
+            ON CREATE SET
+                fh.turnover = $turnover,
+                fh.expenseRatio = $expense_ratio,
+                fh.totalReturn = $total_return,
+                fh.netAssets = $net_assets,
+                fh.netAssetsValueBeginning = $net_assets_value_begining,
+                fh.netAssetsValueEnd = $net_assets_value_end,
+                fh.netIncomeRatio = $net_income_ratio,
+                fh.createdAt = timestamp()
+            ON MATCH SET
+                fh.turnover = $turnover,
+                fh.expenseRatio = $expense_ratio,
+                fh.totalReturn = $total_return,
+                fh.netAssets = $net_assets,
+                fh.netAssetsValueBeginning = $net_assets_value_begining,
+                fh.netAssetsValueEnd = $net_assets_value_end,
+                fh.netIncomeRatio = $net_income_ratio,
+                fh.updatedAt = timestamp()
+            MERGE (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh)
+            SET r.year = $year,
+                r.createdAt = timestamp()
+            RETURN fh, f, r
             """
             
-            result = self._execute_write(query, params)
+            params = {
+                "fund_ticker": fund_ticker,
+                "highlights_id": highlights_id,
+                "year": year,
+                "turnover": turnover,
+                "expense_ratio": expense_ratio,
+                "total_return": total_return,
+                "net_assets": net_assets,
+                "net_assets_value_begining": net_assets_value_begining,
+                "net_assets_value_end": net_assets_value_end,
+                "net_income_ratio": net_income_ratio,
+            }
             
+            result = self._execute_write(query, params)
             if result:
-                print(f"✅ Successfully created/updated fund: {fund.ticker}")
-                return result[0]
+                print(f"✅ Added financial highlights for {fund_ticker} ({year})")
+                return result[0]["fh"]
             else:
-                print(f"⚠️  Warning: No result returned for fund: {fund.ticker}")
+                print(f"⚠️ Fund {fund_ticker} not found")
                 return None
                 
         except Exception as e:
-            print(f"❌ ERROR creating fund {fund.ticker}: {str(e)}")
-            logger.error(f"Failed to create fund {fund.ticker}: {e}", exc_info=True)
+            print(f"❌ Error adding financial highlights to {fund_ticker}: {e}")
+            logger.error(f"Failed to add financial highlights to {fund_ticker}: {e}", exc_info=True)
             return None
+
+  
+
+    def add_sector_allocations(
+        self,
+        sectors_df,
+        fund_ticker: str,
+        report_date: str
+    ):
+        """
+        Add multiple sector allocations from a DataFrame.
+        
+        Args:
+            sectors_df: DataFrame with 2 columns - first column is sector name, second is weight
+            fund_ticker: The ticker of the fund
+            report_date: The date of this allocation report (e.g., "2024-12-31")
+        
+        Returns:
+            Number of sectors successfully added
+        """
+        try:
+            if sectors_df is None or sectors_df.empty:
+                print(f"⚠️ No sector data provided for {fund_ticker}")
+                return 0
+            
+            cols = sectors_df.columns.tolist()
+            if len(cols) < 2:
+                print(f"❌ DataFrame must have at least 2 columns (sector name, weight)")
+                return 0
+            
+            sector_col = cols[0]
+            weight_col = cols[1]
+            
+            sectors_data = []
+            for _, row in sectors_df.iterrows():
+                sector_name = row[sector_col]
+                weight = row[weight_col]
+                
+                if sector_name and weight is not None:
+                    sectors_data.append({
+                        "sector_name": str(sector_name).strip(),
+                        "weight": float(weight)
+                    })
+            
+            if not sectors_data:
+                print(f"⚠️ No valid sector data found for {fund_ticker}")
+                return 0
+            
+            query = """
+            MATCH (f:Fund {ticker: $fund_ticker})
+            UNWIND $sectors AS sector
+            MERGE (s:Sector {name: sector.sector_name})
+            ON CREATE SET
+                s.createdAt = timestamp()
+            MERGE (f)-[r:HAS_SECTOR_ALLOCATION]->(s)
+            SET r.weight = sector.weight,
+                r.reportDate = $report_date,
+                r.updatedAt = timestamp()
+            RETURN count(s) as count
+            """
+            
+            params = {
+                "fund_ticker": fund_ticker,
+                "sectors": sectors_data,
+                "report_date": report_date,
+            }
+            
+            result = self._execute_write(query, params)
+            if result:
+                count = result[0]["count"]
+                print(f"✅ Added {count} sector allocations to {fund_ticker} ({report_date})")
+                return count
+            else:
+                print(f"⚠️ Fund {fund_ticker} not found")
+                return 0
+                
+        except Exception as e:
+            print(f"❌ Error adding sector allocations to {fund_ticker}: {e}")
+            logger.error(f"Failed to add sector allocations to {fund_ticker}: {e}", exc_info=True)
+            return 0
+
+    def add_geographic_allocations(
+        self,
+        geographic_df,
+        fund_ticker: str,
+        report_date: str
+    ):
+        """
+        Add multiple geographic allocations from a DataFrame.
+        
+        Args:
+            geographic_df: DataFrame with 2 columns - first column is region name, second is weight
+            fund_ticker: The ticker of the fund
+            report_date: The date of this allocation report (e.g., "2024-12-31")
+        
+        Returns:
+            Number of regions successfully added
+        """
+        try:
+            if geographic_df is None or geographic_df.empty:
+                print(f"⚠️ No geographic data provided for {fund_ticker}")
+                return 0
+            
+            cols = geographic_df.columns.tolist()
+            if len(cols) < 2:
+                print(f"❌ DataFrame must have at least 2 columns (region name, weight)")
+                return 0
+            
+            region_col = cols[0]
+            weight_col = cols[1]
+            
+            regions_data = []
+            for _, row in geographic_df.iterrows():
+                region_name = row[region_col]
+                weight = row[weight_col]
+                
+                if region_name and weight is not None:
+                    regions_data.append({
+                        "region_name": str(region_name).strip(),
+                        "weight": float(weight)
+                    })
+            
+            if not regions_data:
+                print(f"⚠️ No valid geographic data found for {fund_ticker}")
+                return 0
+            
+            query = """
+            MATCH (f:Fund {ticker: $fund_ticker})
+            UNWIND $regions AS region
+            MERGE (r:Region {name: region.region_name})
+            ON CREATE SET
+                r.createdAt = timestamp()
+            MERGE (f)-[rel:HAS_GEOGRAPHIC_ALLOCATION]->(r)
+            SET rel.weight = region.weight,
+                rel.reportDate = $report_date,
+                rel.updatedAt = timestamp()
+            RETURN count(r) as count
+            """
+            
+            params = {
+                "fund_ticker": fund_ticker,
+                "regions": regions_data,
+                "report_date": report_date,
+            }
+            
+            result = self._execute_write(query, params)
+            if result:
+                count = result[0]["count"]
+                print(f"✅ Added {count} geographic allocations to {fund_ticker} ({report_date})")
+                return count
+            else:
+                print(f"⚠️ Fund {fund_ticker} not found")
+                return 0
+                
+        except Exception as e:
+            print(f"❌ Error adding geographic allocations to {fund_ticker}: {e}")
+            logger.error(f"Failed to add geographic allocations to {fund_ticker}: {e}", exc_info=True)
+            return 0
+ 
+
+    def create_fund_holdings(self, ticker: str, report_date: Optional[date], holdings_df):
+        """
+        High-Performance Ingestion for Large Funds (>4k holdings).
+        Uses Batching + CREATE logic for maximum speed.
+        """
+        if holdings_df is None or holdings_df.empty:
+            print(f"⚠️ No holdings found for {ticker}")
+            return
+
+        print(f"💰 Processing {len(holdings_df)} holdings for {ticker}...")
+
+        # 1. CLEANING & ID GENERATION (Python Side)
+        
+        df = holdings_df.replace({np.nan: None})
+        
+        # Ensure numerics
+        for col in ['shares', 'market_value', 'weight_pct']:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: float(x) if x is not None else 0.0)
+
+        # ID Generation using ISIN only
+        def generate_id(row):
+            return str(row.get('isin', 'UNKNOWN')).strip()
+
+        df['node_id'] = df.apply(generate_id, axis=1)
+        
+        # Convert to list
+        all_holdings = df.to_dict('records')
+        total_count = len(all_holdings)
+
+        # 2. SETUP PARENT NODES (One-time setup for the Fund/Portfolio)
+        # We do this OUTSIDE the batch loop so we don't repeat it
+        date_str = report_date.isoformat() if report_date else "LATEST"
+        portfolio_id = f"{ticker}_{date_str}_portfolio"
+        
+        setup_query = """
+        MATCH (fund:Fund {ticker: $fund_ticker})
+        MERGE (port:Portfolio {id: $portfolio_id})
+        ON CREATE SET
+            port.ticker = $fund_ticker,
+            port.date = $report_date,
+            port.count = $total_count,
+            port.createdAt = timestamp()
+        MERGE (fund)-[:HAS_PORTFOLIO]->(port)
+        """
+        self._execute_write(setup_query, {
+            "fund_ticker": ticker, 
+            "portfolio_id": portfolio_id, 
+            "report_date": report_date,
+            "total_count": total_count
+        })
+
+        # 3. BATCHED INSERTION (The Speed Fix)
+        # We process holdings in chunks of 2,000 to prevent memory overload
+        BATCH_SIZE = 1000
+        
+        batch_query = """
+        MATCH (port:Portfolio {id: $portfolio_id})
+        UNWIND $batch as row
+        
+        // A. Handle the Company Node (MERGE is fine here - it's shared)
+        MERGE (h:Holding {id: row.node_id})
+        ON CREATE SET
+            h.name = row.name,
+            h.ticker = row.ticker,
+            h.cusip = row.cusip,
+            h.isin = row.isin,
+            h.lei = row.lei,
+            h.country = row.country,
+            h.sector = row.sector,
+            h.assetCategory = row.asset_category,
+            h.assetDesc = row.asset_category_desc,
+            h.issuerCategory = row.issuer_category,
+            h.issuerDesc = row.issuer_category_desc,
+            h.createdAt = timestamp()
+
+        // B. Create Link (Use CREATE, not MERGE for speed)
+        // Since 'port' is unique to this report, we know links don't exist yet.
+        CREATE (port)-[rel:CONTAINS]->(h)
+        SET rel.shares = row.shares,
+            rel.marketValue = row.market_value,
+            rel.weight = row.weight_pct,
+            rel.currency = row.currency,
+            rel.fairValueLevel = row.fair_value_level,
+            rel.isRestricted = row.is_restricted,
+            rel.payoffProfile = row.payoff_profile
+        """
+
+        try:
+            with self.driver.session() as session:
+                for i in range(0, total_count, BATCH_SIZE):
+                    batch = all_holdings[i : i + BATCH_SIZE]
+                    session.run(batch_query, {
+                        "portfolio_id": portfolio_id,
+                        "batch": batch
+                    })
+                    print(f"   ⏳ {ticker}: Ingested batch {i} to {i + len(batch)}...")
+            
+            print(f"✅ Successfully ingested {total_count} holdings for {ticker}")
+
+        except Exception as e:
+            print(f"❌ Error ingesting holdings for {ticker}: {e}")
+
     
     def get_or_create_share_class(self, name: str, description: str) -> Dict[str, Any]:
         """Get or create ShareClass node."""
@@ -414,30 +1010,6 @@ class Neo4jDatabase:
         return None
 
 
-    def get_or_create_asset(self, name: str, ticker: Optional[str] = None, **kwargs) -> Dict[str, Any]:
-        """Get or create Asset node."""
-        properties = {"name": name}
-        if ticker:
-            properties["ticker"] = ticker
-        properties.update(kwargs)
-        
-        # Build SET clause
-        set_clauses = ", ".join([f"a.{key} = ${key}" for key in properties.keys()])
-        
-        # Match by name and ticker if provided
-        match_clause = "MERGE (a:Asset {name: $name" + (", ticker: $ticker" if ticker else "") + "})"
-        
-        query = f"""
-        {match_clause}
-        SET {set_clauses}
-        RETURN a
-        """
-        
-        result = self._execute_write(query, properties)
-        if result:
-            logger.info(f"Got/Created asset: {name}")
-            return result[0]["a"]
-        return None
     
     def get_or_create_person(self, name: str) -> Dict[str, Any]:
         """Get or create Person node."""
@@ -475,139 +1047,7 @@ class Neo4jDatabase:
             return result[0]["c"]
         return None
     
-    # ==================== RELATIONSHIP CREATION ====================
-    
-    def link_provider_trust(self, provider_name: str, trust_name: str):
-        """Create MANAGES relationship between Provider and Trust."""
-        query = """
-        MATCH (p:Provider {name: $provider_name})
-        MATCH (t:Trust {name: $trust_name})
-        MERGE (p)-[:MANAGES]->(t)
-        """
-        self._execute_write(query, {"provider_name": provider_name, "trust_name": trust_name})
-        logger.info(f"Linked {provider_name} -> {trust_name}")
-    
-    def link_trust_fund(self, trust_name: str, fund_ticker: str):
-        """Create ISSUES relationship between Trust and Fund."""
-        query = """
-        MATCH (t:Trust {name: $trust_name})
-        MATCH (f:Fund {ticker: $fund_ticker})
-        MERGE (t)-[:ISSUES]->(f)
-        """
-        self._execute_write(query, {"trust_name": trust_name, "fund_ticker": fund_ticker})
-        logger.info(f"Linked {trust_name} -> {fund_ticker}")
-    
-    def link_fund_asset(
-        self,
-        fund_ticker: str,
-        asset_name: str,
-        weight: Optional[float] = None,
-        n_shares: Optional[float] = None,
-        date: Optional[str] = None,
-        market_value: Optional[float] = None
-    ):
-        """Create HAS_ASSET relationship between Fund and Asset."""
-        properties = {}
-        if weight is not None:
-            properties["weight"] = weight
-        if n_shares is not None:
-            properties["n_shares"] = n_shares
-        if date is not None:
-            properties["date"] = date
-        if market_value is not None:
-            properties["market_value"] = market_value
-        
-        set_clause = ", ".join([f"r.{key} = ${key}" for key in properties.keys()]) if properties else ""
-        set_statement = f"SET {set_clause}" if set_clause else ""
-        
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        MATCH (a:Asset {{name: $asset_name}})
-        MERGE (f)-[r:HAS_ASSET]->(a)
-        {set_statement}
-        """
-        
-        params = {"fund_ticker": fund_ticker, "asset_name": asset_name}
-        params.update(properties)
-        self._execute_write(query, params)
-        logger.info(f"Linked fund {fund_ticker} -> asset {asset_name}")
-    
-    def link_fund_manager(
-        self,
-        fund_ticker: str,
-        person_name: str,
-        since: Optional[str] = None,
-        role: Optional[str] = None
-    ):
-        """Create MANAGED_BY relationship between Fund and Person."""
-        properties = {}
-        if since:
-            properties["since"] = since
-        if role:
-            properties["role"] = role
-        
-        set_clause = ", ".join([f"r.{key} = ${key}" for key in properties.keys()]) if properties else ""
-        set_statement = f"SET {set_clause}" if set_clause else ""
-        
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        MATCH (p:Person {{name: $person_name}})
-        MERGE (f)-[r:MANAGED_BY]->(p)
-        {set_statement}
-        """
-        
-        params = {"fund_ticker": fund_ticker, "person_name": person_name}
-        params.update(properties)
-        self._execute_write(query, params)
-        logger.info(f"Linked fund {fund_ticker} -> manager {person_name}")
-    
-    def link_fund_sector(
-        self,
-        fund_ticker: str,
-        sector_name: str,
-        weight: Optional[float] = None
-    ):
-        """Create HAS_SECTOR_ALLOCATION relationship."""
-        set_statement = "SET r.weight = $weight" if weight is not None else ""
-        
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        MATCH (s:Sector {{name: $sector_name}})
-        MERGE (f)-[r:HAS_SECTOR_ALLOCATION]->(s)
-        {set_statement}
-        """
-        
-        params = {"fund_ticker": fund_ticker, "sector_name": sector_name}
-        if weight is not None:
-            params["weight"] = weight
-        
-        self._execute_write(query, params)
-        logger.info(f"Linked fund {fund_ticker} -> sector {sector_name}")
-    
-    def link_fund_credit_rating(
-        self,
-        fund_ticker: str,
-        rating_name: str,
-        weight: Optional[float] = None
-    ):
-        """Create HAS_CREDIT_RATING relationship."""
-        set_statement = "SET r.weight = $weight" if weight is not None else ""
-        
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        MATCH (c:CreditRating {{name: $rating_name}})
-        MERGE (f)-[r:HAS_CREDIT_RATING]->(c)
-        {set_statement}
-        """
-        
-        params = {"fund_ticker": fund_ticker, "rating_name": rating_name}
-        if weight is not None:
-            params["weight"] = weight
-        
-        self._execute_write(query, params)
-        logger.info(f"Linked fund {fund_ticker} -> credit rating {rating_name}")
-    
-    # ==================== COMPLEX NODE CREATION ====================
+    # ==================== NODE CREATION ====================
     
     def create_risks_node(
         self,
@@ -834,76 +1274,125 @@ class Neo4jDatabase:
     
     # ==================== QUERY METHODS ====================
     
-    def get_fund_by_ticker(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """Get fund by ticker."""
-        query = """
-        MATCH (f:Fund {ticker: $ticker})
-        RETURN f
+    def query(self, cypher_query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
-        result = self._execute_query(query, {"ticker": ticker})
-        if result:
-            return result[0]["f"]
-        return None
-    
-    def get_fund_with_holdings(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """Get fund with all its holdings."""
-        query = """
-        MATCH (f:Fund {ticker: $ticker})
-        OPTIONAL MATCH (f)-[r:HAS_ASSET]->(a:Asset)
-        RETURN f, 
-               collect({asset: a, weight: r.weight, n_shares: r.n_shares, 
-                       market_value: r.market_value, date: r.date}) as holdings
+        Execute a custom Cypher query.
+        
+        Args:
+            cypher_query: The Cypher query string to execute
+            parameters: Optional dictionary of parameters for the query
+            
+        Returns:
+            List of result records as dictionaries
+            
+        Example:
+            # Get fund by ticker
+            results = db.query(
+                "MATCH (f:Fund {ticker: $ticker}) RETURN f",
+                {"ticker": "VTI"}
+            )
+            
+            # Get all funds
+            results = db.query("MATCH (f:Fund) RETURN f ORDER BY f.ticker")
+            
+            # Complex query with multiple nodes
+            results = db.query('''
+                MATCH (f:Fund {ticker: $ticker})-[r:HAS_ASSET]->(a:Asset)
+                RETURN f, collect({asset: a, weight: r.weight}) as holdings
+            ''', {"ticker": "VTI"})
         """
-        result = self._execute_query(query, {"ticker": ticker})
-        if result:
-            return {
-                "fund": result[0]["f"],
-                "holdings": result[0]["holdings"]
-            }
-        return None
-    
-    def get_all_funds(self) -> List[Dict[str, Any]]:
-        """Get all funds."""
-        query = """
-        MATCH (f:Fund)
-        RETURN f
-        ORDER BY f.ticker
-        """
-        result = self._execute_query(query)
-        return [record["f"] for record in result]
-    
-    def get_funds_by_provider(self, provider_name: str) -> List[Dict[str, Any]]:
-        """Get all funds managed by a provider."""
-        query = """
-        MATCH (p:Provider {name: $provider_name})-[:MANAGES]->(t:Trust)-[:ISSUES]->(f:Fund)
-        RETURN f
-        ORDER BY f.ticker
-        """
-        result = self._execute_query(query, {"provider_name": provider_name})
-        return [record["f"] for record in result]
-    
-    def search_funds_by_name(self, name_pattern: str) -> List[Dict[str, Any]]:
-        """Search funds by name pattern."""
-        query = """
-        MATCH (f:Fund)
-        WHERE toLower(f.name) CONTAINS toLower($pattern)
-        RETURN f
-        ORDER BY f.ticker
-        """
-        result = self._execute_query(query, {"pattern": name_pattern})
-        return [record["f"] for record in result]
-    
-    def delete_fund(self, ticker: str):
-        """Delete fund and all its relationships."""
-        query = """
-        MATCH (f:Fund {ticker: $ticker})
-        DETACH DELETE f
-        """
-        self._execute_write(query, {"ticker": ticker})
-        logger.info(f"Deleted fund: {ticker}")
+        return self._execute_query(cypher_query, parameters)
     
     def clear_database(self):
         """Clear entire database (use with caution!)."""
         query = "MATCH (n) DETACH DELETE n"
         self._execute_write(query)
         logger.warning("Database cleared!")
+    
+    def add_chart_to_fund(
+        self, 
+        fund_ticker: str, 
+        title: str, 
+        category: str, 
+        svg_content: str, 
+        date: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add a chart (Image node) to a fund with HAS_CHART relationship.
+        
+        Args:
+            fund_ticker: The ticker of the fund to add the chart to
+            title: Title of the chart
+            category: Category/type of the chart (e.g., 'performance', 'allocation', 'sector')
+            svg_content: The SVG content as a string
+            date: Date associated with the chart (e.g., report date)
+            
+        Returns:
+            Dictionary with created Image node or None if fund not found
+        """
+        try:
+            # Generate unique ID for the image using hash of content
+            import hashlib
+            content_hash = hashlib.md5(svg_content.encode()).hexdigest()[:12]
+            image_id = f"{fund_ticker}_{category}_{content_hash}"
+            
+            query = """
+            MATCH (f:Fund {ticker: $fund_ticker})
+            MERGE (img:Image {id: $image_id})
+            ON CREATE SET
+                img.title = $title,
+                img.category = $category,
+                img.svg = $svg_content,
+                img.createdAt = timestamp()
+            ON MATCH SET
+                img.title = $title,
+                img.category = $category,
+                img.svg = $svg_content,
+                img.updatedAt = timestamp()
+            MERGE (f)-[r:HAS_CHART]->(img)
+            RETURN img, f
+            """
+            
+            params = {
+                "fund_ticker": fund_ticker,
+                "image_id": image_id,
+                "title": title,
+                "category": category,
+                "svg_content": svg_content
+            }
+            
+            result = self._execute_write(query, params)
+            
+            if result:
+                print(f"✅ Added chart '{title}' ({category}) to fund {fund_ticker}")
+                return result[0]
+            else:
+                print(f"⚠️ Fund {fund_ticker} not found")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error adding chart to fund {fund_ticker}: {e}")
+            logger.error(f"Failed to add chart to fund {fund_ticker}: {e}", exc_info=True)
+            return None
+    
+    def get_fund_charts(self, fund_ticker: str) -> List[Dict[str, Any]]:
+        """
+        Get all charts for a specific fund.
+        
+        Args:
+            fund_ticker: The ticker of the fund
+            
+        Returns:
+            List of chart dictionaries with image data and relationship date
+        """
+        query = """
+        MATCH (f:Fund {ticker: $fund_ticker})-[r:HAS_CHART]->(img:Image)
+        RETURN img.id as id,
+               img.title as title,
+               img.category as category,
+               img.svg as svg_content,
+               img.createdAt as created_at
+        """
+        
+        result = self._execute_query(query, {"fund_ticker": fund_ticker})
+        return result
