@@ -9,7 +9,7 @@ from tqdm import tqdm
 from neo4j import GraphDatabase, Driver, Session
 from neo4j.exceptions import ServiceUnavailable, AuthError
 from .config import settings
-from src.simple_rag.models.fund import FundData
+from src.simple_rag.models.fund import FundData, AverageReturnSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -184,11 +184,81 @@ class Neo4jDatabase:
     # ==================== DATABASE MANAGEMENT ====================
     
     def reset_database(self):
-        """Delete all nodes and relationships from the database."""
+        """Delete all nodes, relationships, constraints, and indexes from the database."""
         with self.driver.session() as session:
-            query = "MATCH (n) DETACH DELETE n"
-            session.run(query)
-            print("✅ Database reset complete")
+            # Step 1: Drop all constraints
+            print("🗑️  Dropping all constraints...")
+            constraints_query = "SHOW CONSTRAINTS"
+            constraints = session.run(constraints_query)
+            constraint_count = 0
+            
+            for constraint in constraints:
+                constraint_name = constraint.get("name")
+                if constraint_name:
+                    drop_query = f"DROP CONSTRAINT {constraint_name} IF EXISTS"
+                    session.run(drop_query)
+                    constraint_count += 1
+            
+            print(f"   ✅ Dropped {constraint_count} constraints")
+            
+            # Step 2: Drop all indexes
+            print("🗑️  Dropping all indexes...")
+            indexes_query = "SHOW INDEXES"
+            indexes = session.run(indexes_query)
+            index_count = 0
+            
+            for index in indexes:
+                index_name = index.get("name")
+                # Skip constraint-backed indexes (already dropped with constraints)
+                if index_name and index.get("type") != "RANGE":
+                    try:
+                        drop_query = f"DROP INDEX {index_name} IF EXISTS"
+                        session.run(drop_query)
+                        index_count += 1
+                    except Exception:
+                        pass  # Some indexes are auto-managed
+            
+            print(f"   ✅ Dropped {index_count} indexes")
+            
+            # Step 3: Delete all nodes and relationships
+            count_query = """
+            MATCH (n)
+            RETURN count(n) as nodeCount
+            """
+            result = session.run(count_query)
+            node_count = result.single()["nodeCount"]
+            
+            print(f"🗑️  Deleting {node_count} nodes from database...")
+            
+            # Delete in batches to avoid memory issues with large databases
+            batch_size = 10000
+            deleted_total = 0
+            
+            while True:
+                delete_query = f"""
+                MATCH (n)
+                WITH n LIMIT {batch_size}
+                DETACH DELETE n
+                RETURN count(n) as deleted
+                """
+                result = session.run(delete_query)
+                deleted = result.single()["deleted"]
+                
+                if deleted == 0:
+                    break
+                    
+                deleted_total += deleted
+                print(f"   ⏳ Deleted {deleted_total}/{node_count} nodes...")
+            
+            # Step 4: Verify deletion
+            verify_query = "MATCH (n) RETURN count(n) as remaining"
+            result = session.run(verify_query)
+            remaining = result.single()["remaining"]
+            
+            if remaining == 0:
+                print("✅ Database reset complete - all data, constraints, and indexes removed")
+            else:
+                print(f"⚠️  Warning: {remaining} nodes still remain in database")
     
     def delete_all_funds(self):
         """Delete only Fund nodes and their relationships."""
@@ -296,16 +366,35 @@ class Neo4jDatabase:
         return None
     
     def get_or_create_trust(self, provider_name: str, name: str) -> Dict[str, Any]:
-        """Get or create Trust node and link it to a Provider via MANAGES relationship."""
+        """
+        Get or create Trust node.
+        FIXED: Uses Composite ID to prevent merging generic trust names across providers.
+        """
+        # 1. Generate a Unique Composite ID
+        # e.g. "THE_VANGUARD_GROUP_INC_INDEX_FUNDS" vs "BLACKROCK_INC_INDEX_FUNDS"
+        trust_id = f"{provider_name}_{name}".upper().replace(" ", "_").strip()
+        
         query = """
         MERGE (p:Provider {name: $provider_name})
-        MERGE (t:Trust {name: $name})
+        
+        // 2. MERGE on the ID, not the Name
+        MERGE (t:Trust {id: $trust_id})
+        ON CREATE SET 
+            t.name = $name,
+            t.created_at = timestamp()
+            
         MERGE (p)-[:MANAGES]->(t)
         RETURN t, p
         """
-        result = self._execute_write(query, {"name": name, "provider_name": provider_name})
+        
+        # 3. Pass the new ID parameter
+        result = self._execute_write(query, {
+            "name": name, 
+            "provider_name": provider_name,
+            "trust_id": trust_id
+        })
+        
         if result:
-            logger.info(f"Got/Created trust: {name} managed by provider: {provider_name}")
             return result[0]["t"]
         return None
         
@@ -411,7 +500,7 @@ class Neo4jDatabase:
                 MERGE (perf:PerformanceCommentary {id: $perf_id})
                 SET perf.text = $perf_text,
                     perf.embedding = $perf_vector
-                MERGE (prof)-[:HAS_PERFORMANCE]->(perf)
+                MERGE (prof)-[:HAS_PERFORMANCE_COMMENTARY]->(perf)
             )
 
             // --- D. CHUNK NODES (Risks & Strategies) ---
@@ -520,6 +609,31 @@ class Neo4jDatabase:
             }}}}
             """
         ]
+        
+        # 2. FULLTEXT INDEXES (For Fuzzy Name Search)
+        fulltext_queries = [
+            """
+            // 1. Index for Providers (e.g., "The Vanguard Group")
+            CREATE FULLTEXT INDEX providerNameIndex IF NOT EXISTS
+            FOR (p:Provider) ON EACH [p.name]
+            """,
+            """
+            // 2. Index for Trusts (e.g., "Vanguard Index Funds")
+            CREATE FULLTEXT INDEX trustNameIndex IF NOT EXISTS
+            FOR (t:Trust) ON EACH [t.name]
+            """,
+            """
+            // 3. Index for Funds (Name AND Ticker)
+            // We include ticker here so 'VTI' and 'Total Stock' both work
+            CREATE FULLTEXT INDEX fundNameIndex IF NOT EXISTS
+            FOR (f:Fund) ON EACH [f.name, f.ticker]
+            """,
+            """
+            // 4. Index for Managers (Person nodes)
+            CREATE FULLTEXT INDEX personNameIndex IF NOT EXISTS
+            FOR (p:Person) ON EACH [p.name]
+            """
+        ]
 
         # 2. CONSTRAINTS (Crucial for Ingestion Speed & Data Integrity)
         constraint_queries = [
@@ -545,6 +659,28 @@ class Neo4jDatabase:
         # 3. FULLTEXT INDEXES (For Keyword Search)
         fulltext_queries = [
             """
+            // 1. Index for Providers (e.g., "The Vanguard Group")
+            CREATE FULLTEXT INDEX providerNameIndex IF NOT EXISTS
+            FOR (p:Provider) ON EACH [p.name]
+            """,
+            """
+            // 2. Index for Trusts (e.g., "Vanguard Index Funds")
+            CREATE FULLTEXT INDEX trustNameIndex IF NOT EXISTS
+            FOR (t:Trust) ON EACH [t.name]
+            """,
+            """
+            // 3. Index for Funds (Name AND Ticker)
+            // We include ticker here so 'VTI' and 'Total Stock' both work
+            CREATE FULLTEXT INDEX fundNameIndex IF NOT EXISTS
+            FOR (f:Fund) ON EACH [f.name, f.ticker]
+            """,
+            """
+            // 4. Index for Managers (Person nodes)
+            CREATE FULLTEXT INDEX personNameIndex IF NOT EXISTS
+            FOR (p:Person) ON EACH [p.name]
+            """,
+            """
+            // 5. Index for Sections (Keyword Search)
             CREATE FULLTEXT INDEX section_keyword_index IF NOT EXISTS
             FOR (n:Section) ON EACH [n.text]
             """
@@ -887,16 +1023,20 @@ class Neo4jDatabase:
             return 0
  
 
-    def create_fund_holdings(self, ticker: str, report_date: Optional[date], holdings_df):
+    def create_fund_holdings(self, ticker:str, series_id: str, report_date: Optional[date], holdings_df):
         """
         High-Performance Ingestion for Large Funds (>4k holdings).
         Uses Batching + CREATE logic for maximum speed.
         """
+        if series_id is None:
+            print(f"⚠️ No series_id provided for {ticker}, skipping portfolio and holdings creation")
+            return
+        
         if holdings_df is None or holdings_df.empty:
-            print(f"⚠️ No holdings found for {ticker}")
+            print(f"⚠️ No holdings found for {series_id}")
             return
 
-        print(f"💰 Processing {len(holdings_df)} holdings for {ticker}...")
+        print(f"💰 Processing {len(holdings_df)} holdings for {series_id}...")
 
         # 1. CLEANING & ID GENERATION (Python Side)
         
@@ -919,18 +1059,23 @@ class Neo4jDatabase:
 
         # 2. SETUP PARENT NODES (One-time setup for the Fund/Portfolio)
         # We do this OUTSIDE the batch loop so we don't repeat it
-        date_str = report_date.isoformat() if report_date else "LATEST"
-        portfolio_id = f"{ticker}_{date_str}_portfolio"
+        
+        portfolio_id = series_id
         
         setup_query = """
         MATCH (fund:Fund {ticker: $fund_ticker})
         MERGE (port:Portfolio {id: $portfolio_id})
         ON CREATE SET
             port.ticker = $fund_ticker,
-            port.date = $report_date,
             port.count = $total_count,
             port.createdAt = timestamp()
-        MERGE (fund)-[:HAS_PORTFOLIO]->(port)
+        MERGE (fund)-[r:HAS_PORTFOLIO]->(port)
+        ON CREATE SET
+            r.date = $report_date,
+            r.createdAt = timestamp()
+        ON MATCH SET
+            r.date = $report_date,
+            r.updatedAt = timestamp()
         """
         self._execute_write(setup_query, {
             "fund_ticker": ticker, 
@@ -965,8 +1110,9 @@ class Neo4jDatabase:
 
         // B. Create Link (Use CREATE, not MERGE for speed)
         // Since 'port' is unique to this report, we know links don't exist yet.
-        CREATE (port)-[rel:CONTAINS]->(h)
-        SET rel.shares = row.shares,
+        MERGE (port)-[rel:CONTAINS]->(h)
+        ON CREATE SET
+            rel.shares = row.shares,
             rel.marketValue = row.market_value,
             rel.weight = row.weight_pct,
             rel.currency = row.currency,
@@ -1079,36 +1225,40 @@ class Neo4jDatabase:
     def create_performance_node(
         self,
         fund_ticker: str,
-        return_1y: Optional[float] = None,
-        return_5y: Optional[float] = None,
-        return_10y: Optional[float] = None,
-        return_inception: Optional[float] = None,
+        performance_data: Optional[AverageReturnSnapshot] = None,
         date: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create TrailingPerformance node and link to Fund."""
-        perf_props = {}
-        if return_1y is not None:
-            perf_props["return_1y"] = return_1y
-        if return_5y is not None:
-            perf_props["return_5y"] = return_5y
-        if return_10y is not None:
-            perf_props["return_10y"] = return_10y
-        if return_inception is not None:
-            perf_props["return_inception"] = return_inception
+        if performance_data is None:
+            return None
         
-        perf_set = ", ".join([f"p.{k} = ${k}" for k in perf_props.keys()])
-        rel_set = "SET r.date = $date" if date else ""
+        perf_props = {}
+        if performance_data:
+                    
+            if hasattr(performance_data, 'return_1y') and performance_data.return_1y is not None:
+                perf_props["return1y"] = performance_data.return_1y
+            if hasattr(performance_data, 'return_5y') and performance_data.return_5y is not None:
+                perf_props["return5y"] = performance_data.return_5y
+            if hasattr(performance_data, 'return_10y') and performance_data.return_10y is not None:
+                perf_props["return10y"] = performance_data.return_10y
+            if hasattr(performance_data, 'return_inception') and performance_data.return_inception is not None:
+                perf_props["returnInception"] = performance_data.return_inception
+        
+        perf_id = fund_ticker + "_" + date if date else fund_ticker
+        
+        # Build SET clause only if there are properties to set
+        perf_set = ", ".join([f"tp.{k} = ${k}" for k in perf_props.keys()])
+        set_clause = f"SET {perf_set}" if perf_set else ""
         
         query = f"""
         MATCH (f:Fund {{ticker: $fund_ticker}})
-        CREATE (p:TrailingPerformance)
-        SET {perf_set}
-        CREATE (f)-[r:HAS_PERFORMANCE]->(p)
-        {rel_set}
-        RETURN p
+        MERGE (tp:TrailingPerformance {{id: $perf_id}})
+        {set_clause}
+        MERGE (f)-[r:HAS_TRAILING_PERFORMANCE {{date: $date}}]->(tp)
+        RETURN tp
         """
         
-        params = {"fund_ticker": fund_ticker}
+        params = {"fund_ticker": fund_ticker, "perf_id": perf_id}
         params.update(perf_props)
         if date:
             params["date"] = date
@@ -1116,38 +1266,11 @@ class Neo4jDatabase:
         result = self._execute_write(query, params)
         if result:
             logger.info(f"Created performance node for fund {fund_ticker}")
-            return result[0]["p"]
+            print(result)
+            return result[0]["tp"]
         return None
     
-    def create_annual_performance_node(
-        self,
-        fund_ticker: str,
-        year: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Create AnnualPerformance node and link to Fund."""
-        properties = {"year": year}
-        properties.update(kwargs)
-        
-        set_clauses = ", ".join([f"ap.{k} = ${k}" for k in properties.keys()])
-        
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        CREATE (ap:AnnualPerformance)
-        SET {set_clauses}
-        CREATE (f)-[:HAS_ANNUAL_PERFORMANCE]->(ap)
-        RETURN ap
-        """
-        
-        params = {"fund_ticker": fund_ticker}
-        params.update(properties)
-        
-        result = self._execute_write(query, params)
-        if result:
-            logger.info(f"Created annual performance node for fund {fund_ticker}, year {year}")
-            return result[0]["ap"]
-        return None
-    
+
     def create_strategy_node(
         self,
         fund_ticker: str,

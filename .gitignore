@@ -31,12 +31,14 @@ notebooks/filings
 notebooks/summaries
 notebooks/vanguard
 notebooks/ishares
+notebooks/unsloth_compiled_cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
-
+*.md5
+*.faiss
 # Data directories (processed data, models, etc.)
 data/processed/
 data/raw/*.pdf
@@ -87,3 +89,4 @@ tmp//
 
 .deepeval
 .latest*
+Modelfile
