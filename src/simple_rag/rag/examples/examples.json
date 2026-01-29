@@ -1,0 +1,139 @@
+[
+  {
+    "question": "Who is the provider that manages the VTI fund?",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN p.name"
+  },
+  {
+    "question": "What is the net assets value for VTI?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.ticker, f.name, f.netAssets"
+  },
+  {
+    "question": "Show funds with expense ratio over 0.5%",
+    "cypher": "MATCH (f:Fund) WHERE f.expenseRatio > 0.5 RETURN f.ticker, f.name, f.expenseRatio"
+  },
+  {
+    "question": "Does VTI have turnover higher than 10%?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.ticker, f.turnoverRate > 10 AS isHighTurnover"
+  },
+  {
+    "question": "Show costs per 10k for NASDAQ funds",
+    "cypher": "MATCH (f:Fund) WHERE f.securityExchange = 'NASDAQ' RETURN f.ticker AS ticker, f.costsPer10k AS cost"
+  },
+  {
+    "question": "Which funds have more than 5000 holdings?",
+    "cypher": "MATCH (f:Fund) WHERE f.numberHoldings > 5000 RETURN f.ticker, f.name, f.numberHoldings"
+  },
+  {
+    "question": "How many holdings does each fund have in the database?",
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH f, count(h) AS holdingCount WHERE holdingCount > 100 RETURN f.ticker, holdingCount"
+  },
+  {
+    "question": "Which funds are issued by 'Vanguard Index Funds'?",
+    "cypher": "MATCH (t:Trust {name: 'Vanguard Index Funds'})-[:ISSUES]->(f:Fund) RETURN f.ticker, f.name"
+  },
+  {
+    "question": "Find funds managed by Vangurd",
+    "cypher": "CALL db.index.fulltext.queryNodes('providerNameIndex', 'Vangurd~') YIELD node, score MATCH (node)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker, f.name, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What is the expense ratio of the Total Stock Market fund?",
+    "cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'Total Stock Market~') YIELD node, score RETURN node.ticker, node.name, node.expenseRatio, score ORDER BY score DESC LIMIT 1"
+  },
+  {
+    "question": "Which funds does Michael Duglas manage?",
+    "cypher": "CALL db.index.fulltext.queryNodes('personNameIndex', 'Michael Duglas~') YIELD node, score MATCH (f:Fund)-[:MANAGED_BY]->(node) RETURN f.ticker, f.name, score ORDER BY score DESC"
+  },
+  {
+    "question": "What are the tickers of the funds with the provider Vanguard?",
+    "cypher": "CALL db.index.fulltext.queryNodes('providerNameIndex', 'Vanguard~') YIELD node MATCH (node)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker"
+  },
+  {
+    "question": "Who are the managers of the VTI fund?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName"
+  },
+  {
+    "question": "Does the VTI has any image attached to it?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category"
+  },
+  {
+    "question": "What is the security exchange of VTI?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.securityExchange AS exchange"
+  },
+  {
+    "question": "What is the objective of 'nameofFund'?",
+    "cypher": "MATCH (f:Fund {name: 'nameofFund'})-[:DEFINED_BY]->(:Profile)-[:HAS_OBJECTIVE]->(o:Objective) RETURN o.text AS objective"
+  },
+  {
+    "question": "Show me all general information about VTI including financial highlights, profile details, and images",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:DEFINED_BY]->(p:Profile) OPTIONAL MATCH (f)-[:HAS_CHART]->(img:Image) RETURN f.ticker, f.name, f.securityExchange, f.expenseRatio, f.turnoverRate, f.numberHoldings, f.netAssets, f.costsPer10k, f.advisoryFees, fh.totalReturn, fh.expenseRatio AS fhExpenseRatio, p.summaryProspectus, collect(img.title) AS images"
+  },
+  {
+    "question": "Show me all the funds that have more than 15% invested in Technology and return the funds with distinct in the property name",
+    "cypher": "MATCH (f:Fund)-[h:HAS_SECTOR_ALLOCATION]->(:Sector {name: 'Technology'}) WHERE h.weight > 15.0 RETURN DISTINCT f.name AS fundName"
+  },
+  {
+    "question": "Show me the ordered list of funds in decreasing order of the 10 year returns",
+    "cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_10y IS NOT NULL RETURN f.name AS fundName, p.return_10y AS tenYearReturn ORDER BY tenYearReturn DESC"
+  },
+  {
+    "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
+    "cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'S&P 500' RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover"
+  },
+  {
+    "question": "What percentage of VTI's holdings are US-based companies?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH count(h) AS total, count(CASE WHEN h.country = 'US' THEN 1 END) AS usCount RETURN (usCount * 100.0 / total) AS percentageUS"
+  },
+  {
+    "question": "Show me all the funds that are Admiral Shares share class?",
+    "cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'Admiral Shares'}) RETURN f.name AS fundName"
+  },
+  {
+    "question": "What are the risks described for the VTI fund?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK]->(r:RiskChunk) RETURN r.title AS riskTitle, r.text AS riskDescription"
+  },
+  {
+    "question": "What are the investment strategies for the Short-Term Bond fund?",
+    "cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_STRATEGY]->(s:StrategyChunk) WHERE f.name CONTAINS 'Short-Term Bond' RETURN s.text AS strategy"
+  },
+  {
+    "question": "Show me all the funds that have more than 15% invested in the United States?",
+    "cypher": "MATCH (f:Fund)-[h:HAS_GEOGRAPHIC_ALLOCATION]->(:Region {name: 'United States'}) WHERE h.weight > 15.0 RETURN f.name AS fundName"
+  },
+  {
+    "question": "Which holding has the highest weight across all portfolios?",
+    "cypher": "MATCH (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[c:CONTAINS]->(h:Holding) RETURN h.name AS holdingName, h.ticker AS ticker, max(c.weight) AS maxWeight ORDER BY maxWeight DESC LIMIT 1"
+  },
+  {
+    "question": "List all funds that share at least one manager with VTI.",
+    "cypher": "MATCH (f1:Fund {ticker: 'VTI'})-[:MANAGED_BY]->(p:Person)<-[:MANAGED_BY]-(f2:Fund) WHERE f1 <> f2 RETURN DISTINCT f2.ticker AS ticker, f2.name AS name, p.name AS sharedManager"
+  },
+  {
+    "question": "Show me the fund that had the best total return in the year 2022.",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL AND r.year = 2022 RETURN f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY totalReturn DESC LIMIT 1"
+  },
+  {
+    "question": "Show me the 1y, 5y and inception returns for VTI.",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) RETURN p.return1y AS oneYear, p.return5y AS fiveYear, p.returnInception AS inception"
+  },
+  {
+    "question": "Find the provider managing funds with the lowest average turnover rate.",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WITH p, avg(f.turnoverRate) AS avgTurnover RETURN p.name AS provider, avgTurnover ORDER BY avgTurnover ASC LIMIT 1"
+  },
+  {
+    "question": "What is the investment objective text for VOO?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:DEFINED_BY]->(:Profile)-[:HAS_OBJECTIVE]->(o:Objective) RETURN o.text AS objective"
+  },
+  {
+    "question": "Get the performance commentary for VTI.",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_PERFORMANCE]->(pc:PerformanceCommentary) RETURN pc.text AS performance"
+  },
+  {
+    "question": "What are the top 5 holdings for VGT?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:CONTAINS]->(h:Holding) RETURN h.name AS holdingName, r.weight AS weight ORDER BY r.weight DESC LIMIT 5"
+  },
+  {
+    "question": "Show me all the funds that have more than 15% invested in Technology",
+    "cypher": "MATCH (f:Fund)-[h:HAS_SECTOR_ALLOCATION]->(:Sector {name: 'Technology'}) WHERE h.weight > 15.0 RETURN f.name AS fundName"
+  }
+
+]

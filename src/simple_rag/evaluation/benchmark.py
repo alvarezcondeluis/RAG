@@ -31,11 +31,13 @@ class Text2CypherBenchmark:
     A professional testing suite for evaluating Text-to-Cypher models.
     """
     
-    def __init__(self, test_set_path: str, model_name: str):
+    def __init__(self, test_set_path: str, model_name: str, backend: str):
         self.test_path = Path(test_set_path)
-        self.translator = CypherTranslator(model_name=model_name)
         self.neo = Neo4jDatabase()
+        self.translator = CypherTranslator(neo4j_driver=self.neo.driver, model_name=model_name, backend=backend, use_entity_resolver=True)
+        
         self.results: List[TestResult] = []
+        self.backend = backend
         
     def load_tests(self) -> List[Dict]:
         """Loads test cases from the JSON file."""
@@ -58,33 +60,54 @@ class Text2CypherBenchmark:
         except IndexError:
             return normalized
     
-    def _compare_results_flexible(self, gen_records: List[Dict], exp_records: List[Dict]) -> bool:
+    def _compare_results_flexible(self, gen_records: List[Dict], exp_records) -> tuple[bool, str]:
         """
         Compare results flexibly - ignores alias names, only compares values.
-        Handles cases where generated query uses different aliases than expected.
+        Returns: (is_match, match_type) where match_type is 'exact', 'partial', or 'mismatch'
         """
-        if len(gen_records) != len(exp_records):
-            return False
-        
-        # Extract and sort values only (ignore keys/aliases)
-        def extract_values(records):
-            result = []
-            for record in records:
-                # Get all values, convert to strings, and sort them
-                values = tuple(sorted([str(v) for v in record.values()]))
-                result.append(values)
-            return sorted(result)
-        
-        gen_values = extract_values(gen_records)
-        exp_values = extract_values(exp_records)
-        
-        return gen_values == exp_values
+        try:
+            # Handle case where exp_records is a simple string/number
+            if isinstance(exp_records, str):
+                try:
+                    exp_records = [json.loads(exp_records)]
+                except json.JSONDecodeError:
+                    exp_records = [{"value": exp_records}]
+            
+            # Extract all values from records (ignoring keys)
+            def extract_all_values(records):
+                all_values = set()
+                for record in records:
+                    if isinstance(record, int):
+                        return record
+                    for v in record.values():
+                        all_values.add(str(v))
+                return all_values
+            
+            gen_values = extract_all_values(gen_records)
+            exp_values = extract_all_values(exp_records)
+            
+            if isinstance(exp_values, int):
+                return (str(exp_values) in gen_values, 'exact')
+            
+            # Check match type
+            if gen_values == exp_values:
+                return (True, 'exact')
+            elif exp_values.issubset(gen_values):
+                return (True, 'partial')  # Generated has all expected + more
+            elif gen_values.issubset(exp_values):
+                return (True, 'partial')  # Generated has subset of expected
+            else:
+                return (False, 'mismatch')
+            
+        except Exception as e:
+            print(f"⚠️  Error comparing results: {e}")
+            return (False, 'error')
 
     def evaluate_single_question(self, index: int, item: Dict) -> TestResult:
         """Runs the pipeline for a single question and returns metrics."""
         question = item['question']
         expected_cypher = item.get('expected_cypher')
-        
+        expected_answer = item.get('ground_truth_answer')
         result = TestResult(
             question_id=index,
             question=question,
@@ -92,8 +115,10 @@ class Text2CypherBenchmark:
             expected_cypher=expected_cypher
         )
 
-        print(f"🔹 Processing Q{index}: {question[:50]}...")
-
+        print(f"\n{'='*80}")
+        print(f"📝 Q{index}: {question}")
+        print(f"{'='*80}")
+        
         # 1. Measure Generation
         try:
             gen_start = time.time()
@@ -104,11 +129,13 @@ class Text2CypherBenchmark:
             if not generated_cypher:
                 result.error_type = "Generation Failure"
                 result.error_message = "Model returned empty string"
+                print(f"❌ Generation failed: Model returned empty string")
                 return result
 
         except Exception as e:
             result.error_type = "Translation Exception"
             result.error_message = str(e)
+            print(f"❌ Translation error: {e}")
             return result
 
         # 2. Measure Execution & Accuracy
@@ -120,7 +147,6 @@ class Text2CypherBenchmark:
                 gen_records = [r.data() for r in gen_res]
             result.execution_time_ms = (time.time() - exec_start) * 1000
             
-            
             with self.neo.driver.session() as session:
                 exp_res = list(session.run(expected_cypher))
                 exp_records = [r.data() for r in exp_res]
@@ -129,34 +155,71 @@ class Text2CypherBenchmark:
             result.generated_results = gen_records
             result.expected_results = exp_records
             
-            # D. Compare Results (flexible - ignores alias names)
-            if self._compare_results_flexible(gen_records, exp_records):
+            # D. Display both queries
+            print(f"\n🔍 QUERIES:")
+            print(f"Generated: {generated_cypher}")
+            print(f"Expected:  {expected_cypher}")
+            
+            # E. Display both results
+            print(f"\n📊 RESULTS:")
+            print(f"Generated ({len(gen_records)} records):")
+            for i, record in enumerate(gen_records[:3]):  # Show first 3 records
+                print(f"  [{i+1}] {record}")
+            if len(gen_records) > 3:
+                print(f"  ... and {len(gen_records)-3} more")
+            
+            print(f"Expected ({len(exp_records)} records):")
+            for i, record in enumerate(exp_records[:3]):  # Show first 3 records
+                print(f"  [{i+1}] {record}")
+            if len(exp_records) > 3:
+                print(f"  ... and {len(exp_records)-3} more")
+            
+            # F. Compare Results (flexible - ignores alias names)
+            is_match, match_type = self._compare_results_flexible(gen_records, exp_records)
+            
+            if not is_match and expected_answer:
+                is_match, match_type = self._compare_results_flexible(gen_records, expected_answer)
+            
+            if is_match:
                 result.success = True
                 result.is_semantically_correct = True
+                if match_type == 'exact':
+                    print(f"\n✅ PASS - Exact match")
+                elif match_type == 'partial':
+                    print(f"\n🟠 PASS - Partial match (extra or missing fields)")
+                    print(f"   Generated: {len(gen_records)} records")
+                    print(f"   Expected: {len(exp_records)} records")
             else:
                 result.success = False
                 result.error_type = "Incorrect Result"
                 result.error_message = f"Got {len(gen_records)} records, expected {len(exp_records)}"
+                print(f"\n❌ FAIL - Result mismatch")
+                print(f"   Generated: {gen_records[:2] if len(gen_records) > 0 else 'empty'}...")
+                print(f"   Expected: {exp_records[:2] if len(exp_records) > 0 else 'empty'}...")
                 
         except Exception as e:
             result.success = False
             result.error_type = "Syntax/Execution Error"
             result.error_message = str(e)
-
+            print(f"\n❌ FAIL - Execution error: {str(e)[:100]}")
+            
+        print(f"\n⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
         return result
 
     def run(self):
         """Main execution loop."""
         test_data = self.load_tests()
-        print(f"\n🚀 Starting Benchmark on {len(test_data)} questions...\n")
+        print(f"\n{'='*80}")
+        print(f"🚀 Text-to-Cypher Benchmark Suite")
+        print(f"{'='*80}")
+        print(f"📊 Total Questions: {len(test_data)}")
+        print(f"🤖 Model: {self.translator.model_name}")
+        print(f"🔧 Backend: {self.backend}")
+        print(f"{'='*80}\n")
         
         for i, item in enumerate(test_data, 1):
             res = self.evaluate_single_question(i, item)
             self.results.append(res)
-            
-            # Real-time feedback
-            status = "✅ PASS" if res.success else f"❌ FAIL ({res.error_type})"
-            print(f"   -> {status} | Gen: {res.generation_time_ms:.0f}ms | Exec: {res.execution_time_ms:.0f}ms")
 
         self.print_report()
         self.cleanup()

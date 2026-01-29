@@ -1,82 +1,305 @@
-import requests
-import json
 import subprocess
 import time
-from typing import Optional
-
+import requests
+import re
+from typing import Optional, Literal
+from datetime import datetime, timedelta
+import torch
+from langchain_ollama import ChatOllama
+from langchain_huggingface import HuggingFacePipeline
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from transformers import pipeline
+from simple_rag.rag.dynamic_few_shot import DynamicFewShotSelector
+from simple_rag.evaluation.entity_resolver import EntityResolver
+from simple_rag.rag.groq_wrapper import GroqWrapper
 
 class CypherTranslator:
     def __init__(
         self,
+        neo4j_driver,
         model_name: str = "llama3.1:8b",
-        api_url: str = "http://localhost:11434/api/generate",
-        auto_start_ollama: bool = True
+        api_url: str = "http://localhost:11434",
+        auto_start_ollama: bool = True,
+        backend: Literal["ollama", "huggingface", "groq"] = "ollama",
+        device: str = "cuda",
+        temperature: float = 0.5,
+        use_entity_resolver: bool = True,
+        entity_resolver_debug: bool = False,
+        groq_api_key: Optional[str] = None
     ):
         """
-        Wraps the local Ollama LLM for text-to-Cypher translation.
+        LangChain-based LLM wrapper for text-to-Cypher translation.
         
         Args:
-            model_name: Ollama model to use
-            api_url: Ollama API endpoint
+            neo4j_driver: Neo4j driver instance for entity resolution
+            model_name: Model identifier (Ollama model, HuggingFace path, or Groq model)
+            api_url: Ollama base URL (only used if backend="ollama")
             auto_start_ollama: Whether to auto-start Ollama if not running
+            backend: "ollama" for Ollama API, "huggingface" for local HF model, or "groq" for Groq API
+            device: Device for HuggingFace model ("cuda" or "cpu")
+            temperature: Sampling temperature (lower = more deterministic)
+            use_entity_resolver: Whether to use EntityResolver for pre-resolving entities
+            entity_resolver_debug: Enable debug output for entity resolution
+            groq_api_key: Groq API key (only used if backend="groq", uses GROQ_API_KEY env var if None)
         """
         self.model_name = model_name
         self.api_url = api_url
         self.ollama_process = None
+        self.backend = backend
+        self.device = device
+        self.temperature = temperature
+        self.groq_api_key = None
+        self.selector = DynamicFewShotSelector(k=2)
+        
+        # Groq token tracking (Free tier limits)
+        self.groq_tokens_used = 0
+        self.groq_requests_count = 0
+        self.groq_daily_limit = 14400  # Free tier: 14,400 tokens/day
+        self.groq_rpm_limit = 30  # Free tier: 30 requests/minute
+        self.groq_request_timestamps = []  # Track request times for RPM limiting
+        self.groq_reset_time = datetime.now() + timedelta(days=1)
+        
+        # Initialize EntityResolver if enabled
+        self.use_entity_resolver = use_entity_resolver
+        self.entity_resolver = None
+        if use_entity_resolver and neo4j_driver:
+            self.entity_resolver = EntityResolver(neo4j_driver, debug=entity_resolver_debug)
+            print("✓ EntityResolver initialized")
+
+        # LangChain components
+        self.llm = None
+        self.chain = None
         
         # Complete Neo4j schema
         self.schema = """
-        # Fund Management Structure
-        (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund {
-            ticker, name, securityExchange, costsPer10k, advisoryFees, numberHoldings, 
-            expenseRatio, netAssets, turnoverRate, createdAt, updatedAt
+        # === FUND MANAGEMENT STRUCTURE ===
+        (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund)
+        
+        # === FUND NODE PROPERTIES (Use these directly!) ===
+        (:Fund {
+            ticker,              # Symbol like 'VTI' (use for matching symbols)
+            name,                # Full name like 'Vanguard Total Stock Market Index Fund'
+            securityExchange,    # Exchange like 'NASDAQ', 'NYSE'
+            costsPer10k,         # Costs per $10,000 invested (numeric)
+            advisoryFees,        # Advisory fees (numeric)
+            numberHoldings,      # Total number of holdings (integer) - USE THIS, not count(h)!
+            expenseRatio,        # Expense ratio (numeric)
+            netAssets,           # Net assets value (numeric) - DIRECTLY ON FUND NODE
+            turnoverRate        # Turnover in ABSOLUTE terms (e.g., 2 means 2%, NOT 0.02) 
         })
         
-        # Fund Share Classes
+        # FULL-TEXT INDEXES (use for fuzzy/partial name matching):
+        # - Provider.name -> use CALL db.index.fulltext.queryNodes('providerNameIndex', 'search_term')
+        # - Trust.name -> use CALL db.index.fulltext.queryNodes('trustNameIndex', 'search_term')
+        # - Fund.name -> use CALL db.index.fulltext.queryNodes('fundNameIndex', 'search_term')
+        # - Person.name -> use CALL db.index.fulltext.queryNodes('personNameIndex', 'search_term')
+        # For exact ticker matching, use {ticker: 'VTI'} (no index needed)
+
+        # === FUND RELATIONSHIPS ===
+        # Share Classes
         (:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name})
         
-        # Fund Profile and Content Sections (Temporal - versioned by date)
-        (:Fund)-[:DEFINED_BY {date}]->(:Profile {
-            id, summaryProspectus, createdAt, updatedAt
-        })
+        # Profile (versioned by date)
+        (:Fund)-[:DEFINED_BY {date}]->(:Profile {id, summaryProspectus})
         (:Profile)-[:HAS_OBJECTIVE]->(:Objective {id, text, embedding})
         (:Profile)-[:HAS_PERFORMANCE]->(:PerformanceCommentary {id, text, embedding})
         (:Profile)-[:HAS_RISK]->(:RiskChunk {id, title, text, embedding})
         (:Profile)-[:HAS_STRATEGY]->(:StrategyChunk {id, title, text, embedding})
         
-        # Fund Financial Highlights (by year)
-        (:Fund)-[:HAS_FINANCIAL_HIGHLIGHT {year}]->(:FinancialHighlight {
-            id, turnover, expenseRatio, totalReturn, netAssets, 
-            netAssetsValueBeginning, netAssetsValueEnd, netIncomeRatio, createdAt, updatedAt
-        })
+        # Charts/Images (dated)
+        (:Fund)-[:HAS_CHART {date}]->(:Image {id, title, category, svg})
         
-        # Fund Charts/Images
-        (:Fund)-[:HAS_CHART {date}]->(:Image {id, title, category, svg, createdAt, updatedAt})
+        # Management Team
+        (:Fund)-[:MANAGED_BY]->(:Person {name})
         
-        # Fund Management Team
-        (:Fund)-[:MANAGED_BY]->(:Person {name, createdAt, updatedAt})
-        
-        # Fund Allocations (by report date)
-        (:Fund)-[:HAS_SECTOR_ALLOCATION {weight, reportDate}]->(:Sector {name, createdAt})
-        (:Fund)-[:HAS_GEOGRAPHIC_ALLOCATION {weight, reportDate}]->(:Region {name, createdAt})
-        
-        # Fund Holdings Structure
-        (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {id, ticker, date, count, createdAt})
+        # Allocations (by report date)
+        (:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, date}]->(:Sector {name})
+        (:Fund)-[h:HAS_GEOGRAPHIC_ALLOCATION {weight, date}]->(:Region {name})
+                    
+        # Holdings Structure
+        (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {id, ticker, date, count})
         (:Portfolio)-[:CONTAINS {shares, marketValue, weight, currency, fairValueLevel, isRestricted, payoffProfile}]->(:Holding {
             id, name, ticker, cusip, isin, lei, country, sector, assetCategory, 
-            assetDesc, issuerCategory, issuerDesc, createdAt
+            assetDesc, issuerCategory, issuerDesc
         })
-        
-        # Note: Vector indexes exist on embedding properties for semantic search:
-        # - RiskChunk.embedding, StrategyChunk.embedding, Objective.embedding, PerformanceCommentary.embedding
-        # Use vector similarity search for finding similar content across funds.
 
-        # Match ticker for symbols (e.g., 'VTI') and name for titles (e.g., 'Vanguard Total Stock').
+        # Financial Highlights
+        (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT {year}]->(:FinancialHighlight {turnover, expenseRatio, totalReturn, netAssets, netAssetsValueBeginning, netAssetsValueEnd, netIncomeRatio})
+
+        # Trailing Performance
+        (:Fund)-[:HAS_TRAILING_PERFORMANCE {date}]->(:TrailingPerformance {return1y, return5y, return10y, returnInception})
+
+        # === IMPORTANT NOTES ===
+        # 1. netAssets is DIRECTLY on Fund node, not in a separate FinancialHighlight node
+        # 2. numberHoldings property already contains the count - don't recalculate!
+        # 3. turnoverRate is absolute (2 = 2%, not 0.02)
+        # 4. Use 'ticker' for symbols (VTI), 'name' for full names
+        # 5. Vector indexes exist on embedding properties for semantic search
+        # 6. Fulltext indexes exist on name properties for fuzzy/partial name matchings USE THEM before the MATCH
+        # 7. NEVER generate incomplete property filters like (n:Label {name}). Only use property filters with values like (n:Label {name: 'Value'}).
+        # 8. If you do not know the value of a property, DO NOT include it in the curly braces {}.
         """
         
-        # Check and start Ollama if needed
-        if auto_start_ollama:
-            self._ensure_ollama_running()
+        # Define the prompt template
+        self.prompt_template = """You are a Neo4j Cypher expert. Convert the natural language question to a valid Cypher query.
+
+Neo4j Schema:
+{schema}
+
+Examples:
+{examples}
+
+{entity_context}
+
+Rules:
+1. Output ONLY the Cypher query, no explanations or markdown
+2. Use proper Cypher syntax with MATCH, WHERE, RETURN, COUNT(*)
+3. Use property names exactly as shown in schema
+4. For numeric comparisons, use appropriate operators (>, <, =, etc.) just after the MATCH clause
+5. For text search, use CONTAINS or regular expressions
+6. Always return more properties than the ones asked. Include ticker, name, etc.
+7. If entity names are provided in the Entity Context, use them EXACTLY as shown
+
+Question: {question}
+
+Cypher Query:"""
+        
+        self.prompt = PromptTemplate(
+            input_variables=["schema", "examples", "entity_context", "question"],
+            template=self.prompt_template
+        )
+        
+        # Initialize based on backend
+        if self.backend == "ollama":
+            if auto_start_ollama:
+                self._ensure_ollama_running()
+            self._init_ollama_chain()
+        elif self.backend == "huggingface":
+            self._init_huggingface_chain()
+        elif self.backend == "groq":
+            self._init_groq_chain()
+        else:
+            raise ValueError(f"Unknown backend: {backend}. Use 'ollama', 'huggingface', or 'groq'")
+
+        self._warm_up()
+
+    def _warm_up(self):
+        """
+        Sends a lightweight dummy request to force the LLM to load into VRAM.
+        This ensures the first real user query doesn't lag.
+        """
+        print("🔥 Warming up LLM (loading into memory)...")
+        try:
+            # We send a trivial request. The answer doesn't matter.
+            self.chain.invoke({
+                "schema": "",  # Empty schema is fine for warmup
+                "examples": "",
+                "question": "hi",
+                "entity_context": ""
+            })
+            print("✓ LLM Warmed up and ready.")
+        except Exception as e:
+            # If warmup fails, we log it but don't crash the app
+            print(f"⚠ Warm-up failed (non-critical): {e}")
+    
+    def _init_ollama_chain(self):
+        """Initialize LangChain with Ollama backend."""
+        try:
+            self.llm = ChatOllama(
+                model=self.model_name,
+                base_url=self.api_url,
+                temperature=self.temperature,
+                num_predict=512
+            )
+            
+            # Build the chain: Prompt -> LLM -> Output Parser
+            self.chain = self.prompt | self.llm | StrOutputParser()
+            
+            print(f"✓ Ollama LangChain initialized with model: {self.model_name}")
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Ollama chain: {e}") from e
+    
+    def _init_huggingface_chain(self):
+        """Initialize LangChain with HuggingFace backend."""
+        try:
+            from unsloth import FastLanguageModel
+            
+            print(f"Loading HuggingFace model: {self.model_name}")
+            
+            # Use Unsloth's FastLanguageModel
+            max_seq_length = 2048
+            dtype = None  # Auto-detect
+            load_in_4bit = True  # Use 4bit quantization for efficiency
+            
+            self.hf_model, self.hf_tokenizer = FastLanguageModel.from_pretrained(
+                model_name=self.model_name,
+                max_seq_length=max_seq_length,
+                dtype=dtype,
+                load_in_4bit=load_in_4bit,
+            )
+            
+            # Enable inference mode (faster)
+            FastLanguageModel.for_inference(self.hf_model)
+            
+            # Create HuggingFace pipeline
+            hf_pipeline = pipeline(
+                "text-generation",
+                model=self.hf_model,
+                tokenizer=self.hf_tokenizer,
+                max_new_tokens=256,
+                temperature=self.temperature if self.temperature > 0 else 1.0,
+                do_sample=self.temperature > 0,
+                device=0 if self.device == "cuda" and torch.cuda.is_available() else -1
+            )
+            
+            # Wrap in LangChain HuggingFacePipeline
+            self.llm = HuggingFacePipeline(pipeline=hf_pipeline)
+            
+            # Build the chain
+            self.chain = self.prompt | self.llm | StrOutputParser()
+            
+            # Check device
+            if self.device == "cuda" and torch.cuda.is_available():
+                print(f"✓ HuggingFace model loaded on GPU with 4-bit quantization")
+            else:
+                print(f"✓ HuggingFace model loaded on CPU")
+                
+        except ImportError as e:
+            raise ImportError(
+                "HuggingFace backend requires 'unsloth', 'transformers', and 'langchain-huggingface'. "
+                "Install with: pip install unsloth transformers langchain-huggingface"
+            ) from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize HuggingFace chain: {e}") from e
+    
+    def _init_groq_chain(self):
+        """Initialize LangChain with Groq backend."""
+        try:
+            # Initialize Groq wrapper
+            groq_wrapper = GroqWrapper(
+                model_name=self.model_name,
+                api_key=self.groq_api_key,
+                temperature=self.temperature,
+                max_tokens=512
+            )
+            
+            # Get the LangChain-compatible LLM
+            self.llm = groq_wrapper.get_llm()
+            
+            # Build the chain: Prompt -> LLM -> Output Parser
+            self.chain = self.prompt | self.llm | StrOutputParser()
+            
+            print(f"✓ Groq LangChain initialized with model: {self.model_name}")
+            
+        except ImportError as e:
+            raise ImportError(
+                "Groq backend requires 'langchain-groq'. "
+                "Install with: pip install langchain-groq"
+            ) from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Groq chain: {e}") from e
     
     def _is_ollama_running(self) -> bool:
         """Check if Ollama server is running."""
@@ -129,75 +352,243 @@ class CypherTranslator:
         print("Ollama server not detected, attempting to start...")
         return self._start_ollama_server()
     
-    def translate(self, user_query: str, temperature: float = 0.1) -> Optional[str]:
+    def _check_groq_rate_limits(self) -> bool:
         """
-        Translate natural language query to Cypher query.
+        Check if we're within Groq API rate limits.
+        Returns True if safe to proceed, False if limits exceeded.
+        """
+        if self.backend != "groq":
+            return True
+        
+        now = datetime.now()
+        
+        # Check daily token limit reset
+        if now >= self.groq_reset_time:
+            self.groq_tokens_used = 0
+            self.groq_requests_count = 0
+            self.groq_reset_time = now + timedelta(days=1)
+            print("🔄 Groq token counter reset (new day)")
+        
+        # Check daily token limit
+        if self.groq_tokens_used >= self.groq_daily_limit:
+            remaining_time = self.groq_reset_time - now
+            hours = remaining_time.seconds // 3600
+            minutes = (remaining_time.seconds % 3600) // 60
+            print(f"⚠️  Groq daily token limit reached ({self.groq_tokens_used}/{self.groq_daily_limit})")
+            print(f"   Resets in {hours}h {minutes}m")
+            return False
+        
+        # Check RPM (requests per minute) limit
+        one_minute_ago = now - timedelta(minutes=1)
+        self.groq_request_timestamps = [ts for ts in self.groq_request_timestamps if ts > one_minute_ago]
+        
+        if len(self.groq_request_timestamps) >= self.groq_rpm_limit:
+            wait_time = 60 - (now - self.groq_request_timestamps[0]).seconds
+            print(f"⚠️  Groq RPM limit reached ({len(self.groq_request_timestamps)}/{self.groq_rpm_limit})")
+            print(f"   Waiting {wait_time}s before next request...")
+            time.sleep(wait_time + 1)
+            # Clean up old timestamps after waiting
+            self.groq_request_timestamps = [ts for ts in self.groq_request_timestamps if ts > datetime.now() - timedelta(minutes=1)]
+        
+        return True
+    
+    def _update_groq_token_usage(self, prompt_tokens: int, completion_tokens: int):
+        """Update Groq token usage tracking."""
+        if self.backend != "groq":
+            return
+        
+        total_tokens = prompt_tokens + completion_tokens
+        self.groq_tokens_used += total_tokens
+        self.groq_requests_count += 1
+        self.groq_request_timestamps.append(datetime.now())
+        
+        # Calculate percentage used
+        usage_percent = (self.groq_tokens_used / self.groq_daily_limit) * 100
+        
+        print(f"📊 Groq Usage: {self.groq_tokens_used}/{self.groq_daily_limit} tokens ({usage_percent:.1f}%) | "
+              f"Requests: {self.groq_requests_count} | "
+              f"This call: {total_tokens} tokens (↑{prompt_tokens} ↓{completion_tokens})")
+    
+    def get_groq_usage_stats(self) -> dict:
+        """Get current Groq usage statistics."""
+        if self.backend != "groq":
+            return {"error": "Not using Groq backend"}
+        
+        remaining_tokens = self.groq_daily_limit - self.groq_tokens_used
+        usage_percent = (self.groq_tokens_used / self.groq_daily_limit) * 100
+        time_until_reset = self.groq_reset_time - datetime.now()
+        
+        return {
+            "tokens_used": self.groq_tokens_used,
+            "tokens_remaining": remaining_tokens,
+            "daily_limit": self.groq_daily_limit,
+            "usage_percent": round(usage_percent, 2),
+            "requests_count": self.groq_requests_count,
+            "reset_in_hours": round(time_until_reset.seconds / 3600, 2)
+        }
+    
+    def reset_groq_usage(self):
+        """Manually reset Groq usage counters (for testing or new day)."""
+        if self.backend == "groq":
+            self.groq_tokens_used = 0
+            self.groq_requests_count = 0
+            self.groq_request_timestamps = []
+            self.groq_reset_time = datetime.now() + timedelta(days=1)
+            print("✓ Groq usage counters reset")
+    
+    def translate(self, user_query: str, temperature: Optional[float] = None) -> Optional[str]:
+        """
+        Translate natural language query to Cypher query using LangChain.
         
         Args:
             user_query: Natural language question
-            temperature: Sampling temperature (lower = more deterministic)
+            temperature: Override temperature for this query (optional)
             
         Returns:
             Cypher query string or None if error
         """
-        prompt = f"""You are a Neo4j Cypher expert. Convert the natural language question to a valid Cypher query.
-
-Neo4j Schema:
-{self.schema}
-
-Rules:
-1. Output ONLY the Cypher query, no explanations or markdown
-2. Use proper Cypher syntax with MATCH, WHERE, RETURN
-3. Use property names exactly as shown in schema
-4. For numeric comparisons, use appropriate operators (>, <, =, etc.)
-5. For text search, use CONTAINS or regular expressions
-6. Always return relevant properties
-
-Question: {user_query}
-
-Cypher Query:"""
+        if self.chain is None:
+            raise RuntimeError("LangChain not initialized. Check backend configuration.")
+        
+        # Check Groq rate limits before proceeding
+        if self.backend == "groq":
+            if not self._check_groq_rate_limits():
+                print("❌ Cannot proceed: Groq rate limits exceeded")
+                return None
+        
+        # Step 1: Resolve entities in the query
+        entity_context = ""
+        processed_query = user_query
+        
+        if self.entity_resolver:
+            
+            resolved_entities = self.entity_resolver.extract_entities(user_query)
+            print("Resolved Entities: ", resolved_entities)
+            if resolved_entities:
+                # Build entity context with explicit instructions
+                entity_context = "RESOLVED ENTITIES (Use these EXACT names in your Cypher query):\n"
+                
+                # Sort by entity type for consistent output
+                entity_list = []
+                for entity_name, entity_type in resolved_entities.items():
+                    entity_list.append((entity_type, entity_name))
+                    # Replace entity in query (case-insensitive)
+                    import re
+                    pattern = re.compile(re.escape(entity_name), re.IGNORECASE)
+                    processed_query = pattern.sub(f"'{entity_name}'", processed_query, count=1)
+                
+                # Add to context
+                for entity_type, entity_name in sorted(entity_list):
+                    entity_context += f"  - {entity_type}: {entity_name}\n"
+                
+               
+                entity_context += f"Processed Question: {processed_query}\n"
+                entity_context += "\nIMPORTANT: Use the exact entity names shown above in your Cypher query.\n"
+                
+                # Compact entity resolution output
+                entity_summary = ", ".join([f"{t}:{n}" for t, n in sorted(entity_list)])
+                print(f"🔍 Entities: {entity_summary}")
+        
+        # Step 2: Get few-shot examples
+        examples_str = self.selector.get_formatted_context(user_query)
+        print(f"📚 Examples: {len(examples_str.split('Example'))-1} retrieved")
         
         try:
-            # Call Ollama API
-            payload = {
-                "model": self.model_name,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": 512
-                }
-            }
+            # Update temperature if provided
+            if temperature is not None and self.backend in ["ollama", "groq"]:
+                self.llm.temperature = temperature
             
-            response = requests.post(self.api_url, json=payload, timeout=60)
-            response.raise_for_status()
-            response_json = response.json()
+            # Invoke the chain with entity context and processed query
+            if self.backend == "groq":
+                # For Groq, we need to capture the full response to get token usage
+                from langchain_core.messages import HumanMessage
+                
+                # Build the full prompt
+                full_prompt = self.prompt.format(
+                    schema=self.schema,
+                    examples=examples_str,
+                    entity_context=entity_context,
+                    question=processed_query
+                )
+                
+                # Invoke LLM directly to get response with metadata
+                llm_response = self.llm.invoke([HumanMessage(content=full_prompt)])
+                response = llm_response.content
+                
+                # Extract token usage from response metadata
+                if hasattr(llm_response, 'response_metadata') and 'token_usage' in llm_response.response_metadata:
+                    token_usage = llm_response.response_metadata['token_usage']
+                    prompt_tokens = token_usage.get('prompt_tokens', 0)
+                    completion_tokens = token_usage.get('completion_tokens', 0)
+                    self._update_groq_token_usage(prompt_tokens, completion_tokens)
+                else:
+                    # Fallback: estimate tokens if metadata not available
+                    estimated_prompt = len(full_prompt.split()) * 1.3  # Rough estimate
+                    estimated_completion = len(response.split()) * 1.3
+                    self._update_groq_token_usage(int(estimated_prompt), int(estimated_completion))
+                    print("⚠️  Token usage estimated (metadata not available)")
+            else:
+                # For other backends, use normal chain invocation
+                response = self.chain.invoke({
+                    "schema": self.schema,
+                    "examples": examples_str,
+                    "entity_context": entity_context,
+                    "question": processed_query
+                })
             
-            # Extract and clean the Cypher query
-            raw_cypher = response_json.get("response", "").strip()
+            # Clean the output
+            cypher_query = self._clean_cypher(response)
             
-            # Remove markdown code blocks if present
-            cleaned_cypher = raw_cypher.replace("```cypher", "").replace("```", "").strip()
-            
-            # Remove any leading/trailing quotes
-            cleaned_cypher = cleaned_cypher.strip('"\'')
-            
-            if not cleaned_cypher:
+            if cypher_query:
+                print(f"✓ Generated Cypher: {cypher_query}")
+            else:
                 print("⚠ Empty Cypher query generated")
-                return None
             
-            print(f"✓ Generated Cypher: {cleaned_cypher[:100]}...")
-            return cleaned_cypher
+            # Restore original temperature
+            if temperature is not None and self.backend in ["ollama", "groq"]:
+                self.llm.temperature = self.temperature
             
-        except requests.exceptions.Timeout:
-            print("✗ Ollama API timeout - query took too long")
-            return None
-        except requests.exceptions.RequestException as e:
-            print(f"✗ Ollama API error: {e}")
-            return None
+            return cypher_query
+            
         except Exception as e:
-            print(f"✗ Unexpected error in translation: {e}")
+            print(f"✗ Error during translation: {e}")
             return None
+    
+    
+    def _clean_cypher(self, query: str) -> str:
+        """Clean up generated Cypher query."""
+        query = query.strip()
+        
+        # Remove markdown code blocks
+        if query.startswith("```"):
+            lines = query.split("\n")
+            query = "\n".join(lines[1:-1]) if len(lines) > 2 else query
+        
+        query = query.replace("```cypher", "").replace("```", "").strip()
+        
+        # Remove any leading/trailing quotes
+        query = query.strip('"\'')
+        
+        # Remove common prefixes
+        prefixes = ["cypher:", "Cypher:", "CYPHER:", "Query:", "query:"]
+        for prefix in prefixes:
+            if query.startswith(prefix):
+                query = query[len(prefix):].strip()
+        
+        # === NEW FIX: Repair Syntax Errors ===
+        
+        # 1. Fix "Property without value" error: (n:Label {prop}) -> (n:Label)
+        # Matches {word} that does NOT have a colon inside
+        # This turns (t:Trust {name}) into (t:Trust )
+        query = re.sub(r'\{\s*[a-zA-Z0-9_]+\s*\}', '', query)
+        
+        # 2. Fix empty braces error: (n:Label {}) -> (n:Label)
+        query = re.sub(r'\{\s*\}', '', query)
+        
+        # 3. Clean up accidental double spaces created by the removal
+        query = re.sub(r'\s+', ' ', query).strip()
+        
+        return query
     
     def stop_ollama_server(self):
         """Stop the Ollama server if it was started by this instance."""
@@ -215,3 +606,10 @@ Cypher Query:"""
     def __del__(self):
         """Cleanup on deletion."""
         self.stop_ollama_server()
+        
+        # Clear GPU memory if using HuggingFace
+        if self.hf_model is not None:
+            del self.hf_model
+            del self.hf_tokenizer
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
