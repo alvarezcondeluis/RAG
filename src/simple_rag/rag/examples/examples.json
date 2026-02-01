@@ -53,7 +53,7 @@
   },
   {
     "question": "Does the VTI has any image attached to it?",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category, img.svg AS svg"
   },
   {
     "question": "What is the security exchange of VTI?",
@@ -73,7 +73,7 @@
   },
   {
     "question": "Show me the ordered list of funds in decreasing order of the 10 year returns",
-    "cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_10y IS NOT NULL RETURN f.name AS fundName, p.return_10y AS tenYearReturn ORDER BY tenYearReturn DESC"
+    "cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return10y IS NOT NULL RETURN f.name AS fundName, p.return10y AS tenYearReturn ORDER BY tenYearReturn DESC"
   },
   {
     "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
@@ -134,6 +134,26 @@
   {
     "question": "Show me all the funds that have more than 15% invested in Technology",
     "cypher": "MATCH (f:Fund)-[h:HAS_SECTOR_ALLOCATION]->(:Sector {name: 'Technology'}) WHERE h.weight > 15.0 RETURN f.name AS fundName"
+  },
+  {
+    "question": "What is the current NAV of the VTI fund?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssetsValueEnd AS currentNAV, fh.year AS year ORDER BY fh.year DESC LIMIT 1"
+  },
+  {
+    "question": "What is the net asset value of the VOO fund?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssetsValueEnd AS netAssetValue, fh.year AS year ORDER BY fh.year DESC LIMIT 1"
+  },
+  {
+    "question": "What is the cost per 10k investment for the 'Growth Index' fund?",
+    "cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Growth Index' RETURN f.costsPer10k AS cost, f.name as Name"
+  },
+  {
+    "question": "Find the ticker symbol for the fund named '500 Index Fund'.",
+    "cypher": "MATCH (f:Fund) WHERE f.name CONTAINS '500 Index Fund' RETURN f.ticker AS ticker"
+  },
+  {
+    "question": "What is the fund that has the highest turnover rate?",
+    "cypher": "MATCH (f:Fund) RETURN f.name AS fundName, f.turnoverRate AS turnoverRate ORDER BY turnoverRate DESC LIMIT 1"
   }
 
 ]

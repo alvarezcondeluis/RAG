@@ -86,7 +86,7 @@
   {
     "question": "List the tickers of all funds managed by the provider 'Vanguard'.",
     "ground_truth_answer": "['VTI', 'VOO', 'BND']",
-    "expected_cypher": "MATCH (p:Provider {name: 'Vanguard'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker AS ticker",
+    "expected_cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker",
     "complexity": "hard"
   },
   {
@@ -132,7 +132,7 @@
     "complexity": "medium"
   },
   {
-    "question": "Who manages the trust for the fund with turnover rate 0.04?",
+    "question": "Who manages the trust for the fund with turnover rate 4%?",
     "ground_truth_answer": "Vanguard",
     "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE f.turnoverRate = 0.04 RETURN p.name AS providerName",
     "complexity": "hard"
@@ -175,7 +175,7 @@
 },
 {
   "question": "What are the top 5 holdings for VTI?",
-  "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) RETURN h.name AS holdingName, h.weight AS weight ORDER BY weight DESC LIMIT 5",
+  "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:CONTAINS]->(h:Holding) RETURN h.name AS holdingName, r.weight AS weight ORDER BY r.weight DESC LIMIT 5",
   "complexity": "simple"
 },
 {
@@ -214,8 +214,14 @@
   "complexity": "hard"
 },
 {
+  "question": "Show me all of the different sectors that exist in the database",
+  "expected_cypher": "MATCH (s:Sector) RETURN DISTINCT s.name AS sectorName",
+  "complexity": "simple"
+},
+
+{
   "question": "Show me the ordered list of funds in decreasing order of the 5 year returns" ,
-  "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_5y IS NOT NULL RETURN f.name AS fundName, p.return_5y AS fiveYearReturn ORDER BY fiveYearReturn DESC",
+  "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return5y IS NOT NULL RETURN f.name AS fundName, p.return5y AS fiveYearReturn ORDER BY fiveYearReturn DESC",
   "complexity": "medium"
 },
 {
@@ -234,8 +240,8 @@
   "complexity": "medium"
 },
 {
-  "question": "Show me all the funds that are Insitutional Plus Shares share class?" ,
-  "expected_cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'Insitutional Plus Shares'}) RETURN f.name AS fundName",
+  "question": "Show me all the funds that are Institutional Plus Shares share class?" ,
+  "expected_cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'Institutional Plus Shares'}) RETURN f.name AS fundName",
   "complexity": "medium"
 },
 {
@@ -340,7 +346,7 @@
   {
     "question": "List the tickers of all funds managed by the provider 'Vanguard'.",
     "ground_truth_answer": "['VTI', 'VOO', 'BND']",
-    "expected_cypher": "MATCH (p:Provider {name: 'Vanguard'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker AS ticker",
+    "expected_cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker AS ticker",
     "complexity": "hard"
   },
   {
@@ -386,7 +392,7 @@
     "complexity": "medium"
   },
   {
-    "question": "Who manages the trust for the fund with turnover rate 0.05?",
+    "question": "Who manages the trust for the fund with turnover rate 5%?",
     "ground_truth_answer": "Vanguard",
     "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE f.turnoverRate = 0.05 RETURN p.name AS providerName",
     "complexity": "hard"
@@ -469,7 +475,7 @@
   },
   {
     "question": "Show me the ordered list of funds in decreasing order of the 10 year returns",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_10y IS NOT NULL RETURN f.name AS fundName, p.return_10y AS tenYearReturn ORDER BY tenYearReturn DESC",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return10y IS NOT NULL RETURN f.name AS fundName, p.return10y AS tenYearReturn ORDER BY tenYearReturn DESC",
     "complexity": "medium"
   },
   {
@@ -506,5 +512,30 @@
     "question": "Does the VOO has any image attached to it?",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category",
     "complexity": "medium"
+  },
+  {
+    "question": "For the last financial highlight of the VBK, i want to know the nav the expense ratio and the income ratio",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VBK'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssetsValueEnd AS nav, fh.expenseRatio AS expenseRatio, fh.netIncomeRatio AS incomeRatio, r.year AS year ORDER BY r.year DESC LIMIT 1",
+    "complexity": "medium"
+  },
+  {
+    "question": "For the VIEIX, i want to see the evolution of the turnover ratio along the years",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VIEIX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.turnover AS turnover, r.year AS year ORDER BY r.year DESC",
+    "complexity": "medium"
+  },
+  {
+    "question": "How much has the VIEIX fund increased its net asset value since 2 years ago",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VIEIX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)\nWITH fh, r.year AS year\nORDER BY year DESC\nLIMIT 2\nWITH collect(fh) AS highlights\nWHERE size(highlights) = 2\nWITH highlights[0] AS latest, highlights[1] AS two_years_ago\nRETURN \n    latest.netAssetsValueEnd AS currentNAV,\n    two_years_ago.netAssetsValueEnd AS previousNAV,\n    (latest.netAssetsValueEnd - two_years_ago.netAssetsValueEnd) AS absoluteIncrease,\n    ((latest.netAssetsValueEnd - two_years_ago.netAssetsValueEnd) / two_years_ago.netAssetsValueEnd) * 100 AS percentageGrowth",
+    "complexity": "hard"
+  },
+  {
+    "question": "What is the fund that holds the most shares of the AAPL company?",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding {name: 'AAPL'}) RETURN f.name AS fundName, h.shares AS shares ORDER BY shares DESC LIMIT 1",
+    "complexity": "hard"
+  },
+  {
+    "question": "What is the fund that has the highest turnover rate?",
+    "expected_cypher": "MATCH (f:Fund) RETURN f.name AS fundName, f.turnoverRate AS turnoverRate ORDER BY turnoverRate DESC LIMIT 1",
+    "complexity": "hard"
   }
 ]

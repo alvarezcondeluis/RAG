@@ -31,13 +31,15 @@ class Text2CypherBenchmark:
     A professional testing suite for evaluating Text-to-Cypher models.
     """
     
-    def __init__(self, test_set_path: str, model_name: str, backend: str):
+    def __init__(self, test_set_path: str, model_name: str, backend: str, interactive: bool = False):
         self.test_path = Path(test_set_path)
         self.neo = Neo4jDatabase()
         self.translator = CypherTranslator(neo4j_driver=self.neo.driver, model_name=model_name, backend=backend, use_entity_resolver=True)
         
         self.results: List[TestResult] = []
         self.backend = backend
+        self.interactive = interactive
+        self.incorrect_queries: List[Dict[str, Any]] = []
         
     def load_tests(self) -> List[Dict]:
         """Loads test cases from the JSON file."""
@@ -204,17 +206,47 @@ class Text2CypherBenchmark:
             print(f"\n❌ FAIL - Execution error: {str(e)[:100]}")
             
         print(f"\n⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
+        
+        # Interactive validation if enabled
+        if self.interactive:
+            user_validation = self._ask_user_validation(result, item)
+            if not user_validation:
+                self._save_incorrect_query(result, item)
+        
         return result
 
-    def run(self):
-        """Main execution loop."""
+    def run(self, complexity_filter: Optional[List[str]] = None):
+        """
+        Main execution loop.
+        
+        Args:
+            complexity_filter: List of complexity levels to include ['simple', 'medium', 'hard'].
+                              If None and backend is 'groq', defaults to ['hard'] to conserve API limits.
+                              Examples: ['hard'], ['medium', 'hard'], ['simple', 'medium', 'hard']
+        """
         test_data = self.load_tests()
+        
+        # Auto-filter for Groq backend to conserve API limits
+        if complexity_filter is None and self.backend == "groq":
+            complexity_filter = ["hard"]
+            print(f"⚠️  Groq backend detected: Auto-filtering to {complexity_filter} questions only to conserve API limits")
+        
+        # Apply complexity filter if specified
+        if complexity_filter:
+            original_count = len(test_data)
+            # Normalize filter values to lowercase for comparison
+            filter_lower = [f.lower() for f in complexity_filter]
+            test_data = [item for item in test_data if item.get('complexity', '').lower() in filter_lower]
+            print(f"🔍 Filtered: {original_count} → {len(test_data)} questions (complexity={complexity_filter})")
+        
         print(f"\n{'='*80}")
         print(f"🚀 Text-to-Cypher Benchmark Suite")
         print(f"{'='*80}")
         print(f"📊 Total Questions: {len(test_data)}")
         print(f"🤖 Model: {self.translator.model_name}")
         print(f"🔧 Backend: {self.backend}")
+        if complexity_filter:
+            print(f"🎯 Complexity Filter: {', '.join(complexity_filter)}")
         print(f"{'='*80}\n")
         
         for i, item in enumerate(test_data, 1):
@@ -288,6 +320,92 @@ class Text2CypherBenchmark:
                     
                     print(f"\n{'='*80}\n")
 
+    def _ask_user_validation(self, result: TestResult, item: Dict) -> bool:
+        """
+        Ask user if the generated query and results are correct.
+        Returns True if correct, False if incorrect.
+        """
+        print("\n" + "="*80)
+        print("🔍 USER VALIDATION REQUIRED")
+        print("="*80)
+        
+        while True:
+            response = input("\n❓ Is this query and result CORRECT? (y/n/s to skip): ").strip().lower()
+            
+            if response == 'y':
+                print("✅ Marked as CORRECT")
+                return True
+            elif response == 'n':
+                print("❌ Marked as INCORRECT - will be saved for review")
+                # Ask for optional feedback
+                feedback = input("💬 Optional feedback (press Enter to skip): ").strip()
+                if feedback:
+                    result.error_message = f"User feedback: {feedback}"
+                return False
+            elif response == 's':
+                print("⏭️  Skipped - treating as correct")
+                return True
+            else:
+                print("⚠️  Invalid input. Please enter 'y' (yes), 'n' (no), or 's' (skip)")
+    
+    def _save_incorrect_query(self, result: TestResult, item: Dict):
+        """
+        Save an incorrect query to the list for later export.
+        """
+        incorrect_entry = {
+            "question_id": result.question_id,
+            "question": result.question,
+            "complexity": result.complexity,
+            "expected_cypher": result.expected_cypher,
+            "generated_cypher": result.generated_cypher,
+            "expected_results": result.expected_results,
+            "generated_results": result.generated_results,
+            "error_type": result.error_type,
+            "error_message": result.error_message,
+            "generation_time_ms": result.generation_time_ms,
+            "execution_time_ms": result.execution_time_ms
+        }
+        self.incorrect_queries.append(incorrect_entry)
+        print(f"💾 Saved to incorrect queries list (total: {len(self.incorrect_queries)})")
+    
+    def export_incorrect_queries(self, output_path: str = None):
+        """
+        Export incorrect queries to a JSON file.
+        """
+        if not self.incorrect_queries:
+            print("\n✅ No incorrect queries to export!")
+            return
+        
+        if output_path is None:
+            # Default to timestamp-based filename in test_results folder
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create test_results folder if it doesn't exist
+            results_dir = Path(__file__).parent / "test_results"
+            results_dir.mkdir(exist_ok=True)
+            
+            output_path = results_dir / f"incorrect_queries_{timestamp}.json"
+        
+        output_file = Path(output_path)
+        
+        with open(output_file, 'w') as f:
+            json.dump({
+                "metadata": {
+                    "total_incorrect": len(self.incorrect_queries),
+                    "model": self.translator.model_name,
+                    "backend": self.backend
+                },
+                "incorrect_queries": self.incorrect_queries
+            }, f, indent=2)
+        
+        print(f"\n💾 Exported {len(self.incorrect_queries)} incorrect queries to: {output_file}")
+        print(f"📁 Full path: {output_file.absolute()}")
+    
     def cleanup(self):
+        # Export incorrect queries if any were collected
+        if self.interactive and self.incorrect_queries:
+            self.export_incorrect_queries()
+        
         self.translator.stop_ollama_server()
         self.neo.close()

@@ -4,12 +4,10 @@ import requests
 import re
 from typing import Optional, Literal
 from datetime import datetime, timedelta
-import torch
 from langchain_ollama import ChatOllama
 from langchain_huggingface import HuggingFacePipeline
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from transformers import pipeline
 from simple_rag.rag.dynamic_few_shot import DynamicFewShotSelector
 from simple_rag.evaluation.entity_resolver import EntityResolver
 from simple_rag.rag.groq_wrapper import GroqWrapper
@@ -52,13 +50,26 @@ class CypherTranslator:
         self.groq_api_key = None
         self.selector = DynamicFewShotSelector(k=2)
         
-        # Groq token tracking (Free tier limits)
+        # Groq token tracking (Free tier limits - model-specific)
         self.groq_tokens_used = 0
         self.groq_requests_count = 0
-        self.groq_daily_limit = 14400  # Free tier: 14,400 tokens/day
-        self.groq_rpm_limit = 30  # Free tier: 30 requests/minute
         self.groq_request_timestamps = []  # Track request times for RPM limiting
         self.groq_reset_time = datetime.now() + timedelta(days=1)
+        
+        # Set limits based on model (Free tier)
+        if backend == "groq":
+            # Check if using 70B model (stricter limits) or 8B model
+            if "70b" in model_name.lower():
+                self.groq_daily_limit = 1000  # 70B: 1,000 requests/day
+                self.groq_tpm_limit = 6000    # 70B: 6,000 tokens/minute
+                print(f"📊 Groq Free Tier (70B model): 1,000 requests/day, 6,000 tokens/min")
+            else:
+                self.groq_daily_limit = 14400  # 8B: 14,400 requests/day
+                self.groq_tpm_limit = 6000     # 8B: 6,000 tokens/minute
+                print(f"📊 Groq Free Tier (8B model): 14,400 requests/day, 6,000 tokens/min")
+        else:
+            self.groq_daily_limit = 14400
+            self.groq_tpm_limit = 6000
         
         # Initialize EntityResolver if enabled
         self.use_entity_resolver = use_entity_resolver
@@ -224,7 +235,10 @@ Cypher Query:"""
     def _init_huggingface_chain(self):
         """Initialize LangChain with HuggingFace backend."""
         try:
+            # Import torch locally to avoid circular import issues
+            import torch
             from unsloth import FastLanguageModel
+            from transformers import pipeline
             
             print(f"Loading HuggingFace model: {self.model_name}")
             
@@ -243,6 +257,10 @@ Cypher Query:"""
             # Enable inference mode (faster)
             FastLanguageModel.for_inference(self.hf_model)
             
+            # Check CUDA availability
+            use_cuda = self.device == "cuda" and torch.cuda.is_available()
+            device_id = 0 if use_cuda else -1
+            
             # Create HuggingFace pipeline
             hf_pipeline = pipeline(
                 "text-generation",
@@ -251,7 +269,7 @@ Cypher Query:"""
                 max_new_tokens=256,
                 temperature=self.temperature if self.temperature > 0 else 1.0,
                 do_sample=self.temperature > 0,
-                device=0 if self.device == "cuda" and torch.cuda.is_available() else -1
+                device=device_id
             )
             
             # Wrap in LangChain HuggingFacePipeline
@@ -260,8 +278,8 @@ Cypher Query:"""
             # Build the chain
             self.chain = self.prompt | self.llm | StrOutputParser()
             
-            # Check device
-            if self.device == "cuda" and torch.cuda.is_available():
+            # Check device and report
+            if use_cuda:
                 print(f"✓ HuggingFace model loaded on GPU with 4-bit quantization")
             else:
                 print(f"✓ HuggingFace model loaded on CPU")
@@ -271,6 +289,20 @@ Cypher Query:"""
                 "HuggingFace backend requires 'unsloth', 'transformers', and 'langchain-huggingface'. "
                 "Install with: pip install unsloth transformers langchain-huggingface"
             ) from e
+        except AttributeError as e:
+            if "torch" in str(e) and "circular import" in str(e):
+                raise RuntimeError(
+                    "PyTorch circular import detected. This usually happens when:\n"
+                    "1. PyTorch version is incompatible with other packages\n"
+                    "2. Multiple PyTorch installations exist\n"
+                    "3. Environment has conflicting packages\n\n"
+                    "Try:\n"
+                    "- pip install torch --upgrade --force-reinstall\n"
+                    "- pip install unsloth transformers langchain-huggingface --upgrade\n"
+                    "- Or use a different backend (backend='ollama' or backend='groq')"
+                ) from e
+            else:
+                raise RuntimeError(f"Failed to initialize HuggingFace chain: {e}") from e
         except Exception as e:
             raise RuntimeError(f"Failed to initialize HuggingFace chain: {e}") from e
     
@@ -356,39 +388,40 @@ Cypher Query:"""
         """
         Check if we're within Groq API rate limits.
         Returns True if safe to proceed, False if limits exceeded.
+        
+        Free Tier Limits:
+        - Llama 3.1 8B: 14,400 requests/day, 6,000 tokens/min
+        - Llama 3.3 70B: 1,000 requests/day, 6,000 tokens/min
         """
         if self.backend != "groq":
             return True
         
         now = datetime.now()
         
-        # Check daily token limit reset
+        # Check daily reset
         if now >= self.groq_reset_time:
             self.groq_tokens_used = 0
             self.groq_requests_count = 0
+            self.groq_request_timestamps = []
             self.groq_reset_time = now + timedelta(days=1)
-            print("🔄 Groq token counter reset (new day)")
+            print("🔄 Groq counters reset (new day)")
         
-        # Check daily token limit
-        if self.groq_tokens_used >= self.groq_daily_limit:
+        # Check daily REQUEST limit (not token limit)
+        if self.groq_requests_count >= self.groq_daily_limit:
             remaining_time = self.groq_reset_time - now
             hours = remaining_time.seconds // 3600
             minutes = (remaining_time.seconds % 3600) // 60
-            print(f"⚠️  Groq daily token limit reached ({self.groq_tokens_used}/{self.groq_daily_limit})")
+            print(f"⚠️  Groq daily request limit reached ({self.groq_requests_count}/{self.groq_daily_limit})")
             print(f"   Resets in {hours}h {minutes}m")
             return False
         
-        # Check RPM (requests per minute) limit
+        # Check TPM (tokens per minute) limit
         one_minute_ago = now - timedelta(minutes=1)
         self.groq_request_timestamps = [ts for ts in self.groq_request_timestamps if ts > one_minute_ago]
         
-        if len(self.groq_request_timestamps) >= self.groq_rpm_limit:
-            wait_time = 60 - (now - self.groq_request_timestamps[0]).seconds
-            print(f"⚠️  Groq RPM limit reached ({len(self.groq_request_timestamps)}/{self.groq_rpm_limit})")
-            print(f"   Waiting {wait_time}s before next request...")
-            time.sleep(wait_time + 1)
-            # Clean up old timestamps after waiting
-            self.groq_request_timestamps = [ts for ts in self.groq_request_timestamps if ts > datetime.now() - timedelta(minutes=1)]
+        # Calculate tokens used in the last minute
+        # Note: We'll track this after the API call, so this is a pre-check based on previous minute
+        # For now, we just warn if we're close to the limit
         
         return True
     
@@ -402,11 +435,11 @@ Cypher Query:"""
         self.groq_requests_count += 1
         self.groq_request_timestamps.append(datetime.now())
         
-        # Calculate percentage used
-        usage_percent = (self.groq_tokens_used / self.groq_daily_limit) * 100
+        # Calculate percentage used (based on requests, not tokens)
+        usage_percent = (self.groq_requests_count / self.groq_daily_limit) * 100
         
-        print(f"📊 Groq Usage: {self.groq_tokens_used}/{self.groq_daily_limit} tokens ({usage_percent:.1f}%) | "
-              f"Requests: {self.groq_requests_count} | "
+        print(f"📊 Groq Usage: {self.groq_requests_count}/{self.groq_daily_limit} requests ({usage_percent:.1f}%) | "
+              f"Tokens: {self.groq_tokens_used} total | "
               f"This call: {total_tokens} tokens (↑{prompt_tokens} ↓{completion_tokens})")
     
     def get_groq_usage_stats(self) -> dict:
@@ -414,17 +447,19 @@ Cypher Query:"""
         if self.backend != "groq":
             return {"error": "Not using Groq backend"}
         
-        remaining_tokens = self.groq_daily_limit - self.groq_tokens_used
-        usage_percent = (self.groq_tokens_used / self.groq_daily_limit) * 100
+        remaining_requests = self.groq_daily_limit - self.groq_requests_count
+        usage_percent = (self.groq_requests_count / self.groq_daily_limit) * 100
         time_until_reset = self.groq_reset_time - datetime.now()
         
         return {
+            "requests_used": self.groq_requests_count,
+            "requests_remaining": remaining_requests,
+            "daily_request_limit": self.groq_daily_limit,
             "tokens_used": self.groq_tokens_used,
-            "tokens_remaining": remaining_tokens,
-            "daily_limit": self.groq_daily_limit,
+            "tpm_limit": self.groq_tpm_limit,
             "usage_percent": round(usage_percent, 2),
-            "requests_count": self.groq_requests_count,
-            "reset_in_hours": round(time_until_reset.seconds / 3600, 2)
+            "reset_in_hours": round(time_until_reset.seconds / 3600, 2),
+            "model": self.model_name
         }
     
     def reset_groq_usage(self):

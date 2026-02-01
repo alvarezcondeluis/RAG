@@ -809,6 +809,8 @@ class Neo4jDatabase:
             The created FinancialHighlights node or None if failed
         """
         try:
+            # Ensure year is an integer
+            year = int(year)
             highlights_id = f"{fund_ticker}_{year}_highlights"
             
             query = """

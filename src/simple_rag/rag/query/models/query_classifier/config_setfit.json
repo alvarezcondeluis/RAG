@@ -1,0 +1,9 @@
+{
+  "normalize_embeddings": false,
+  "labels": [
+    "not related",
+    "simple query",
+    "complex query",
+    "vector search"
+  ]
+}

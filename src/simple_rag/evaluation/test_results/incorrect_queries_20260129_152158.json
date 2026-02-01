@@ -1,0 +1,1125 @@
+{
+  "metadata": {
+    "total_incorrect": 29,
+    "model": "tomasonjo/llama3-text2cypher-demo:8b_4bit",
+    "backend": "ollama"
+  },
+  "incorrect_queries": [
+    {
+      "question_id": 14,
+      "question": "What is the net assets value recorded for the fund VTI?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.netAssets",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.ticker, f.name, f.netAssets",
+      "expected_results": [
+        {
+          "f.netAssets": 1777963000000.0
+        }
+      ],
+      "generated_results": [
+        {
+          "f.ticker": "VTI",
+          "f.name": "Vanguard Total Stock Market Index Fund",
+          "f.netAssets": 1777963000000.0
+        }
+      ],
+      "error_type": null,
+      "error_message": "User feedback: Not obtained from the financial highlights",
+      "generation_time_ms": 1291.5642261505127,
+      "execution_time_ms": 54.280996322631836
+    },
+    {
+      "question_id": 21,
+      "question": "What is the total number of holdings for the Vanguard Small Cap Fund?",
+      "complexity": "hard",
+      "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Small-Cap Index Fund'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH f, count(h) AS holdingCount WHERE holdingCount > 100 RETURN f.ticker, holdingCount",
+      "generated_cypher": "MATCH (p:Provider {name: 'Vanguard'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VMOTX', name: 'Vanguard Small Cap Fund'}) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH f, COUNT(h) AS holdingCount RETURN holdingCount",
+      "expected_results": [
+        {
+          "f.ticker": "NAESX",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VB",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VSMAX",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VSCIX",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VSCPX",
+          "holdingCount": 1329
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity retrieval error",
+      "generation_time_ms": 3445.542812347412,
+      "execution_time_ms": 100.52728652954102
+    },
+    {
+      "question_id": 25,
+      "question": "Who are the managers of the Vanguard Mid Cap Growth fund?",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Mid-Cap Growth Index Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName",
+      "generated_cypher": "MATCH (f:Fund {name: 'Vanguard Mid Cap Growth Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName",
+      "expected_results": [
+        {
+          "managerName": "Kenny Narzikul"
+        },
+        {
+          "managerName": "Aur\u00e9lie Denis"
+        },
+        {
+          "managerName": "Aaron Choi"
+        },
+        {
+          "managerName": "Kenny Narzikul"
+        },
+        {
+          "managerName": "Aur\u00e9lie Denis"
+        },
+        {
+          "managerName": "Aaron Choi"
+        },
+        {
+          "managerName": "Kenny Narzikul"
+        },
+        {
+          "managerName": "Aur\u00e9lie Denis"
+        },
+        {
+          "managerName": "Aaron Choi"
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity retrieval",
+      "generation_time_ms": 1730.161190032959,
+      "execution_time_ms": 29.28948402404785
+    },
+    {
+      "question_id": 33,
+      "question": "What is the name of the fund that has the greates annual returns since inception?",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) RETURN f.name AS fundName, p.returnInception AS inceptionReturn ORDER BY inceptionReturn DESC LIMIT 1",
+      "generated_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(tp:TrailingPerformance) RETURN f.name AS fundName, tp.returnInception AS returnInception ORDER BY tp.returnInception DESC LIMIT 1",
+      "expected_results": [
+        {
+          "fundName": "Vanguard Extended Market Index Fund",
+          "inceptionReturn": null
+        }
+      ],
+      "generated_results": [
+        {
+          "fundName": "Vanguard Extended Market Index Fund",
+          "returnInception": null
+        }
+      ],
+      "error_type": null,
+      "error_message": "User feedback: Fail in the relationship property",
+      "generation_time_ms": 2037.7569198608398,
+      "execution_time_ms": 62.70003318786621
+    },
+    {
+      "question_id": 39,
+      "question": "Show me the ordered list of funds in decreasing order of the 5 year returns",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_5y IS NOT NULL RETURN f.name AS fundName, p.return_5y AS fiveYearReturn ORDER BY fiveYearReturn DESC",
+      "generated_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_5y IS NOT NULL RETURN f.name AS fundName, p.return_5y AS fiveYearReturn ORDER BY fiveYearReturn DESC",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: fail in the relationship",
+      "generation_time_ms": 3429.0080070495605,
+      "execution_time_ms": 37.69111633300781
+    },
+    {
+      "question_id": 40,
+      "question": "Show me the fund that has the best total return in the year 2022",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL AND r.year = 2022 RETURN f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY totalReturn DESC LIMIT 1",
+      "generated_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL AND r.year = 2022 RETURN f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY totalReturn DESC LIMIT 1",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: year property as a string",
+      "generation_time_ms": 4650.674819946289,
+      "execution_time_ms": 35.01701354980469
+    },
+    {
+      "question_id": 44,
+      "question": "Show me all the funds that have more than 15% invested in United States",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[h:HAS_GEOGRAPHIC_ALLOCATION]->(:Region {name: 'United States'}) WHERE h.weight > 15.0 RETURN f.name AS fundName",
+      "generated_cypher": "MATCH (f:Fund)-[h:HAS_GEOGRAPHIC_ALLOCATION ]->(:Region {name: 'United States'}) WHERE weight > 0.15 RETURN f.name AS fundName, f.ticker AS ticker, f.name AS fundFullName",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": "Syntax/Execution Error",
+      "error_message": "User feedback: Not indicated a similar example using holdings or geographic allocation",
+      "generation_time_ms": 3462.806463241577,
+      "execution_time_ms": 0.0
+    },
+    {
+      "question_id": 46,
+      "question": "Does the VTI has any image attached to it?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category",
+      "expected_results": [
+        {
+          "chartTitle": "Portfolio: VTI",
+          "category": "Portfolio"
+        }
+      ],
+      "generated_results": [
+        {
+          "chartTitle": "Portfolio: VTI",
+          "category": "Portfolio"
+        }
+      ],
+      "error_type": null,
+      "error_message": "User feedback: for the images return also the svg",
+      "generation_time_ms": 1734.8828315734863,
+      "execution_time_ms": 3.9675235748291016
+    },
+    {
+      "question_id": 50,
+      "question": "How many holdings does the Total International Stock fund have in total?",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WHERE f.name CONTAINS 'Total International Stock' RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName",
+      "generated_cypher": "MATCH (f:Fund {name: 'Total International Stock'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) RETURN count(h) AS holdingCount",
+      "expected_results": [
+        {
+          "holdingsCount": 4186,
+          "ticker": "IXUS",
+          "fundName": "iShares Core MSCI Total International Stock ETF"
+        }
+      ],
+      "generated_results": [
+        {
+          "holdingCount": 0
+        }
+      ],
+      "error_type": "Incorrect Result",
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 1913.8898849487305,
+      "execution_time_ms": 63.076019287109375
+    },
+    {
+      "question_id": 53,
+      "question": "Calculate the cost per 10k investment for the 'Growth Index' fund.",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Growth Index' RETURN f.costsPer10k AS cost, f.name as Name",
+      "generated_cypher": "MATCH (f:Fund {name: 'Growth Index'}) RETURN f.ticker AS ticker, f.costsPer10k AS cost",
+      "expected_results": [
+        {
+          "cost": 20
+        },
+        {
+          "cost": 5
+        },
+        {
+          "cost": 6
+        },
+        {
+          "cost": 5
+        },
+        {
+          "cost": 8
+        },
+        {
+          "cost": 7
+        },
+        {
+          "cost": 21
+        },
+        {
+          "cost": 8
+        },
+        {
+          "cost": 8
+        },
+        {
+          "cost": 21
+        },
+        {
+          "cost": 8
+        },
+        {
+          "cost": 8
+        },
+        {
+          "cost": 6
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 1648.0059623718262,
+      "execution_time_ms": 44.52967643737793
+    },
+    {
+      "question_id": 54,
+      "question": "Find the ticker symbol for the fund named '500 Index Fund'.",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS '500 Index Fund' RETURN f.ticker AS ticker",
+      "generated_cypher": "MATCH (f:Fund {name: '500 Index Fund'}) RETURN f.ticker AS ticker",
+      "expected_results": [
+        {
+          "ticker": "VFINX"
+        },
+        {
+          "ticker": "VOO"
+        },
+        {
+          "ticker": "VFIAX"
+        },
+        {
+          "ticker": "VFFSX"
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: complex",
+      "generation_time_ms": 2325.4525661468506,
+      "execution_time_ms": 10.123729705810547
+    },
+    {
+      "question_id": 56,
+      "question": "Who is the provider that manages the BSV fund?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'BSV'}) RETURN p.name AS providerName",
+      "generated_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'BSV'}) RETURN p.name",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: not in the data so have to indicate",
+      "generation_time_ms": 1463.9713764190674,
+      "execution_time_ms": 20.607948303222656
+    },
+    {
+      "question_id": 59,
+      "question": "Return both the expense ratio and the turnover rate for the High Dividend Yield fund.",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'High Dividend Yield' RETURN f.expenseRatio AS expenseRatio, f.turnoverRate AS turnoverRate",
+      "generated_cypher": "MATCH (f:Fund {name: 'High Dividend Yield'}) RETURN f.expenseRatio AS expenseRatio, f.turnoverRate AS turnoverRate",
+      "expected_results": [
+        {
+          "expenseRatio": 0.06,
+          "turnoverRate": 11.0
+        },
+        {
+          "expenseRatio": 0.08,
+          "turnoverRate": 11.0
+        },
+        {
+          "expenseRatio": 0.18,
+          "turnoverRate": 9.0
+        },
+        {
+          "expenseRatio": 0.18,
+          "turnoverRate": 9.0
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 686.0146522521973,
+      "execution_time_ms": 33.44559669494629
+    },
+    {
+      "question_id": 60,
+      "question": "What is the net assets value recorded for the fund BNDX?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund {ticker: 'BNDX'}) RETURN f.netAssets",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'BNDX'}) RETURN f.ticker, f.name, f.netAssets",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: not in the data",
+      "generation_time_ms": 2051.711320877075,
+      "execution_time_ms": 14.943599700927734
+    },
+    {
+      "question_id": 63,
+      "question": "What is the security exchange and the number of holdings for the Information Technology ETF?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Information Technology' RETURN f.securityExchange AS exchange, f.numberHoldings AS holdings",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'IXIC'}) RETURN f.securityExchange AS exchange, f.numberHoldings AS numberOfHoldings",
+      "expected_results": [
+        {
+          "exchange": "NYSE",
+          "holdings": 321
+        },
+        {
+          "exchange": "N/A",
+          "holdings": 321
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 1402.4293422698975,
+      "execution_time_ms": 28.438329696655273
+    },
+    {
+      "question_id": 64,
+      "question": "Does the Wellington fund have a turnover rate higher than 20%?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Wellington' RETURN f.turnoverRate > 20 AS isHighTurnover",
+      "generated_cypher": "MATCH (f:Fund {name: 'Wellington'}) RETURN f.ticker, f.name, f.turnoverRate > 20 AS isHighTurnover",
+      "expected_results": [
+        {
+          "isHighTurnover": true
+        },
+        {
+          "isHighTurnover": true
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 3150.0725746154785,
+      "execution_time_ms": 28.66649627685547
+    },
+    {
+      "question_id": 65,
+      "question": "Which funds are issued by 'Vanguard Bond Index Funds' trust?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (t:Trust {name: 'Vanguard Bond Index Funds'})-[:ISSUES]->(f:Fund) RETURN f.name AS fundName",
+      "generated_cypher": "MATCH (t:Trust {name: 'Vanguard Bond Index Funds'})-[:ISSUES]->(f:Fund) RETURN f.ticker AS ticker, f.name AS name",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: not in the data",
+      "generation_time_ms": 909.1341495513916,
+      "execution_time_ms": 11.233329772949219
+    },
+    {
+      "question_id": 67,
+      "question": "What is the total number of holdings for the Vanguard Small Cap Fund?",
+      "complexity": "hard",
+      "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Small-Cap Index Fund'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH f, count(h) AS holdingCount WHERE holdingCount > 100 RETURN f.ticker, holdingCount",
+      "generated_cypher": "MATCH (p:Provider {name: 'Vanguard'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {name: 'Vanguard Small Cap Fund'}) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) RETURN count(h) AS holdingCount",
+      "expected_results": [
+        {
+          "f.ticker": "NAESX",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VB",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VSMAX",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VSCIX",
+          "holdingCount": 1329
+        },
+        {
+          "f.ticker": "VSCPX",
+          "holdingCount": 1329
+        }
+      ],
+      "generated_results": [
+        {
+          "holdingCount": 0
+        }
+      ],
+      "error_type": "Incorrect Result",
+      "error_message": "User feedback: entity resolver and bad answer",
+      "generation_time_ms": 3706.310272216797,
+      "execution_time_ms": 72.78800010681152
+    },
+    {
+      "question_id": 68,
+      "question": "Show me the costs per 10k for all funds listed on NYSE Arca.",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.securityExchange = 'NYSE Arca' RETURN f.ticker AS ticker, f.costsPer10k AS cost",
+      "generated_cypher": "MATCH (f:Fund) WHERE f.securityExchange = 'NYSE' RETURN f.ticker AS ticker, f.costsPer10k AS cost",
+      "expected_results": [
+        {
+          "ticker": "MGK",
+          "cost": 8
+        },
+        {
+          "ticker": "LDRC",
+          "cost": 0
+        },
+        {
+          "ticker": "LDRH",
+          "cost": 0
+        },
+        {
+          "ticker": "LDRI",
+          "cost": 0
+        },
+        {
+          "ticker": "LDRT",
+          "cost": 0
+        },
+        {
+          "ticker": "ILCG",
+          "cost": 4
+        },
+        {
+          "ticker": "IMCB",
+          "cost": 4
+        },
+        {
+          "ticker": "IMCG",
+          "cost": 6
+        },
+        {
+          "ticker": "ISCG",
+          "cost": 6
+        },
+        {
+          "ticker": "ISCV",
+          "cost": 6
+        },
+        {
+          "ticker": "LRGF",
+          "cost": 9
+        },
+        {
+          "ticker": "SMLF",
+          "cost": 16
+        },
+        {
+          "ticker": "TECB",
+          "cost": 33
+        },
+        {
+          "ticker": "AOK",
+          "cost": 10
+        },
+        {
+          "ticker": "AOM",
+          "cost": 10
+        },
+        {
+          "ticker": "AOR",
+          "cost": 11
+        },
+        {
+          "ticker": "AOA",
+          "cost": 12
+        },
+        {
+          "ticker": "SIZE",
+          "cost": 16
+        },
+        {
+          "ticker": "IRTR",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDB",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDC",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDD",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDE",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDF",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDG",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDH",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDI",
+          "cost": 0
+        },
+        {
+          "ticker": "ITDJ",
+          "cost": 0
+        },
+        {
+          "ticker": "IYY",
+          "cost": 21
+        },
+        {
+          "ticker": "DSI",
+          "cost": 26
+        },
+        {
+          "ticker": "SUSA",
+          "cost": 26
+        },
+        {
+          "ticker": "IYM",
+          "cost": 37
+        },
+        {
+          "ticker": "IYC",
+          "cost": 41
+        },
+        {
+          "ticker": "IYK",
+          "cost": 40
+        },
+        {
+          "ticker": "IYE",
+          "cost": 36
+        },
+        {
+          "ticker": "IYG",
+          "cost": 43
+        },
+        {
+          "ticker": "IYF",
+          "cost": 42
+        },
+        {
+          "ticker": "IYH",
+          "cost": 38
+        },
+        {
+          "ticker": "IYW",
+          "cost": 40
+        },
+        {
+          "ticker": "IDU",
+          "cost": 42
+        },
+        {
+          "ticker": "IAI",
+          "cost": 42
+        },
+        {
+          "ticker": "IHF",
+          "cost": 38
+        },
+        {
+          "ticker": "IAK",
+          "cost": 42
+        },
+        {
+          "ticker": "MADE",
+          "cost": 28
+        },
+        {
+          "ticker": "IHI",
+          "cost": 39
+        },
+        {
+          "ticker": "IEZ",
+          "cost": 35
+        },
+        {
+          "ticker": "IHE",
+          "cost": 39
+        },
+        {
+          "ticker": "IYR",
+          "cost": 40
+        },
+        {
+          "ticker": "IAT",
+          "cost": 40
+        },
+        {
+          "ticker": "IWB",
+          "cost": 16
+        },
+        {
+          "ticker": "IWF",
+          "cost": 19
+        },
+        {
+          "ticker": "IWD",
+          "cost": 19
+        },
+        {
+          "ticker": "FOVL",
+          "cost": 27
+        },
+        {
+          "ticker": "IVV",
+          "cost": 3
+        },
+        {
+          "ticker": "ITOT",
+          "cost": 3
+        },
+        {
+          "ticker": "IGM",
+          "cost": 40
+        },
+        {
+          "ticker": "IWC",
+          "cost": 58
+        },
+        {
+          "ticker": "IWM",
+          "cost": 18
+        },
+        {
+          "ticker": "IWO",
+          "cost": 23
+        },
+        {
+          "ticker": "IWN",
+          "cost": 23
+        },
+        {
+          "ticker": "IWR",
+          "cost": 19
+        },
+        {
+          "ticker": "IWP",
+          "cost": 23
+        },
+        {
+          "ticker": "IJK",
+          "cost": 16
+        },
+        {
+          "ticker": "IJJ",
+          "cost": 18
+        },
+        {
+          "ticker": "TOPT",
+          "cost": 9
+        },
+        {
+          "ticker": "IDGT",
+          "cost": 40
+        },
+        {
+          "ticker": "STIP",
+          "cost": 3
+        },
+        {
+          "ticker": "TIP",
+          "cost": 19
+        },
+        {
+          "ticker": "IBIB",
+          "cost": 10
+        },
+        {
+          "ticker": "IBIC",
+          "cost": 10
+        },
+        {
+          "ticker": "IBID",
+          "cost": 10
+        },
+        {
+          "ticker": "IBIE",
+          "cost": 10
+        },
+        {
+          "ticker": "IBIF",
+          "cost": 10
+        },
+        {
+          "ticker": "IBIG",
+          "cost": 10
+        },
+        {
+          "ticker": "IBIH",
+          "cost": 10
+        },
+        {
+          "ticker": "IBII",
+          "cost": 10
+        },
+        {
+          "ticker": "IBIJ",
+          "cost": 10
+        },
+        {
+          "ticker": "IBDX",
+          "cost": 11
+        },
+        {
+          "ticker": "IBDY",
+          "cost": 11
+        },
+        {
+          "ticker": "BYLD",
+          "cost": 0
+        }
+      ],
+      "generated_results": [
+        {
+          "ticker": "VTV",
+          "cost": 4
+        },
+        {
+          "ticker": "VUG",
+          "cost": 5
+        },
+        {
+          "ticker": "VV",
+          "cost": 5
+        },
+        {
+          "ticker": "VAW",
+          "cost": 9
+        },
+        {
+          "ticker": "VOX",
+          "cost": 10
+        },
+        {
+          "ticker": "VPU",
+          "cost": 10
+        },
+        {
+          "ticker": "VCR",
+          "cost": 10
+        },
+        {
+          "ticker": "VDC",
+          "cost": 9
+        },
+        {
+          "ticker": "VDE",
+          "cost": 9
+        },
+        {
+          "ticker": "VFH",
+          "cost": 10
+        },
+        {
+          "ticker": "VHT",
+          "cost": 9
+        },
+        {
+          "ticker": "VIS",
+          "cost": 10
+        },
+        {
+          "ticker": "VGT",
+          "cost": 10
+        },
+        {
+          "ticker": "MGC",
+          "cost": 8
+        },
+        {
+          "ticker": "MGV",
+          "cost": 7
+        },
+        {
+          "ticker": "VIG",
+          "cost": 7
+        }
+      ],
+      "error_type": "Incorrect Result",
+      "error_message": "User feedback: incorrect entity for NYSE Arca",
+      "generation_time_ms": 2670.3107357025146,
+      "execution_time_ms": 52.28137969970703
+    },
+    {
+      "question_id": 71,
+      "question": "Who are the managers of the Vanguard Mid Cap Growth fund?",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Mid-Cap Growth Index Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName",
+      "generated_cypher": "MATCH (f:Fund {name: 'Vanguard Mid Cap Growth Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName",
+      "expected_results": [
+        {
+          "managerName": "Kenny Narzikul"
+        },
+        {
+          "managerName": "Aur\u00e9lie Denis"
+        },
+        {
+          "managerName": "Aaron Choi"
+        },
+        {
+          "managerName": "Kenny Narzikul"
+        },
+        {
+          "managerName": "Aur\u00e9lie Denis"
+        },
+        {
+          "managerName": "Aaron Choi"
+        },
+        {
+          "managerName": "Kenny Narzikul"
+        },
+        {
+          "managerName": "Aur\u00e9lie Denis"
+        },
+        {
+          "managerName": "Aaron Choi"
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 1630.9690475463867,
+      "execution_time_ms": 4.292964935302734
+    },
+    {
+      "question_id": 74,
+      "question": "What are the main risks described for BND?",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund {ticker: 'BND'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK]->(r:RiskChunk) RETURN r.title AS riskTitle, r.text AS riskDescription",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'BND'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK]->(r:RiskChunk) RETURN r.title AS riskTitle, r.text AS riskDescription",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: not in the data",
+      "generation_time_ms": 1961.979866027832,
+      "execution_time_ms": 37.97554969787598
+    },
+    {
+      "question_id": 78,
+      "question": "Show me what is the 1y, 5y and inception return of the Health Care ETF?",
+      "complexity": "simple",
+      "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE f.name CONTAINS 'Health Care' RETURN p.return1y AS oneYear, p.return5y AS fiveYear, p.returnInception AS inception",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) RETURN p.return1y AS oneYear, p.return5y AS fiveYear, p.returnInception AS inception",
+      "expected_results": [
+        {
+          "oneYear": 2.96,
+          "fiveYear": 7.22,
+          "inception": null
+        },
+        {
+          "oneYear": 3.01,
+          "fiveYear": 7.28,
+          "inception": null
+        },
+        {
+          "oneYear": -10.13,
+          "fiveYear": 5.65,
+          "inception": null
+        },
+        {
+          "oneYear": -10.13,
+          "fiveYear": 5.66,
+          "inception": null
+        }
+      ],
+      "generated_results": [
+        {
+          "oneYear": 23.75,
+          "fiveYear": 13.8,
+          "inception": null
+        }
+      ],
+      "error_type": "Incorrect Result",
+      "error_message": "User feedback: entity resolver",
+      "generation_time_ms": 2235.320568084717,
+      "execution_time_ms": 5.224943161010742
+    },
+    {
+      "question_id": 83,
+      "question": "What percentage of VXUS's holdings are US-based companies?",
+      "complexity": "hard",
+      "expected_cypher": "MATCH (f:Fund {ticker: 'VXUS'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH count(h) AS total, count(CASE WHEN h.country = 'US' THEN 1 END) AS usCount RETURN (usCount * 100.0 / total) AS percentageUS",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'VXUS'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:CONTAINS]->(h:Holding) WITH count(h) AS total, count(CASE WHEN h.country = 'US' THEN 1 END) AS usCount RETURN (usCount * 100.0 / total) AS percentageUS",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": "Syntax/Execution Error",
+      "error_message": "User feedback: ticker cleaning needed",
+      "generation_time_ms": 2977.25510597229,
+      "execution_time_ms": 0.0
+    },
+    {
+      "question_id": 84,
+      "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
+      "complexity": "hard",
+      "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'S&P 500' RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover",
+      "generated_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'S&P 500' RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover",
+      "expected_results": [
+        {
+          "ticker": "IVV",
+          "name": "iShares Core S&P 500 ETF",
+          "exchange": "NYSE Arca",
+          "cost": 3,
+          "fee": 158485881000.0,
+          "holdings": 508,
+          "ratio": 0.03,
+          "assets": 5.81551682983e+17,
+          "turnover": 3.0
+        },
+        {
+          "ticker": "IVVW",
+          "name": "iShares S&P 500 BuyWrite ETF",
+          "exchange": "N/A",
+          "cost": 23,
+          "fee": 196183000.0,
+          "holdings": 3,
+          "ratio": 0.22,
+          "assets": 200212628000000.0,
+          "turnover": 1.0
+        }
+      ],
+      "generated_results": [
+        {
+          "ticker": "IVV",
+          "name": "iShares Core S&P 500 ETF",
+          "exchange": "NYSE Arca",
+          "cost": 3,
+          "fee": 158485881000.0,
+          "holdings": 508,
+          "ratio": 0.03,
+          "assets": 5.81551682983e+17,
+          "turnover": 3.0
+        },
+        {
+          "ticker": "IVVW",
+          "name": "iShares S&P 500 BuyWrite ETF",
+          "exchange": "N/A",
+          "cost": 23,
+          "fee": 196183000.0,
+          "holdings": 3,
+          "ratio": 0.22,
+          "assets": 200212628000000.0,
+          "turnover": 1.0
+        }
+      ],
+      "error_type": null,
+      "error_message": "User feedback: complex query Vanguard 500 not included",
+      "generation_time_ms": 4309.121370315552,
+      "execution_time_ms": 3.587007522583008
+    },
+    {
+      "question_id": 85,
+      "question": "Show me the ordered list of funds in decreasing order of the 10 year returns",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_10y IS NOT NULL RETURN f.name AS fundName, p.return_10y AS tenYearReturn ORDER BY tenYearReturn DESC",
+      "generated_cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return_10y IS NOT NULL RETURN f.name AS fundName, p.return_10y AS tenYearReturn ORDER BY tenYearReturn DESC",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: using old _ properties",
+      "generation_time_ms": 3184.927225112915,
+      "execution_time_ms": 33.63966941833496
+    },
+    {
+      "question_id": 86,
+      "question": "Show me the fund that has the best total return in the year 2023",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL AND r.year = 2023 RETURN f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY totalReturn DESC LIMIT 1",
+      "generated_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL AND r.year = 2023 RETURN f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY totalReturn DESC LIMIT 1",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: year is string in the database",
+      "generation_time_ms": 3735.595464706421,
+      "execution_time_ms": 25.62427520751953
+    },
+    {
+      "question_id": 87,
+      "question": "What are the risks for the Real Estate ETF?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_RISK]->(r:RiskChunk) WHERE f.name CONTAINS 'Real Estate' RETURN r.text AS risk",
+      "generated_cypher": "MATCH (f:Fund {ticker: 'REIT'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK]->(r:RiskChunk) RETURN r.title AS riskTitle, r.text AS riskDescription",
+      "expected_results": [
+        {
+          "risk": "The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market.\n\n\u2022\u2002Asset concentration risk, which is the chance that, because the Fund\u2019s targetindex (and therefore the Fund) tends to be heavily weighted in its ten largestholdings, the Fund\u2019s performance may be hurt disproportionately by the poorperformance of relatively few stocks.\n\n\u2022\u2002Investment style risk, which is the chance that returns from the stocks of REITsand other real estate-related investments - which typically are small- ormid-capitalization stocks - will trail returns from the overall stock market. Historically, these stocks have performed quite differently from theoverall market.\n\n\u2022\u2002Nondiversification risk, which is the chance that the Fund may invest a greaterpercentage of its assets in a particular issuer or group of issuers or may ownlarger positions of an issuer\u2019s voting stock than a diversified fund.\n\n\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk."
+        },
+        {
+          "risk": "\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index.\n\nAn investment in the Fund is not a deposit of a bank and is not insured orguaranteed by the Federal Deposit Insurance Corporation or any othergovernment agency."
+        },
+        {
+          "risk": "\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk. Passive management risk is the chance that the Fund\u2019s use of anindexing strategy will negatively impact the Fund\u2019s performance. Because theFund seeks to track the performance of its target index regardless of how thatindex is performing, the Fund\u2019s performance may be lower than it would be if theFund were actively managed. \nTracking error risk is the chance that the Fund\u2019sperformance will deviate from the performance of its target index. Tracking errorrisk may be heightened during times of increased market volatility or under otherunusual market conditions. Index provider risk is the chance that the Fund will be\n\n3\n\nnegatively impacted by changes or errors made by the index provider. Any gains, losses, or costs associated with or resulting from an error made by the indexprovider will generally be borne by the Fund and, as a result, theFund\u2019s shareholders.\n\n\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index."
+        },
+        {
+          "risk": "An investment in the Fund could lose money over short or long periods of time. You should expect the Fund\u2019s share price and total return to fluctuate within awide range. The Fund is subject to the following risks, which could affect theFund\u2019s performance:\n\n\u2022\u2002Industry concentration risk, which is the chance that the stocks of REITs andother real estate-related investments will decline because of adversedevelopments affecting the real estate industry and real property values. Because the Fund concentrates its assets in these stocks, industry concentrationrisk is high.\n\n\u2022\u2002Interest rate risk, which is the chance that REIT stock prices overall will declineand that the cost of borrowing for REITs will increase because of rising interestrates. Interest rate risk is high for the Fund.\n\n\u2022\u2002Stock market risk, which is the chance that stock prices overall will decline. Stock markets tend to move in cycles, with periods of rising prices and periods offalling prices. The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market."
+        },
+        {
+          "risk": "An investment in the Fund could lose money over short or long periods of time. You should expect the Fund\u2019s share price and total return to fluctuate within awide range. The Fund is subject to the following risks, which could affect theFund\u2019s performance:\n\n\u2022\u2002Industry concentration risk, which is the chance that the stocks of REITs andother real estate-related investments will decline because of adversedevelopments affecting the real estate industry and real property values. Because the Fund concentrates its assets in these stocks, industry concentrationrisk is high.\n\n\u2022\u2002Interest rate risk, which is the chance that REIT stock prices overall will declineand that the cost of borrowing for REITs will increase because of rising interestrates. Interest rate risk is high for the Fund.\n\n\u2022\u2002Stock market risk, which is the chance that stock prices overall will decline. Stock markets tend to move in cycles, with periods of rising prices and periods offalling prices. The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market."
+        },
+        {
+          "risk": "Trading of the Fund\u2019s ETF Shares may also be halted if (1) theshares are delisted from NYSE Arca without first being listed on anotherexchange or (2) NYSE Arca officials determine that such action is appropriate inthe interest of a fair and \norderly market or for the protection of investors.\n\nAn investment in the Fund is not a deposit of a bank and is not insured orguaranteed by the Federal Deposit Insurance Corporation or any othergovernment agency."
+        },
+        {
+          "risk": "\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk. Passive management risk is the chance that the Fund\u2019s use of anindexing strategy will negatively impact the Fund\u2019s performance. Because theFund seeks to track the performance of its target index regardless of how thatindex is performing, the Fund\u2019s performance may be lower than it would be if theFund were actively managed. \nTracking error risk is the chance that the Fund\u2019sperformance will deviate from the performance of its target index. Tracking errorrisk may be heightened during times of increased market volatility or under otherunusual market conditions. Index provider risk is the chance that the Fund will benegatively impacted by changes or errors made by the index provider. Any gains, losses, or costs associated with or resulting from an error made by the indexprovider will generally be borne by the Fund and, \nas a result, theFund\u2019s shareholders.\n\n\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index."
+        },
+        {
+          "risk": "\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index.\n\n3\n\nBecause ETF Shares are traded on an exchange, they are subject toadditional risks:\n\n\u2022\u2002The Fund\u2019s ETF Shares are listed for trading on NYSE Arca and are boughtand sold on the secondary market at market prices. Although it is expected thatthe market price of an ETF Share typically will approximate its net asset value(NAV), there may be times when the market price and the NAV differ significantly. Thus, you may pay more or less than NAV when you buy ETF Shares on thesecondary market, and you may receive more or less than NAV when you sellthose shares.\n\n\u2022\u2002Although the Fund\u2019s ETF Shares are listed for trading on NYSE Arca, it ispossible that an active trading market may not be maintained.\n\n\u2022\u2002Trading of the Fund\u2019s ETF Shares may be halted by the activation of individualor marketwide trading halts (which halt trading for a specific period of time whenthe price of a particular security or overall market prices decline by a specifiedpercentage)."
+        },
+        {
+          "risk": "The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market.\n\n\u2022\u2002Asset concentration risk, which is the chance that, because the Fund\u2019s targetindex (and therefore the Fund) tends to be heavily weighted in its ten largestholdings, the Fund\u2019s performance may be hurt disproportionately by the poorperformance of relatively few stocks.\n\n\u2022\u2002Investment style risk, which is the chance that returns from the stocks of REITsand other real estate-related investments - which typically are small- ormid-capitalization stocks - will trail returns from the overall stock market. Historically, these stocks have performed quite differently from theoverall market.\n\n\u2022\u2002Nondiversification risk, which is the chance that the Fund may invest a greaterpercentage of its assets in a particular issuer or group of issuers or may ownlarger positions of an issuer\u2019s voting stock than a diversified fund.\n\n\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk."
+        },
+        {
+          "risk": "\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index.\n\nAn investment in the Fund is not a deposit of a bank and is not insured orguaranteed by the Federal Deposit Insurance Corporation or any othergovernment agency."
+        },
+        {
+          "risk": "The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market.\n\n\u2022\u2002Asset concentration risk, which is the chance that, because the Fund\u2019s targetindex (and therefore the Fund) tends to be heavily weighted in its ten largestholdings, the Fund\u2019s performance may be hurt disproportionately by the poorperformance of relatively few stocks.\n\n\u2022\u2002Investment style risk, which is the chance that returns from the stocks of REITsand other real estate-related investments - which typically are small- ormid-capitalization stocks - will trail returns from the overall stock market. Historically, these stocks have performed quite differently from theoverall market.\n\n\u2022\u2002Nondiversification risk, which is the chance that the Fund may invest a greaterpercentage of its assets in a particular issuer or group of issuers or may ownlarger positions of an issuer\u2019s voting stock than a diversified fund.\n\n\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk."
+        },
+        {
+          "risk": "An investment in the Fund could lose money over short or long periods of time. You should expect the Fund\u2019s share price and total return to fluctuate within awide range. The Fund is subject to the following risks, which could affect theFund\u2019s performance:\n\n\u2022\u2002Industry concentration risk, which is the chance that the stocks of REITs andother real estate-related investments will decline because of adversedevelopments affecting the real estate industry and real property values. Because the Fund concentrates its assets in these stocks, industry concentrationrisk is high.\n\n\u2022\u2002Interest rate risk, which is the chance that REIT stock prices overall will declineand that the cost of borrowing for REITs will increase because of rising interestrates. Interest rate risk is high for the Fund.\n\n\u2022\u2002Stock market risk, which is the chance that stock prices overall will decline. Stock markets tend to move in cycles, with periods of rising prices and periods offalling prices. The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market."
+        },
+        {
+          "risk": "\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk. Passive management risk is the chance that the Fund\u2019s use of anindexing strategy will negatively impact the Fund\u2019s performance. Because theFund seeks to track the performance of its target index regardless of how thatindex is performing, the Fund\u2019s performance may be lower than it would be if theFund were actively managed. \nTracking error risk is the chance that the Fund\u2019sperformance will deviate from the performance of its target index. Tracking errorrisk may be heightened during times of increased market volatility or under otherunusual market conditions. Index provider risk is the chance that the Fund will be\n\n3\n\nnegatively impacted by changes or errors made by the index provider. Any gains, losses, or costs associated with or resulting from an error made by the indexprovider will generally be borne by the Fund and, as a result, theFund\u2019s shareholders.\n\n\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index."
+        },
+        {
+          "risk": "\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index.\n\nAn investment in the Fund is not a deposit of a bank and is not insured orguaranteed by the Federal Deposit Insurance Corporation or any othergovernment agency."
+        },
+        {
+          "risk": "The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market.\n\n\u2022\u2002Asset concentration risk, which is the chance that, because the Fund\u2019s targetindex (and therefore the Fund) tends to be heavily weighted in its ten largestholdings, the Fund\u2019s performance may be hurt disproportionately by the poorperformance of relatively few stocks.\n\n\u2022\u2002Investment style risk, which is the chance that returns from the stocks of REITsand other real estate-related investments - which typically are small- ormid-capitalization stocks - will trail returns from the overall stock market. Historically, these stocks have performed quite differently from theoverall market.\n\n\u2022\u2002Nondiversification risk, which is the chance that the Fund may invest a greaterpercentage of its assets in a particular issuer or group of issuers or may ownlarger positions of an issuer\u2019s voting stock than a diversified fund.\n\n\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk."
+        },
+        {
+          "risk": "\u2022\u2002Index-related risks. The Fund is subject to risks associated with indexinvesting, which include passive management risk, tracking error risk, and indexprovider risk. Passive management risk is the chance that the Fund\u2019s use of anindexing strategy will negatively impact the Fund\u2019s performance. Because theFund seeks to track the performance of its target index regardless of how thatindex is performing, the Fund\u2019s performance may be lower than it would be if theFund were actively managed. \nTracking error risk is the chance that the Fund\u2019sperformance will deviate from the performance of its target index. Tracking errorrisk may be heightened during times of increased market volatility or under otherunusual market conditions. Index provider risk is the chance that the Fund will be\n\n3\n\nnegatively impacted by changes or errors made by the index provider. Any gains, losses, or costs associated with or resulting from an error made by the indexprovider will generally be borne by the Fund and, as a result, theFund\u2019s shareholders.\n\n\u2022\u2002Index replicating risk, which is the chance that the Fund may be preventedfrom holding one or more securities in the same proportion as in its target index."
+        },
+        {
+          "risk": "An investment in the Fund could lose money over short or long periods of time. You should expect the Fund\u2019s share price and total return to fluctuate within awide range. The Fund is subject to the following risks, which could affect theFund\u2019s performance:\n\n\u2022\u2002Industry concentration risk, which is the chance that the stocks of REITs andother real estate-related investments will decline because of adversedevelopments affecting the real estate industry and real property values. Because the Fund concentrates its assets in these stocks, industry concentrationrisk is high.\n\n\u2022\u2002Interest rate risk, which is the chance that REIT stock prices overall will declineand that the cost of borrowing for REITs will increase because of rising interestrates. Interest rate risk is high for the Fund.\n\n\u2022\u2002Stock market risk, which is the chance that stock prices overall will decline. Stock markets tend to move in cycles, with periods of rising prices and periods offalling prices. The Fund\u2019s target index may, at times, become focused in stocks ofa limited number of companies, which could cause the Fund to underperform theoverall stock market."
+        }
+      ],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: entity resolver or complex query",
+      "generation_time_ms": 2215.604543685913,
+      "execution_time_ms": 20.985841751098633
+    },
+    {
+      "question_id": 88,
+      "question": "What are the strategies of the fund Short-Term Bond?",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_STRATEGY]->(s:StrategyChunk) WHERE f.name CONTAINS 'Short-Term Bond' RETURN s.text AS strategy",
+      "generated_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_STRATEGY]->(s:StrategyChunk) WHERE f.name = 'Short-Term Bond' RETURN s.text AS strategy",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": null,
+      "error_message": "User feedback: not in the data complex query",
+      "generation_time_ms": 3991.565227508545,
+      "execution_time_ms": 26.79443359375
+    },
+    {
+      "question_id": 90,
+      "question": "Show me all the funds that have more than 15% invested in Technology",
+      "complexity": "medium",
+      "expected_cypher": "MATCH (f:Fund)-[h:HAS_SECTOR_ALLOCATION]->(:Sector {name: 'Technology'}) WHERE h.weight > 15.0 RETURN f.name AS fundName",
+      "generated_cypher": "MATCH (f:Fund)-[h:HAS_SECTOR_ALLOCATION ]->(:Sector {name: 'Technology'}) WHERE weight > 0.15 RETURN f.name AS fundName, f.ticker AS ticker, f.name AS fullName",
+      "expected_results": [],
+      "generated_results": [],
+      "error_type": "Syntax/Execution Error",
+      "error_message": "User feedback: sector failed",
+      "generation_time_ms": 3871.0484504699707,
+      "execution_time_ms": 0.0
+    }
+  ]
+}

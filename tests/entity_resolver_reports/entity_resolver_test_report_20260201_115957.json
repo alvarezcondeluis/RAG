@@ -1,0 +1,301 @@
+{
+  "report_metadata": {
+    "generated_at": "2026-02-01T11:59:57.780099",
+    "total_tests": 10,
+    "passed": 10,
+    "failed": 0,
+    "pass_rate": "100.00%"
+  },
+  "summary": {
+    "critical_issues": [
+      {
+        "issue": "Partial Name Matching",
+        "tests": [
+          "Q50",
+          "Q53",
+          "Q59",
+          "Q64"
+        ],
+        "description": "Tests if resolver can match partial fund names using CONTAINS logic"
+      },
+      {
+        "issue": "Hyphenation Differences",
+        "tests": [
+          "Q21",
+          "Q67",
+          "Q25",
+          "Q71"
+        ],
+        "description": "Tests matching 'Small Cap' to 'Small-Cap' and 'Mid Cap' to 'Mid-Cap'"
+      },
+      {
+        "issue": "Ticker Hallucinations",
+        "tests": [
+          "Q63",
+          "Q78",
+          "Q87"
+        ],
+        "description": "Tests that resolver finds correct tickers to prevent LLM hallucinations"
+      }
+    ]
+  },
+  "test_results_by_category": {
+    "Q50": [
+      {
+        "test_name": "Q50_Total_International_Stock",
+        "query": "How many holdings does the Total International Stock fund have in total?",
+        "result": {
+          "iShares Core MSCI Total International Stock ETF": "Fund",
+          "IXUS": "Ticker"
+        },
+        "expected": "Should match fund with CONTAINS 'Total International Stock'",
+        "passed": true,
+        "notes": "Tests partial name matching for Total International Stock",
+        "timestamp": "2026-02-01T11:59:56.196696"
+      }
+    ],
+    "Q53": [
+      {
+        "test_name": "Q53_Growth_Index",
+        "query": "Calculate the cost per 10k investment for the 'Growth Index' fund.",
+        "result": {
+          "Vanguard Growth Index Fund": "Fund",
+          "VIGIX": "Ticker"
+        },
+        "expected": "Should match fund with CONTAINS 'Growth Index'",
+        "passed": true,
+        "notes": "Tests partial name matching for Growth Index",
+        "timestamp": "2026-02-01T11:59:56.199926"
+      }
+    ],
+    "Q59": [
+      {
+        "test_name": "Q59_High_Dividend_Yield",
+        "query": "Return both the expense ratio and the turnover rate for the High Dividend Yield fund.",
+        "result": {
+          "Vanguard High Dividend Yield Index Fund": "Fund",
+          "VHYAX": "Ticker"
+        },
+        "expected": "Should match fund with CONTAINS 'High Dividend Yield'",
+        "passed": true,
+        "notes": "Tests partial name matching for High Dividend Yield",
+        "timestamp": "2026-02-01T11:59:56.204165"
+      }
+    ],
+    "Q64": [
+      {
+        "test_name": "Q64_Wellington",
+        "query": "Does the Wellington fund have a turnover rate higher than 20%?",
+        "result": {
+          "Vanguard Global Wellington\u2122 Fund": "Fund",
+          "VGWAX": "Ticker"
+        },
+        "expected": "Should match fund with CONTAINS 'Wellington'",
+        "passed": true,
+        "notes": "Tests partial name matching for Wellington",
+        "timestamp": "2026-02-01T11:59:56.222736"
+      }
+    ],
+    "Q21": [
+      {
+        "test_name": "Q21_Q67_Small_Cap_Hyphenation",
+        "query": "What is the total number of holdings for the Vanguard Small Cap Fund?",
+        "result": {
+          "Vanguard Small-Cap Index Fund": "Fund",
+          "VSCPX": "Ticker"
+        },
+        "expected": "Should match 'Vanguard Small-Cap Index Fund' (with hyphen)",
+        "passed": true,
+        "notes": "Tests matching 'Small Cap' to 'Small-Cap' with hyphen",
+        "timestamp": "2026-02-01T11:59:56.271624"
+      }
+    ],
+    "Q25": [
+      {
+        "test_name": "Q25_Q71_Mid_Cap_Hyphenation",
+        "query": "Who are the managers of the Vanguard Mid Cap Growth fund?",
+        "result": {
+          "Vanguard Mid-Cap Growth Fund": "Fund",
+          "VMGRX": "Ticker"
+        },
+        "expected": "Should match 'Vanguard Mid-Cap Growth Index Fund' (with hyphen)",
+        "passed": true,
+        "notes": "Tests matching 'Mid Cap' to 'Mid-Cap' with hyphen",
+        "timestamp": "2026-02-01T11:59:56.276137"
+      }
+    ],
+    "Q63": [
+      {
+        "test_name": "Q63_Information_Technology_ETF",
+        "query": "What is the expense ratio for the Information Technology ETF?",
+        "result": {
+          "Vanguard Information Technology Index Fund": "Fund",
+          "VITAX": "Ticker"
+        },
+        "expected": "Should find VGT or Information Technology fund (not IXIC)",
+        "passed": true,
+        "notes": "Prevents hallucination of IXIC ticker",
+        "timestamp": "2026-02-01T11:59:56.339120"
+      }
+    ],
+    "Q78": [
+      {
+        "test_name": "Q78_Health_Care_ETF",
+        "query": "What is the 5-year return of the Health Care ETF?",
+        "result": {
+          "iShares U.S. Healthcare ETF": "Fund",
+          "IYH": "Ticker"
+        },
+        "expected": "Should find VHT or Health Care fund (not VTI)",
+        "passed": true,
+        "notes": "Prevents hallucination of VTI ticker",
+        "timestamp": "2026-02-01T11:59:56.342678"
+      }
+    ],
+    "Q87": [
+      {
+        "test_name": "Q87_Real_Estate_ETF",
+        "query": "What are the risks for the Real Estate ETF?",
+        "result": {
+          "iShares U.S. Real Estate ETF": "Fund",
+          "IYR": "Ticker"
+        },
+        "expected": "Should find VNQ or Real Estate fund (not REIT)",
+        "passed": true,
+        "notes": "Prevents hallucination of REIT ticker",
+        "timestamp": "2026-02-01T11:59:56.361166"
+      }
+    ],
+    "Q68": [
+      {
+        "test_name": "Q68_NYSE_Arca",
+        "query": "Show me funds listed on NYSE Arca.",
+        "result": {},
+        "expected": "Query should preserve 'NYSE Arca' not just 'NYSE'",
+        "passed": true,
+        "notes": "Documents exchange name handling - resolver doesn't extract exchanges",
+        "timestamp": "2026-02-01T11:59:56.364523"
+      }
+    ]
+  },
+  "all_test_results": [
+    {
+      "test_name": "Q50_Total_International_Stock",
+      "query": "How many holdings does the Total International Stock fund have in total?",
+      "result": {
+        "iShares Core MSCI Total International Stock ETF": "Fund",
+        "IXUS": "Ticker"
+      },
+      "expected": "Should match fund with CONTAINS 'Total International Stock'",
+      "passed": true,
+      "notes": "Tests partial name matching for Total International Stock",
+      "timestamp": "2026-02-01T11:59:56.196696"
+    },
+    {
+      "test_name": "Q53_Growth_Index",
+      "query": "Calculate the cost per 10k investment for the 'Growth Index' fund.",
+      "result": {
+        "Vanguard Growth Index Fund": "Fund",
+        "VIGIX": "Ticker"
+      },
+      "expected": "Should match fund with CONTAINS 'Growth Index'",
+      "passed": true,
+      "notes": "Tests partial name matching for Growth Index",
+      "timestamp": "2026-02-01T11:59:56.199926"
+    },
+    {
+      "test_name": "Q59_High_Dividend_Yield",
+      "query": "Return both the expense ratio and the turnover rate for the High Dividend Yield fund.",
+      "result": {
+        "Vanguard High Dividend Yield Index Fund": "Fund",
+        "VHYAX": "Ticker"
+      },
+      "expected": "Should match fund with CONTAINS 'High Dividend Yield'",
+      "passed": true,
+      "notes": "Tests partial name matching for High Dividend Yield",
+      "timestamp": "2026-02-01T11:59:56.204165"
+    },
+    {
+      "test_name": "Q64_Wellington",
+      "query": "Does the Wellington fund have a turnover rate higher than 20%?",
+      "result": {
+        "Vanguard Global Wellington\u2122 Fund": "Fund",
+        "VGWAX": "Ticker"
+      },
+      "expected": "Should match fund with CONTAINS 'Wellington'",
+      "passed": true,
+      "notes": "Tests partial name matching for Wellington",
+      "timestamp": "2026-02-01T11:59:56.222736"
+    },
+    {
+      "test_name": "Q21_Q67_Small_Cap_Hyphenation",
+      "query": "What is the total number of holdings for the Vanguard Small Cap Fund?",
+      "result": {
+        "Vanguard Small-Cap Index Fund": "Fund",
+        "VSCPX": "Ticker"
+      },
+      "expected": "Should match 'Vanguard Small-Cap Index Fund' (with hyphen)",
+      "passed": true,
+      "notes": "Tests matching 'Small Cap' to 'Small-Cap' with hyphen",
+      "timestamp": "2026-02-01T11:59:56.271624"
+    },
+    {
+      "test_name": "Q25_Q71_Mid_Cap_Hyphenation",
+      "query": "Who are the managers of the Vanguard Mid Cap Growth fund?",
+      "result": {
+        "Vanguard Mid-Cap Growth Fund": "Fund",
+        "VMGRX": "Ticker"
+      },
+      "expected": "Should match 'Vanguard Mid-Cap Growth Index Fund' (with hyphen)",
+      "passed": true,
+      "notes": "Tests matching 'Mid Cap' to 'Mid-Cap' with hyphen",
+      "timestamp": "2026-02-01T11:59:56.276137"
+    },
+    {
+      "test_name": "Q63_Information_Technology_ETF",
+      "query": "What is the expense ratio for the Information Technology ETF?",
+      "result": {
+        "Vanguard Information Technology Index Fund": "Fund",
+        "VITAX": "Ticker"
+      },
+      "expected": "Should find VGT or Information Technology fund (not IXIC)",
+      "passed": true,
+      "notes": "Prevents hallucination of IXIC ticker",
+      "timestamp": "2026-02-01T11:59:56.339120"
+    },
+    {
+      "test_name": "Q78_Health_Care_ETF",
+      "query": "What is the 5-year return of the Health Care ETF?",
+      "result": {
+        "iShares U.S. Healthcare ETF": "Fund",
+        "IYH": "Ticker"
+      },
+      "expected": "Should find VHT or Health Care fund (not VTI)",
+      "passed": true,
+      "notes": "Prevents hallucination of VTI ticker",
+      "timestamp": "2026-02-01T11:59:56.342678"
+    },
+    {
+      "test_name": "Q87_Real_Estate_ETF",
+      "query": "What are the risks for the Real Estate ETF?",
+      "result": {
+        "iShares U.S. Real Estate ETF": "Fund",
+        "IYR": "Ticker"
+      },
+      "expected": "Should find VNQ or Real Estate fund (not REIT)",
+      "passed": true,
+      "notes": "Prevents hallucination of REIT ticker",
+      "timestamp": "2026-02-01T11:59:56.361166"
+    },
+    {
+      "test_name": "Q68_NYSE_Arca",
+      "query": "Show me funds listed on NYSE Arca.",
+      "result": {},
+      "expected": "Query should preserve 'NYSE Arca' not just 'NYSE'",
+      "passed": true,
+      "notes": "Documents exchange name handling - resolver doesn't extract exchanges",
+      "timestamp": "2026-02-01T11:59:56.364523"
+    }
+  ],
+  "failed_tests_detail": []
+}

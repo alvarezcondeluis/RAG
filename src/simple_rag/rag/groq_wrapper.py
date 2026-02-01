@@ -4,12 +4,26 @@ Provides access to Groq's fast inference API with models like Llama 3.3 70B.
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (search in parent directories)
+dotenv_path = Path("../.env")
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+    print(f"✓ Loaded .env from: {dotenv_path}")
+else:
+    # Try to find .env in project root (go up from current file)
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parent.parent.parent.parent  # Go up to RAG directory
+    env_file = project_root / ".env"
+    if env_file.exists():
+        load_dotenv(env_file)
+        print(f"✓ Loaded .env from: {env_file}")
+    else:
+        print("⚠️  No .env file found. Will use environment variables or require api_key parameter.")
 
 
 class GroqWrapper:

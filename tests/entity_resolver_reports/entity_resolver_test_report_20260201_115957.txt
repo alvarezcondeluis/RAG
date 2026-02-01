@@ -1,0 +1,75 @@
+================================================================================
+ENTITY RESOLVER TEST REPORT
+================================================================================
+
+Generated: 2026-02-01 11:59:57
+
+SUMMARY
+--------------------------------------------------------------------------------
+Total Tests: 10
+Passed: 10
+Failed: 0
+Pass Rate: 100.00%
+
+CRITICAL ISSUES TESTED
+--------------------------------------------------------------------------------
+
+Partial Name Matching
+  Tests: Q50, Q53, Q59, Q64
+  Description: Tests if resolver can match partial fund names using CONTAINS logic
+
+Hyphenation Differences
+  Tests: Q21, Q67, Q25, Q71
+  Description: Tests matching 'Small Cap' to 'Small-Cap' and 'Mid Cap' to 'Mid-Cap'
+
+Ticker Hallucinations
+  Tests: Q63, Q78, Q87
+  Description: Tests that resolver finds correct tickers to prevent LLM hallucinations
+
+
+FAILED TESTS DETAIL
+--------------------------------------------------------------------------------
+
+
+ALL TEST RESULTS
+--------------------------------------------------------------------------------
+
+✓ PASS - Q50_Total_International_Stock
+  Query: How many holdings does the Total International Stock fund have in total?
+  Result: {'iShares Core MSCI Total International Stock ETF': 'Fund', 'IXUS': 'Ticker'}
+
+✓ PASS - Q53_Growth_Index
+  Query: Calculate the cost per 10k investment for the 'Growth Index' fund.
+  Result: {'Vanguard Growth Index Fund': 'Fund', 'VIGIX': 'Ticker'}
+
+✓ PASS - Q59_High_Dividend_Yield
+  Query: Return both the expense ratio and the turnover rate for the High Dividend Yield fund.
+  Result: {'Vanguard High Dividend Yield Index Fund': 'Fund', 'VHYAX': 'Ticker'}
+
+✓ PASS - Q64_Wellington
+  Query: Does the Wellington fund have a turnover rate higher than 20%?
+  Result: {'Vanguard Global Wellington™ Fund': 'Fund', 'VGWAX': 'Ticker'}
+
+✓ PASS - Q21_Q67_Small_Cap_Hyphenation
+  Query: What is the total number of holdings for the Vanguard Small Cap Fund?
+  Result: {'Vanguard Small-Cap Index Fund': 'Fund', 'VSCPX': 'Ticker'}
+
+✓ PASS - Q25_Q71_Mid_Cap_Hyphenation
+  Query: Who are the managers of the Vanguard Mid Cap Growth fund?
+  Result: {'Vanguard Mid-Cap Growth Fund': 'Fund', 'VMGRX': 'Ticker'}
+
+✓ PASS - Q63_Information_Technology_ETF
+  Query: What is the expense ratio for the Information Technology ETF?
+  Result: {'Vanguard Information Technology Index Fund': 'Fund', 'VITAX': 'Ticker'}
+
+✓ PASS - Q78_Health_Care_ETF
+  Query: What is the 5-year return of the Health Care ETF?
+  Result: {'iShares U.S. Healthcare ETF': 'Fund', 'IYH': 'Ticker'}
+
+✓ PASS - Q87_Real_Estate_ETF
+  Query: What are the risks for the Real Estate ETF?
+  Result: {'iShares U.S. Real Estate ETF': 'Fund', 'IYR': 'Ticker'}
+
+✓ PASS - Q68_NYSE_Arca
+  Query: Show me funds listed on NYSE Arca.
+  Result: {}
