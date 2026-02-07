@@ -44,7 +44,7 @@ data/processed/
 data/raw/*.pdf
 data/raw/*.docx
 data/raw/*.txt
-*.pkl
+
 *.pickle
 
 # Jupyter Notebook checkpoints

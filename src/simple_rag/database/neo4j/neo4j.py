@@ -1521,3 +1521,28 @@ class Neo4jDatabase:
         
         result = self._execute_query(query, {"fund_ticker": fund_ticker})
         return result
+    
+    def get_all_company_tickers(self) -> set:
+        """
+        Get all unique company tickers from the database.
+        
+        Returns:
+            Set of unique company ticker strings
+            
+        Example:
+            db = Neo4jDatabase()
+            tickers = db.get_all_company_tickers()
+            print(f"Found {len(tickers)} companies: {tickers}")
+        """
+        query = """
+        MATCH (c:Holding)
+        WHERE c.ticker IS NOT NULL
+        RETURN DISTINCT c.ticker as ticker
+        ORDER BY c.ticker
+        """
+        
+        result = self._execute_query(query)
+        tickers = {record["ticker"] for record in result if record.get("ticker")}
+        
+        logger.info(f"Found {len(tickers)} unique company tickers in database")
+        return tickers
