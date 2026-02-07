@@ -2,7 +2,10 @@
 .env
 .env.local
 .env.*.local
-
+# Add this to .gitignore
+checkpoints/
+*.pt
+*.safetensors
 # Project specific
 /output
 neo4j/import/
