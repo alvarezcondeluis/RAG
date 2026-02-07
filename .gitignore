@@ -93,3 +93,11 @@ tmp//
 .deepeval
 .latest*
 Modelfile
+
+# Large model files
+*.pt
+*.safetensors
+*.pkl
+checkpoints/
+src/simple_rag/rag/query/models/query_classifier/
+notebooks/funds_backup.pkl
