@@ -1,67 +1,54 @@
-[tool.poetry]
+[project]
 name = "rag"
 version = "0.1.0"
 description = ""
-authors = ["alvarezcondeluis <alvarezcondeluis@gmail.com>"]
 readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "alvarezcondeluis", email = "alvarezcondeluis@gmail.com" }
+]
+dependencies = [
+    "python-dotenv>=1.1.1",
+    "pandas>=2.3.2",
+    "qdrant-client>=1.15.1",
+    "sentence-transformers>=5.1.0",
+    "llama-index-core>=0.13.5",
+    "llama-index-embeddings-huggingface>=0.6.0",
+    "llama-index-vector-stores-qdrant>=0.8.3",
+    "neo4j==5.27.0",
+    "neomodel==5.4.2",
+    "llama-index-graph-stores-neo4j>=0.5.1",
+    "pillow>=11.3.0",
+    "nest-asyncio>=1.6.0",
+    "datasets>=4.2.0",
+    "langchain>=1.0.2",
+    "langchain-community>=0.4",
+    "google-auth>=2.41.1",
+    "google-genai>=1.46.0",
+    "deepeval>=3.7.0",
+    "instructor>=1.13.0",
+    "edgartools>=5.8.0",
+    "beautifulsoup4>=4.14.2",
+    "seaborn>=0.13.2",
+    "yfinance>=0.2.66",
+    "tqdm>=4.67.1",
+    "plotly>=6.5.0",
+    "kaleido>=1.2.0",
+    "markdownify>=1.2.2",
+    "faiss-cpu>=1.13.2",
+]
 
-[tool.poetry.dependencies]
-python = "3.10.18"
-ocrmypdf = "^16.10.4"
-# Your preferred (newer) version
-pypdf = "^6.0.0" 
-pikepdf = "^9.10.2"
-python-dotenv = "^1.1.1"
-llama-parse = "^0.6.62"
-unstructured = "^0.18.14"
-unstructured-inference = "^1.0.5"
-pdf2image = "^1.17.0"
-unstructured-pytesseract = "^0.3.15"
-pdfplumber = "^0.11.7"
-# Your preferred (newer) version
-pandas = "^2.3.2" 
-ollama = "^0.6.0"
-fastembed = "^0.7.3"
-pypdf2 = "^3.0.1"
-qdrant-client = "^1.15.1"
-sentence-transformers = "^5.1.0"
-llama-index-core = "^0.13.5"
-llama-index-llms-ollama = "^0.7.1"
-llama-index-embeddings-huggingface = "^0.6.0"
-llama-index-vector-stores-qdrant = "^0.8.3"
-neo4j = "5.27.0"
-neomodel = "5.4.2"
-llama-index-graph-stores-neo4j = "^0.5.1"
-pymupdf = "^1.26.4"
-pillow = "^11.3.0"
-docling = "^2.54.0"
-vllm = "^0.10.2"
-pynput = "^1.8.1"
-nest-asyncio = "^1.6.0"
-datasets = "^4.2.0"
-langchain = "^1.0.2"
-langchain-community = "^0.4"
-langchain-ollama = "^1.0.0"
-langchain-huggingface = "^1.0.0"
-google-auth = "^2.41.1"
-google-genai = "^1.46.0"
-deepeval = "^3.7.0"
-instructor = "^1.13.0"
-edgartools = "^5.8.0"
-beautifulsoup4 = "^4.14.2"
-seaborn = "^0.13.2"
-yfinance = "^0.2.66"
-tqdm = "^4.67.1"
-plotly = "^6.5.0"
-kaleido = "^1.2.0"
-markdownify = "^1.2.2"
-unsloth = "^2026.1.4"
-faiss-cpu = "^1.13.2"
-langchain-groq = "^1.1.1"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.4.2"
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "edgartools>=5.8.0",
+    "pandas>=2.3.2",
+    "numpy",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
