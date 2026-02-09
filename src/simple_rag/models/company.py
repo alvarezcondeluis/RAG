@@ -2,6 +2,26 @@ from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
 from typing import Optional, List, Dict
 
+class CompanyContentChunk(BaseModel):
+    """
+    Represents a chunk of text from a 10-K filing section with embeddings and metadata.
+    Specialized version of ContentChunk for company filings with section tracking.
+    """
+    id: str = Field(..., description="Unique identifier for this chunk")
+    title: str = Field(..., description="Title or header for this chunk")
+    text: str = Field(..., description="The actual text content of this chunk")
+    embedding: List[float] = Field(default_factory=list, description="Vector embedding of the text")
+    
+    # Section metadata specific to 10-K filings
+    section_type: Optional[str] = Field(None, description="Main section type (e.g., 'Item 1. Business', 'Item 1A. Risk Factors')")
+    subsection: Optional[str] = Field(None, description="Subsection or topic within the main section (e.g., 'iPhone', 'Products')")
+    chunk_index: Optional[int] = Field(None, description="Sequential index of this chunk within its section")
+    
+    # Filing context
+    filing_cik: Optional[str] = Field(None, description="CIK of the company that filed this document")
+    filing_date: Optional[str] = Field(None, description="Date of the filing this chunk came from")
+    section_name: Optional[str] = Field(None, description="Name of the section (e.g., 'business_information', 'risk_factors')")
+
 class FilingMetadata(BaseModel):
     """The 'Source' - Information about the specific SEC document."""
     accession_number: str = Field(..., description="SEC unique identifier (e.g., 0000320193-24-000123)")
@@ -143,6 +163,13 @@ class Filing10K(BaseModel):
     
     # Risk Factors
     risk_factors: Optional[str] = Field(None, description="The risk factors section of the filing")
+    
+    # Chunked and embedded content for RAG (using CompanyContentChunk for better metadata)
+    business_information_chunks: List[CompanyContentChunk] = Field(default_factory=list, description="Chunked and embedded business information")
+    risk_factors_chunks: List[CompanyContentChunk] = Field(default_factory=list, description="Chunked and embedded risk factors")
+    management_discussion_chunks: List[CompanyContentChunk] = Field(default_factory=list, description="Chunked and embedded MD&A")
+    legal_proceedings_chunks: List[CompanyContentChunk] = Field(default_factory=list, description="Chunked and embedded legal proceedings")
+    properties_chunks: List[CompanyContentChunk] = Field(default_factory=list, description="Chunked and embedded properties")
     
     def get_income_statement(self, period_end_date: date) -> Optional[IncomeStatement]:
         """Get income statement for a specific period end date."""

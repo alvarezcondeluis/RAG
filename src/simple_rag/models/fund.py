@@ -7,6 +7,17 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 
+
+class FilingMetadata(BaseModel):
+    """Metadata about the SEC filing source for fund data."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    accession_number: str = Field(..., description="SEC unique identifier (e.g., 0001193125-24-123456)")
+    filing_date: date = Field(..., description="Date the document was submitted to EDGAR")
+    reporting_date: date = Field(..., description="The period end date being reported")
+    url: str = Field(..., description="Direct link to the filing on EDGAR")
+    form: Optional[str] = Field(None, description="Name/title of the document")
+    
 class ContentChunk(BaseModel):
     """A chunk of content with title, text, and embedding."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -113,19 +124,28 @@ class ShareClassType(str, Enum):
     ETF = "ETF Shares"
     OTHER = "Other"
 
+class AnnualReportGeneralInformation(BaseModel):
+    """General information about the annual report."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    
 class FundData(BaseModel):
     """Complete fund data structure with all fund information and metrics."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     # Core identifiers
+    ncsr_metadata: Optional[FilingMetadata] = Field(None, description="Metadata about the SEC filing source for fund data")
+    summary_prospectus_metadata: Optional[FilingMetadata] = Field(None, description="Metadata about the SEC filing source for fund data")
+    nport_metadata: Optional[FilingMetadata] = Field(None, description="Metadata about the SEC filing source for fund data")
     name: str = Field(description="Official fund name")
     registrant: str = Field(description="Registered investment company name")
-    provider: Optional[str] = Field(description="Name of the company that hosts the fund")
+    provider: Optional[str] = Field(None, description="Name of the company that hosts the fund")
     context_id: str = Field(description="SEC EDGAR context identifier")
-    share_class: ShareClassType = Field(None, description="Share class designation (e.g., Admiral, Investor)")
+    share_class: Optional[ShareClassType] = Field(None, description="Share class designation (e.g., Admiral, Investor)")
     ticker: str = Field("N/A", description="Stock ticker symbol")
     security_exchange: Optional[str] = Field(None, description="Primary listing exchange")
     series_id: Optional[str] = Field(None, description="Series identifier")
+    
     # Financial metrics
     costs_per_10k: int = Field(0, description="Cost per $10,000 invested")
     expense_ratio: float = Field(0.0, description="Annual expense ratio as percentage (Annual fee charged by the fund)")

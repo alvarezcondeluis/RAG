@@ -4,8 +4,8 @@ services:
     container_name: fund_graph_db
     restart: always
     ports:
-      - "7474:7474"   # HTTP for the Browser GUI
-      - "7687:7687"   # Bolt port for your Python script
+      - "7474:7474" # HTTP for the Browser GUI
+      - "7687:7687" # Bolt port for your Python script
     environment:
       # Security: Set your initial password here
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
@@ -20,6 +20,6 @@ services:
       # Permissions: Allow APOC to run powerful scripts
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
     volumes:
-      - ./data:/data      # Persist the graph data here
+      - ./data:/data # Persist the graph data here
       - ./plugins:/plugins # Store plugin jars here
       - ./import:/var/lib/neo4j/import # Place CSVs here if you need them later
