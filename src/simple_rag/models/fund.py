@@ -14,7 +14,7 @@ class FilingMetadata(BaseModel):
     
     accession_number: str = Field(..., description="SEC unique identifier (e.g., 0001193125-24-123456)")
     filing_date: date = Field(..., description="Date the document was submitted to EDGAR")
-    reporting_date: date = Field(..., description="The period end date being reported")
+    reporting_date: Optional[date] = Field(None, description="The period end date being reported")
     url: str = Field(..., description="Direct link to the filing on EDGAR")
     form: Optional[str] = Field(None, description="Name/title of the document")
     
