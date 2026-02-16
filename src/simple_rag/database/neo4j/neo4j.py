@@ -671,6 +671,8 @@ class Neo4jDatabase:
                         "vector": getattr(chunk, 'embedding', None)
                     })
 
+            metadata = fund.ncsr_metadata
+
             # 4. CYPHER QUERY
             query = """
             // --- A. STATIC FUND NODES (Merge ensures we reuse existing) ---
@@ -695,6 +697,17 @@ class Neo4jDatabase:
                 f.netAssets = $net_assets,
                 f.updatedAt = timestamp()
 
+            // Metadata of the ncsr filing
+            MERGE (d:Document {id: $accession_number})
+            ON CREATE SET
+                d.accession_number = $accession_number,
+                d.filing_date = $filing_date,
+                d.form = $form,
+                d.url = $url
+            
+            // Link Document to Fund
+            MERGE (f)-[:EXTRACTED_FROM]->(d)
+
             // --- B. TEMPORAL PROFILE NODE (Create new if date differs) ---
             MERGE (prof:Profile {id: $profile_id})
             ON CREATE SET
@@ -707,6 +720,17 @@ class Neo4jDatabase:
             // Connect Fund to Profile (History kept via 'date' property on rel)
             MERGE (f)-[rel:DEFINED_BY]->(prof)
             SET rel.date = $report_date
+            
+            // Link Profile to Summary Prospectus Document (if available)
+            FOREACH (_ IN CASE WHEN $sp_accession_number IS NOT NULL THEN [1] ELSE [] END |
+                MERGE (sp_doc:Document {id: $sp_accession_number})
+                ON CREATE SET
+                    sp_doc.accession_number = $sp_accession_number,
+                    sp_doc.filing_date = $sp_filing_date,
+                    sp_doc.form = $sp_form,
+                    sp_doc.url = $sp_url
+                MERGE (prof)-[:EXTRACTED_FROM]->(sp_doc)
+            )
 
             // --- C. SINGLE NODES (Objective & Performance) ---
             // Connected to PROFILE, not Fund
@@ -748,6 +772,13 @@ class Neo4jDatabase:
             """
 
             # 5. PARAMETERS
+            # Extract summary prospectus metadata if available
+            sp_metadata = fund.summary_prospectus_metadata
+            sp_accession = sp_metadata.accession_number if sp_metadata else None
+            sp_filing_date = sp_metadata.filing_date if sp_metadata else None
+            sp_form = sp_metadata.form if sp_metadata else None
+            sp_url = sp_metadata.url if sp_metadata else None
+            
             params = {
                 # Static
                 "ticker": fund.ticker,
@@ -773,6 +804,19 @@ class Neo4jDatabase:
                 "objective_text": getattr(fund, 'objective', None) if getattr(fund, 'objective', None) not in [None, "N/A", ""] else None,
                 "objective_vector": getattr(fund, 'objective_embedding', None),
                 
+                # NCSR Metadata Information (for Fund)
+                "accession_number": metadata.accession_number,
+                "filing_date": metadata.filing_date,
+                "reporting_date": metadata.reporting_date,
+                "url": metadata.url,
+                "form": metadata.form,
+                
+                # Summary Prospectus Metadata (for Profile)
+                "sp_accession_number": sp_accession,
+                "sp_filing_date": sp_filing_date,
+                "sp_form": sp_form,
+                "sp_url": sp_url,
+
                 "perf_id": perf_id,
                 "perf_text": getattr(fund, 'performance_commentary', None) if getattr(fund, 'performance_commentary', None) not in [None, "N/A", ""] else None,
                 "perf_vector": getattr(fund, 'performance_commentary_embedding', None),
@@ -1316,7 +1360,7 @@ class Neo4jDatabase:
         MATCH (port:Portfolio {id: $portfolio_id})
         UNWIND $batch as row
         
-        // A. Handle the Company Node (MERGE is fine here - it's shared)
+        // A. Create/Update Holding Node
         MERGE (h:Holding {id: row.node_id})
         ON CREATE SET
             h.name = row.name,
@@ -1332,8 +1376,7 @@ class Neo4jDatabase:
             h.issuerDesc = row.issuer_category_desc,
             h.createdAt = timestamp()
 
-        // B. Create Link (Use CREATE, not MERGE for speed)
-        // Since 'port' is unique to this report, we know links don't exist yet.
+        // B. Link Portfolio to Holding
         MERGE (port)-[rel:CONTAINS]->(h)
         ON CREATE SET
             rel.shares = row.shares,
@@ -1343,6 +1386,16 @@ class Neo4jDatabase:
             rel.fairValueLevel = row.fair_value_level,
             rel.isRestricted = row.is_restricted,
             rel.payoffProfile = row.payoff_profile
+        
+        // C. Link Holding to Company (if ticker exists)
+        // This creates the bridge between Fund holdings and Company data
+        FOREACH (_ IN CASE WHEN row.ticker IS NOT NULL AND row.ticker <> '' THEN [1] ELSE [] END |
+            MERGE (c:Company {ticker: row.ticker})
+            ON CREATE SET
+                c.name = row.name,
+                c.createdAt = timestamp()
+            MERGE (h)-[:IS_EQUITY_OF]->(c)
+        )
         """
 
         try:
@@ -1450,9 +1503,21 @@ class Neo4jDatabase:
         self,
         fund_ticker: str,
         performance_data: Optional[AverageReturnSnapshot] = None,
-        date: Optional[str] = None
+        date: Optional[date] = None,
+        accession_number: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create TrailingPerformance node and link to Fund."""
+        """
+        Create TrailingPerformance node and link to Fund.
+        
+        Args:
+            fund_ticker: Fund ticker symbol
+            performance_data: Performance metrics snapshot
+            date: Date object for the performance data
+            accession_number: Optional SEC accession number to link to source Document
+        
+        Returns:
+            Created TrailingPerformance node or None
+        """
         if performance_data is None:
             return None
         
@@ -1468,28 +1533,61 @@ class Neo4jDatabase:
             if hasattr(performance_data, 'return_inception') and performance_data.return_inception is not None:
                 perf_props["returnInception"] = performance_data.return_inception
         
-        perf_id = fund_ticker + "_" + date if date else fund_ticker
+        # Convert date object to string for Neo4j storage
+        date_str = date.isoformat() if date else None
+        perf_id = fund_ticker + "_" + date_str if date_str else fund_ticker
         
-        # Build SET clause only if there are properties to set
-        perf_set = ", ".join([f"tp.{k} = ${k}" for k in perf_props.keys()])
+        # Extract year from date for easy filtering
+        year = None
+        if date:
+            year = date.year
+        
+        # Build SET clause for performance properties
+        perf_set_parts = [f"tp.{k} = ${k}" for k in perf_props.keys()]
+        
+        # Add year property if available
+        if year:
+            perf_set_parts.append("tp.year = $year")
+        
+        perf_set = ", ".join(perf_set_parts)
         set_clause = f"SET {perf_set}" if perf_set else ""
         
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        MERGE (tp:TrailingPerformance {{id: $perf_id}})
-        {set_clause}
-        MERGE (f)-[r:HAS_TRAILING_PERFORMANCE {{date: $date}}]->(tp)
-        RETURN tp
-        """
+        # Build query with optional Document linking
+        if accession_number:
+            query = f"""
+            MATCH (f:Fund {{ticker: $fund_ticker}})
+            MERGE (tp:TrailingPerformance {{id: $perf_id}})
+            {set_clause}
+            MERGE (f)-[r:HAS_TRAILING_PERFORMANCE {{date: $date}}]->(tp)
+            
+            // Link to source Document if accession number provided
+            WITH tp
+            MATCH (d:Document {{id: $accession_number}})
+            MERGE (tp)-[:EXTRACTED_FROM]->(d)
+            
+            RETURN tp
+            """
+        else:
+            query = f"""
+            MATCH (f:Fund {{ticker: $fund_ticker}})
+            MERGE (tp:TrailingPerformance {{id: $perf_id}})
+            {set_clause}
+            MERGE (f)-[r:HAS_TRAILING_PERFORMANCE {{date: $date}}]->(tp)
+            RETURN tp
+            """
         
         params = {"fund_ticker": fund_ticker, "perf_id": perf_id}
         params.update(perf_props)
-        if date:
-            params["date"] = date
+        if date_str:
+            params["date"] = date_str
+        if year:
+            params["year"] = year
+        if accession_number:
+            params["accession_number"] = accession_number
         
         result = self._execute_write(query, params)
         if result:
-            logger.info(f"Created performance node for fund {fund_ticker}")
+            logger.info(f"Created performance node for fund {fund_ticker} (year: {year})")
             print(result)
             return result[0]["tp"]
         return None
@@ -2302,6 +2400,1066 @@ class Neo4jDatabase:
         print(f"Insider Transactions: {stats['insider_transactions_created']}")
         print(f"Person Nodes: {stats['person_nodes_created']}")
         print("=" * 80)
+        
+        return stats
+
+    # ==================== COMPANY DATA METHODS ====================
+    
+    def create_or_update_company(
+        self,
+        ticker: str,
+        name: str,
+        cik: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create or update a Company node.
+        
+        Args:
+            ticker: Company ticker symbol
+            name: Company name
+            cik: SEC Central Index Key (CIK)
+            
+        Returns:
+            Created/updated Company node or None if failed
+            
+        Example:
+            company = db.create_or_update_company("AAPL", "Apple Inc.", "0000320193")
+        """
+        try:
+            query = """
+            MERGE (c:Company {ticker: $ticker})
+            ON CREATE SET
+                c.name = $name,
+                c.cik = $cik,
+                c.createdAt = timestamp()
+            ON MATCH SET
+                c.name = $name,
+                c.cik = $cik,
+                c.updatedAt = timestamp()
+            RETURN c
+            """
+            
+            result = self._execute_write(query, {
+                "ticker": ticker,
+                "name": name,
+                "cik": cik
+            })
+            
+            if result:
+                logger.info(f"✅ Created/Updated company: {ticker}")
+                return result[0]["c"]
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating company {ticker}: {e}")
+            return None
+    
+    def add_10k_filing(
+        self,
+        company_ticker: str,
+        accession_number: str,
+        filing_url: str,
+        filing_date: date,
+        filing_type: str = "10-K",
+        report_period_end: Optional[date] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add a 10-K filing to a company.
+        
+        Args:
+            company_ticker: Company ticker symbol
+            accession_number: SEC accession number
+            filing_url: URL to the filing
+            filing_date: Date the filing was submitted
+            filing_type: Type of filing (default: "10-K")
+            report_period_end: End date of the reporting period
+            
+        Returns:
+            Created 10KFiling node or None if failed
+            
+        Example:
+            filing = db.add_10k_filing(
+                "AAPL",
+                "0000320193-24-000123",
+                "https://www.sec.gov/...",
+                date(2024, 11, 1),
+                report_period_end=date(2024, 9, 30)
+            )
+        """
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            
+            # Create Document node
+            doc_query = """
+            MERGE (doc:Document {id: $accession_number})
+            ON CREATE SET
+                doc.accession_number = $accession_number,
+                doc.url = $filing_url,
+                doc.form = $filing_type,
+                doc.filing_date = $filing_date,
+                doc.reporting_date = $report_period_end,
+                doc.createdAt = timestamp()
+            ON MATCH SET
+                doc.updatedAt = timestamp()
+            RETURN doc
+            """
+            
+            self._execute_write(doc_query, {
+                "accession_number": accession_number,
+                "filing_url": filing_url,
+                "filing_type": filing_type,
+                "filing_date": filing_date,
+                "report_period_end": report_period_end
+            })
+            
+            # Create 10KFiling node and relationships
+            filing_query = """
+            MATCH (c:Company {ticker: $ticker})
+            MATCH (doc:Document {id: $accession_number})
+            
+            MERGE (f:`10KFiling` {id: $filing_id})
+            ON CREATE SET f.createdAt = timestamp()
+            ON MATCH SET f.updatedAt = timestamp()
+            
+            MERGE (c)-[r:HAS_FILING]->(f)
+            SET r.date = $filing_date
+            
+            MERGE (f)-[:EXTRACTED_FROM]->(doc)
+            RETURN f
+            """
+            
+            result = self._execute_write(filing_query, {
+                "ticker": company_ticker,
+                "accession_number": accession_number,
+                "filing_id": filing_id,
+                "filing_date": filing_date
+            })
+            
+            if result:
+                print(f"✅ Added 10-K filing for {company_ticker} ({filing_date})")
+                return result[0]["f"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding 10-K filing for {company_ticker}: {e}")
+            logger.error(f"Failed to add 10-K filing: {e}", exc_info=True)
+            return None
+    
+    def add_risk_factors_section(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        risk_factors_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add Risk Factors section to a 10-K filing.
+        
+        Args:
+            company_ticker: Company ticker symbol
+            filing_date: Date of the filing
+            risk_factors_text: Full text of the risk factors section
+            
+        Returns:
+            Created RiskFactor section node or None if failed
+        """
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            section_id = f"{filing_id}_risk_factors"
+            
+            query = """
+            MATCH (f:`10KFiling` {id: $filing_id})
+            MERGE (rf:Section:RiskFactor {id: $section_id})
+            SET rf.fullText = $full_text,
+                rf.updatedAt = timestamp()
+            MERGE (f)-[:HAS_RISK_FACTORS]->(rf)
+            RETURN rf
+            """
+            
+            result = self._execute_write(query, {
+                "filing_id": filing_id,
+                "section_id": section_id,
+                "full_text": risk_factors_text
+            })
+            
+            if result:
+                print(f"✅ Added Risk Factors section for {company_ticker}")
+                return result[0]["rf"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding Risk Factors for {company_ticker}: {e}")
+            return None
+    
+    def add_business_information_section(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        business_info_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """Add Business Information section to a 10-K filing."""
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            section_id = f"{filing_id}_business_info"
+            
+            query = """
+            MATCH (f:`10KFiling` {id: $filing_id})
+            MERGE (bi:Section:BusinessInformation {id: $section_id})
+            SET bi.fullText = $full_text,
+                bi.updatedAt = timestamp()
+            MERGE (f)-[:HAS_BUSINESS_INFORMATION]->(bi)
+            RETURN bi
+            """
+            
+            result = self._execute_write(query, {
+                "filing_id": filing_id,
+                "section_id": section_id,
+                "full_text": business_info_text
+            })
+            
+            if result:
+                print(f"✅ Added Business Information section for {company_ticker}")
+                return result[0]["bi"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding Business Information for {company_ticker}: {e}")
+            return None
+    
+    def add_legal_proceedings_section(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        legal_proceedings_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """Add Legal Proceedings section to a 10-K filing."""
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            section_id = f"{filing_id}_legal_proceedings"
+            
+            query = """
+            MATCH (f:`10KFiling` {id: $filing_id})
+            MERGE (lp:Section:LegalProceeding {id: $section_id})
+            SET lp.fullTitleSection = $title,
+                lp.fullText = $full_text,
+                lp.updatedAt = timestamp()
+            MERGE (f)-[:HAS_LEGAL_PROCEEDINGS]->(lp)
+            RETURN lp
+            """
+            
+            result = self._execute_write(query, {
+                "filing_id": filing_id,
+                "section_id": section_id,
+                "title": "Item 3 - Legal Proceedings",
+                "full_text": legal_proceedings_text
+            })
+            
+            if result:
+                print(f"✅ Added Legal Proceedings section for {company_ticker}")
+                return result[0]["lp"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding Legal Proceedings for {company_ticker}: {e}")
+            return None
+    
+    def add_management_discussion_section(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        mda_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """Add Management Discussion & Analysis section to a 10-K filing."""
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            section_id = f"{filing_id}_mda"
+            
+            query = """
+            MATCH (f:`10KFiling` {id: $filing_id})
+            MERGE (md:Section:ManagemetDiscussion {id: $section_id})
+            SET md.fullText = $full_text,
+                md.updatedAt = timestamp()
+            MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION]->(md)
+            RETURN md
+            """
+            
+            result = self._execute_write(query, {
+                "filing_id": filing_id,
+                "section_id": section_id,
+                "full_text": mda_text
+            })
+            
+            if result:
+                print(f"✅ Added MD&A section for {company_ticker}")
+                return result[0]["md"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding MD&A for {company_ticker}: {e}")
+            return None
+    
+    def add_properties_section(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        properties_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """Add Properties section to a 10-K filing."""
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            section_id = f"{filing_id}_properties"
+            
+            query = """
+            MATCH (f:`10KFiling` {id: $filing_id})
+            MERGE (prop:Section:Properties {id: $section_id})
+            SET prop.fullText = $full_text,
+                prop.updatedAt = timestamp()
+            MERGE (f)-[:HAS_PROPERTIES]->(prop)
+            RETURN prop
+            """
+            
+            result = self._execute_write(query, {
+                "filing_id": filing_id,
+                "section_id": section_id,
+                "full_text": properties_text
+            })
+            
+            if result:
+                print(f"✅ Added Properties section for {company_ticker}")
+                return result[0]["prop"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding Properties for {company_ticker}: {e}")
+            return None
+    
+    def add_financials_section(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        fiscal_year: int,
+        income_statement_text: Optional[str] = None,
+        balance_sheet_text: Optional[str] = None,
+        cash_flow_text: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add Financials section to a 10-K filing.
+        
+        Args:
+            company_ticker: Company ticker symbol
+            filing_date: Date of the filing
+            fiscal_year: Fiscal year of the financials
+            income_statement_text: Income statement text
+            balance_sheet_text: Balance sheet text
+            cash_flow_text: Cash flow statement text
+            
+        Returns:
+            Created Financials section node or None if failed
+        """
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            financials_id = f"{filing_id}_financials_{fiscal_year}"
+            
+            query = """
+            MATCH (f:`10KFiling` {id: $filing_id})
+            MERGE (fin:Section:Financials {id: $financials_id})
+            SET fin.incomeStatement = $income_statement,
+                fin.balanceSheet = $balance_sheet,
+                fin.cashFlow = $cash_flow,
+                fin.fiscalYear = $fiscal_year,
+                fin.updatedAt = timestamp()
+            MERGE (f)-[:HAS_FINACIALS]->(fin)
+            RETURN fin
+            """
+            
+            result = self._execute_write(query, {
+                "filing_id": filing_id,
+                "financials_id": financials_id,
+                "income_statement": income_statement_text,
+                "balance_sheet": balance_sheet_text,
+                "cash_flow": cash_flow_text,
+                "fiscal_year": fiscal_year
+            })
+            
+            if result:
+                print(f"✅ Added Financials section for {company_ticker} (FY{fiscal_year})")
+                return result[0]["fin"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding Financials for {company_ticker}: {e}")
+            return None
+    
+    def add_financial_metric(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        fiscal_year: int,
+        metric_label: str,
+        metric_value: float,
+        segments: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add a financial metric with optional segments to a Financials section.
+        
+        Args:
+            company_ticker: Company ticker symbol
+            filing_date: Date of the filing
+            fiscal_year: Fiscal year
+            metric_label: Label for the metric (e.g., "Revenue", "NetIncome")
+            metric_value: Value of the metric
+            segments: Optional list of segment dictionaries with keys:
+                     - label: Segment label
+                     - value: Segment value
+                     - percentage: Percentage of total (optional)
+                     
+        Returns:
+            Created FinancialMetric node or None if failed
+            
+        Example:
+            db.add_financial_metric(
+                "AAPL",
+                date(2024, 11, 1),
+                2024,
+                "Revenue",
+                394328000000,
+                segments=[
+                    {"label": "iPhone", "value": 200583000000, "percentage": 50.9},
+                    {"label": "Services", "value": 85200000000, "percentage": 21.6}
+                ]
+            )
+        """
+        try:
+            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            financials_id = f"{filing_id}_financials_{fiscal_year}"
+            metric_id = f"{financials_id}_{metric_label}"
+            
+            # Create FinancialMetric node
+            metric_query = """
+            MATCH (fin:Section:Financials {id: $financials_id})
+            MERGE (fm:FinancialMetric {id: $metric_id})
+            SET fm.value = $value,
+                fm.label = $label,
+                fm.updatedAt = timestamp()
+            MERGE (fin)-[:HAS_METRIC]->(fm)
+            RETURN fm
+            """
+            
+            result = self._execute_write(metric_query, {
+                "financials_id": financials_id,
+                "metric_id": metric_id,
+                "value": metric_value,
+                "label": metric_label
+            })
+            
+            if not result:
+                return None
+            
+            # Create Segment nodes if provided
+            if segments:
+                for seg in segments:
+                    segment_id = f"{metric_id}_{seg['label'].replace(' ', '_')}"
+                    
+                    segment_query = """
+                    MATCH (fm:FinancialMetric {id: $metric_id})
+                    MERGE (seg:Segment {id: $segment_id})
+                    SET seg.label = $label,
+                        seg.value = $value,
+                        seg.percentage = $percentage,
+                        seg.updatedAt = timestamp()
+                    MERGE (fm)-[:HAS_SEGMENT]->(seg)
+                    RETURN seg
+                    """
+                    
+                    self._execute_write(segment_query, {
+                        "metric_id": metric_id,
+                        "segment_id": segment_id,
+                        "label": seg["label"],
+                        "value": seg.get("value"),
+                        "percentage": seg.get("percentage")
+                    })
+            
+            print(f"✅ Added financial metric '{metric_label}' for {company_ticker}")
+            return result[0]["fm"]
+            
+        except Exception as e:
+            print(f"❌ Error adding financial metric for {company_ticker}: {e}")
+            return None
+    
+    def add_ceo_and_compensation(
+        self,
+        company_ticker: str,
+        ceo_name: str,
+        ceo_compensation: Optional[float] = None,
+        ceo_actually_paid: Optional[float] = None,
+        shareholder_return: Optional[float] = None,
+        accession_number: Optional[str] = None,
+        filing_url: Optional[str] = None,
+        filing_date: Optional[date] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add CEO and compensation package information to a company.
+        
+        Args:
+            company_ticker: Company ticker symbol
+            ceo_name: Name of the CEO
+            ceo_compensation: Total CEO compensation
+            ceo_actually_paid: Actually paid compensation
+            shareholder_return: Shareholder return percentage
+            accession_number: SEC accession number for DEF 14A
+            filing_url: URL to the proxy statement
+            filing_date: Date of the filing
+            
+        Returns:
+            Created CompensationPackage node or None if failed
+        """
+        try:
+            # Create Person node for CEO
+            person_query = """
+            MERGE (p:Person {name: $ceo_name})
+            ON CREATE SET p.createdAt = timestamp()
+            ON MATCH SET p.updatedAt = timestamp()
+            RETURN p
+            """
+            
+            self._execute_write(person_query, {"ceo_name": ceo_name})
+            
+            # Create CEO employment relationship
+            ceo_rel_query = """
+            MATCH (c:Company {ticker: $ticker})
+            MATCH (p:Person {name: $ceo_name})
+            MERGE (c)-[r:EMPLOYED_AS_CEO]->(p)
+            SET r.ceoCompensation = $ceo_compensation,
+                r.ceoActuallyPaid = $ceo_actually_paid,
+                r.date = $date
+            RETURN r
+            """
+            
+            self._execute_write(ceo_rel_query, {
+                "ticker": company_ticker,
+                "ceo_name": ceo_name,
+                "ceo_compensation": ceo_compensation,
+                "ceo_actually_paid": ceo_actually_paid,
+                "date": filing_date or date.today()
+            })
+            
+            # Create Document node if filing info provided
+            if accession_number and filing_url:
+                doc_query = """
+                MERGE (doc:Document {id: $accession_number})
+                ON CREATE SET
+                    doc.accession_number = $accession_number,
+                    doc.url = $url,
+                    doc.form = $form,
+                    doc.filing_date = $filing_date,
+                    doc.createdAt = timestamp()
+                ON MATCH SET
+                    doc.updatedAt = timestamp()
+                RETURN doc
+                """
+                
+                self._execute_write(doc_query, {
+                    "accession_number": accession_number,
+                    "url": filing_url,
+                    "form": "DEF 14A",
+                    "filing_date": filing_date or date.today()
+                })
+                
+                # Create CompensationPackage node
+                comp_package_id = f"{company_ticker}_comp_{(filing_date or date.today()).isoformat()}"
+                
+                comp_query = """
+                MATCH (c:Company {ticker: $ticker})
+                MATCH (p:Person {name: $ceo_name})
+                MATCH (doc:Document {id: $accession_number})
+                
+                MERGE (cp:CompensationPackage {id: $comp_package_id})
+                SET cp.totalCompensation = $total_compensation,
+                    cp.shareholderReturn = $shareholder_return,
+                    cp.date = $date,
+                    cp.updatedAt = timestamp()
+                
+                MERGE (p)-[:RECEIVED_COMPENSATION]->(cp)
+                MERGE (c)<-[:AWARDED_BY]-(cp)
+                MERGE (cp)-[:DISCLOSED_IN]->(doc)
+                RETURN cp
+                """
+                
+                result = self._execute_write(comp_query, {
+                    "ticker": company_ticker,
+                    "ceo_name": ceo_name,
+                    "accession_number": accession_number,
+                    "comp_package_id": comp_package_id,
+                    "total_compensation": ceo_compensation,
+                    "shareholder_return": shareholder_return,
+                    "date": filing_date or date.today()
+                })
+                
+                if result:
+                    print(f"✅ Added CEO and compensation for {company_ticker}")
+                    return result[0]["cp"]
+            else:
+                print(f"✅ Added CEO relationship for {company_ticker}")
+                return {"ceo_name": ceo_name}
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding CEO/compensation for {company_ticker}: {e}")
+            return None
+    
+    def add_insider_transaction(
+        self,
+        company_ticker: str,
+        insider_name: str,
+        transaction_date: date,
+        position: Optional[str] = None,
+        transaction_type: Optional[str] = None,
+        shares: Optional[float] = None,
+        price: Optional[float] = None,
+        value: Optional[float] = None,
+        remaining_shares: Optional[float] = None,
+        filing_url: Optional[str] = None,
+        form: str = "4"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Add an insider transaction (Form 4) to a company.
+        
+        Args:
+            company_ticker: Company ticker symbol
+            insider_name: Name of the insider
+            transaction_date: Date of the transaction
+            position: Position/title of the insider
+            transaction_type: Type of transaction (e.g., "Purchase", "Sale")
+            shares: Number of shares transacted
+            price: Price per share
+            value: Total value of transaction
+            remaining_shares: Shares remaining after transaction
+            filing_url: URL to the Form 4 filing
+            form: Form type (default: "4")
+            
+        Returns:
+            Created InsiderTransaction node or None if failed
+        """
+        try:
+            # Create Person node
+            person_query = """
+            MERGE (p:Person {name: $insider_name})
+            ON CREATE SET p.createdAt = timestamp()
+            ON MATCH SET p.updatedAt = timestamp()
+            RETURN p
+            """
+            
+            self._execute_write(person_query, {"insider_name": insider_name})
+            
+            # Create Document node for Form 4
+            form4_accession = f"{company_ticker}_{insider_name}_{transaction_date}_Form4".replace(" ", "_")
+            
+            doc_query = """
+            MERGE (doc:Document {id: $accession_number})
+            ON CREATE SET
+                doc.accession_number = $accession_number,
+                doc.url = $url,
+                doc.form = $form,
+                doc.filing_date = $filing_date,
+                doc.createdAt = timestamp()
+            ON MATCH SET
+                doc.updatedAt = timestamp()
+            RETURN doc
+            """
+            
+            self._execute_write(doc_query, {
+                "accession_number": form4_accession,
+                "url": filing_url,
+                "form": form,
+                "filing_date": transaction_date
+            })
+            
+            # Create InsiderTransaction node
+            trade_id = f"{company_ticker}_{insider_name}_{transaction_date}_{transaction_type}".replace(" ", "_")
+            
+            transaction_query = """
+            MATCH (c:Company {ticker: $ticker})
+            MATCH (p:Person {name: $insider_name})
+            MATCH (doc:Document {id: $accession_number})
+            
+            MERGE (it:InsiderTransaction {id: $trade_id})
+            SET it.position = $position,
+                it.transactionType = $transaction_type,
+                it.shares = $shares,
+                it.price = $price,
+                it.value = $value,
+                it.remainingShares = $remaining_shares,
+                it.updatedAt = timestamp()
+            
+            MERGE (p)<-[:MADE_BY]-(it)
+            MERGE (c)-[:HAS_INSIDER_TRANSACTION]->(it)
+            MERGE (it)-[:EXTRACTED_FROM]->(doc)
+            RETURN it
+            """
+            
+            result = self._execute_write(transaction_query, {
+                "ticker": company_ticker,
+                "insider_name": insider_name,
+                "accession_number": form4_accession,
+                "trade_id": trade_id,
+                "position": position,
+                "transaction_type": transaction_type,
+                "shares": shares,
+                "price": price,
+                "value": value,
+                "remaining_shares": remaining_shares
+            })
+            
+            if result:
+                print(f"✅ Added insider transaction for {company_ticker} ({insider_name})")
+                return result[0]["it"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error adding insider transaction for {company_ticker}: {e}")
+            return None
+    
+    def link_holding_to_company(
+        self,
+        holding_id: str,
+        company_ticker: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Manually link a Holding node to a Company node.
+        
+        This is useful if you want to create the link after the fact,
+        though the create_fund_holdings() method now does this automatically.
+        
+        Args:
+            holding_id: ID of the Holding node
+            company_ticker: Ticker of the Company
+            
+        Returns:
+            The relationship or None if failed
+        """
+        try:
+            query = """
+            MATCH (h:Holding {id: $holding_id})
+            MERGE (c:Company {ticker: $company_ticker})
+            ON CREATE SET
+                c.name = h.name,
+                c.createdAt = timestamp()
+            MERGE (h)-[r:IS_EQUITY_OF]->(c)
+            RETURN r
+            """
+            
+            result = self._execute_write(query, {
+                "holding_id": holding_id,
+                "company_ticker": company_ticker
+            })
+            
+            if result:
+                print(f"✅ Linked holding {holding_id} to company {company_ticker}")
+                return result[0]["r"]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error linking holding to company: {e}")
+            return None
+
+    def ingest_companies_batch(
+        self,
+        companies: List['CompanyEntity'],
+        verbose: bool = True
+    ) -> Dict[str, int]:
+        """
+        Batch ingest a list of CompanyEntity objects into Neo4j.
+        
+        This method processes each company and all its associated data:
+        - Company node
+        - 10-K filings with all sections
+        - Financial metrics with segments
+        - CEO and compensation data
+        - Insider transactions
+        
+        Args:
+            companies: List of CompanyEntity objects to ingest
+            verbose: Whether to print progress messages
+            
+        Returns:
+            Dictionary with ingestion statistics
+            
+        Example:
+            from simple_rag.models.company import CompanyEntity
+            
+            # Load your companies (from pickle, API, etc.)
+            companies = [company1, company2, company3]
+            
+            # Ingest them all
+            stats = db.ingest_companies_batch(companies)
+            print(f"Ingested {stats['companies']} companies")
+        """
+        from datetime import datetime
+        
+        stats = {
+            'companies': 0,
+            'filings_10k': 0,
+            'sections': 0,
+            'financial_metrics': 0,
+            'segments': 0,
+            'compensation_packages': 0,
+            'insider_transactions': 0,
+            'errors': 0
+        }
+        
+        total_companies = len(companies)
+        
+        for idx, company in enumerate(companies, 1):
+            try:
+                if verbose:
+                    print(f"\n{'='*80}")
+                    print(f"Processing Company {idx}/{total_companies}: {company.name} ({company.ticker})")
+                    print(f"{'='*80}")
+                
+                # 1. Create/Update Company Node
+                self.create_or_update_company(
+                    ticker=company.ticker,
+                    name=company.name,
+                    cik=company.cik
+                )
+                stats['companies'] += 1
+                
+                # 2. Process 10-K Filings
+                for filing_date, filing in company.filings_10k.items():
+                    if verbose:
+                        print(f"\n  📄 Processing 10-K filing from {filing_date}")
+                    
+                    # Add the 10-K filing
+                    self.add_10k_filing(
+                        company_ticker=company.ticker,
+                        accession_number=filing.filing_metadata.accession_number,
+                        filing_url=filing.filing_metadata.filing_url,
+                        filing_date=filing.filing_metadata.filing_date,
+                        filing_type=filing.filing_metadata.filing_type,
+                        report_period_end=filing.filing_metadata.report_period_end
+                    )
+                    stats['filings_10k'] += 1
+                    
+                    # Add sections
+                    if filing.risk_factors:
+                        self.add_risk_factors_section(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            risk_factors_text=filing.risk_factors
+                        )
+                        stats['sections'] += 1
+                    
+                    if filing.business_information:
+                        self.add_business_information_section(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            business_info_text=filing.business_information
+                        )
+                        stats['sections'] += 1
+                    
+                    if filing.legal_proceedings:
+                        self.add_legal_proceedings_section(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            legal_proceedings_text=filing.legal_proceedings
+                        )
+                        stats['sections'] += 1
+                    
+                    if filing.management_discussion_and_analysis:
+                        self.add_management_discussion_section(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            mda_text=filing.management_discussion_and_analysis
+                        )
+                        stats['sections'] += 1
+                    
+                    if filing.properties:
+                        self.add_properties_section(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            properties_text=filing.properties
+                        )
+                        stats['sections'] += 1
+                    
+                    # Process income statements
+                    for period_date, income_stmt in filing.income_statements.items():
+                        if verbose:
+                            print(f"    💰 Processing financials for period {period_date}")
+                        
+                        # Add financials section
+                        self.add_financials_section(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            fiscal_year=income_stmt.fiscal_year or period_date.year,
+                            income_statement_text=filing.income_statement_text,
+                            balance_sheet_text=filing.balance_sheet_text,
+                            cash_flow_text=filing.cash_flow_text
+                        )
+                        stats['sections'] += 1
+                        
+                        # Add individual financial metrics
+                        fiscal_year = income_stmt.fiscal_year or period_date.year
+                        
+                        # Revenue
+                        if income_stmt.revenue and income_stmt.revenue.value:
+                            segments = [
+                                {
+                                    "label": seg.label,
+                                    "value": seg.amount,
+                                    "percentage": seg.percentage
+                                }
+                                for seg in income_stmt.revenue.segments
+                            ] if income_stmt.revenue.segments else None
+                            
+                            self.add_financial_metric(
+                                company_ticker=company.ticker,
+                                filing_date=filing.filing_metadata.filing_date,
+                                fiscal_year=fiscal_year,
+                                metric_label="Revenue",
+                                metric_value=income_stmt.revenue.value,
+                                segments=segments
+                            )
+                            stats['financial_metrics'] += 1
+                            if segments:
+                                stats['segments'] += len(segments)
+                        
+                        # Cost of Sales
+                        if income_stmt.cost_of_sales and income_stmt.cost_of_sales.value:
+                            self.add_financial_metric(
+                                company_ticker=company.ticker,
+                                filing_date=filing.filing_metadata.filing_date,
+                                fiscal_year=fiscal_year,
+                                metric_label="CostOfSales",
+                                metric_value=income_stmt.cost_of_sales.value
+                            )
+                            stats['financial_metrics'] += 1
+                        
+                        # Gross Profit
+                        if income_stmt.gross_profit and income_stmt.gross_profit.value:
+                            self.add_financial_metric(
+                                company_ticker=company.ticker,
+                                filing_date=filing.filing_metadata.filing_date,
+                                fiscal_year=fiscal_year,
+                                metric_label="GrossProfit",
+                                metric_value=income_stmt.gross_profit.value
+                            )
+                            stats['financial_metrics'] += 1
+                        
+                        # Operating Expenses
+                        if income_stmt.operating_expenses and income_stmt.operating_expenses.value:
+                            self.add_financial_metric(
+                                company_ticker=company.ticker,
+                                filing_date=filing.filing_metadata.filing_date,
+                                fiscal_year=fiscal_year,
+                                metric_label="OperatingExpenses",
+                                metric_value=income_stmt.operating_expenses.value
+                            )
+                            stats['financial_metrics'] += 1
+                        
+                        # Operating Income
+                        if income_stmt.operating_income and income_stmt.operating_income.value:
+                            self.add_financial_metric(
+                                company_ticker=company.ticker,
+                                filing_date=filing.filing_metadata.filing_date,
+                                fiscal_year=fiscal_year,
+                                metric_label="OperatingIncome",
+                                metric_value=income_stmt.operating_income.value
+                            )
+                            stats['financial_metrics'] += 1
+                        
+                        # Net Income
+                        if income_stmt.net_income and income_stmt.net_income.value:
+                            self.add_financial_metric(
+                                company_ticker=company.ticker,
+                                filing_date=filing.filing_metadata.filing_date,
+                                fiscal_year=fiscal_year,
+                                metric_label="NetIncome",
+                                metric_value=income_stmt.net_income.value
+                            )
+                            stats['financial_metrics'] += 1
+                
+                # 3. Process Executive Compensation
+                if company.executive_compensation:
+                    if verbose:
+                        print(f"\n  👔 Processing executive compensation")
+                    
+                    exec_comp = company.executive_compensation
+                    
+                    # Parse filing date from URL or use a default
+                    filing_date = None
+                    if exec_comp.url and 'accession_number' in dir(exec_comp):
+                        # Try to extract date from accession number if available
+                        pass
+                    
+                    self.add_ceo_and_compensation(
+                        company_ticker=company.ticker,
+                        ceo_name=exec_comp.ceo_name,
+                        ceo_compensation=exec_comp.ceo_compensation,
+                        ceo_actually_paid=exec_comp.ceo_actually_paid,
+                        shareholder_return=exec_comp.shareholder_return,
+                        accession_number=None,  # You may need to add this to ExecutiveCompensation model
+                        filing_url=exec_comp.url,
+                        filing_date=filing_date
+                    )
+                    stats['compensation_packages'] += 1
+                
+                # 4. Process Insider Transactions
+                if company.insider_trades:
+                    if verbose:
+                        print(f"\n  📊 Processing {len(company.insider_trades)} insider transactions")
+                    
+                    for trade in company.insider_trades:
+                        # Parse date string to date object
+                        trade_date = None
+                        if trade.date:
+                            try:
+                                if isinstance(trade.date, str):
+                                    trade_date = datetime.strptime(trade.date, "%Y-%m-%d").date()
+                                else:
+                                    trade_date = trade.date
+                            except:
+                                trade_date = datetime.now().date()
+                        else:
+                            trade_date = datetime.now().date()
+                        
+                        self.add_insider_transaction(
+                            company_ticker=company.ticker,
+                            insider_name=trade.insider_name,
+                            transaction_date=trade_date,
+                            position=trade.position,
+                            transaction_type=trade.transaction_type,
+                            shares=float(trade.shares) if trade.shares else None,
+                            price=trade.price,
+                            value=trade.value,
+                            remaining_shares=float(trade.remaining_shares) if trade.remaining_shares else None,
+                            filing_url=trade.filing_url,
+                            form=trade.form or "4"
+                        )
+                        stats['insider_transactions'] += 1
+                
+                if verbose:
+                    print(f"  ✅ Completed {company.ticker}")
+                    
+            except Exception as e:
+                stats['errors'] += 1
+                print(f"  ❌ Error processing {company.ticker}: {e}")
+                logger.error(f"Error ingesting company {company.ticker}: {e}", exc_info=True)
+                continue
+        
+        # Print summary
+        if verbose:
+            print(f"\n{'='*80}")
+            print("📊 BATCH INGESTION SUMMARY")
+            print(f"{'='*80}")
+            print(f"Companies Processed: {stats['companies']}")
+            print(f"10-K Filings: {stats['filings_10k']}")
+            print(f"Sections Added: {stats['sections']}")
+            print(f"Financial Metrics: {stats['financial_metrics']}")
+            print(f"Segments: {stats['segments']}")
+            print(f"Compensation Packages: {stats['compensation_packages']}")
+            print(f"Insider Transactions: {stats['insider_transactions']}")
+            print(f"Errors: {stats['errors']}")
+            print(f"{'='*80}")
         
         return stats
 
