@@ -1,0 +1,586 @@
+/* ============================================================
+   SEC Filings Intelligence — Bloomberg Terminal × Obsidian Vault
+   ============================================================ */
+
+/* ---- Fonts ---- */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap');
+
+/* ---- Design Tokens ---- */
+:root {
+    --void:        #07080d;
+    --surface-1:   #0d0f14;
+    --surface-2:   #13161d;
+    --surface-3:   #1a1d26;
+    --border:      #23272f;
+    --border-hover:#2e3340;
+
+    --amber:       #e8a820;
+    --amber-dim:   rgba(232,168,32,.15);
+    --amber-glow:  rgba(232,168,32,.25);
+
+    --green:       #22c55e;
+    --red:         #ef4444;
+    --blue:        #3b82f6;
+
+    --text-1:      #e6edf3;
+    --text-2:      #8b949e;
+    --text-3:      #484f58;
+
+    --radius:      8px;
+    --radius-lg:   12px;
+}
+
+/* ---- Global ---- */
+.stApp {
+    background-color: var(--void) !important;
+    background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: center center;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-1);
+}
+
+/* Ambient glow at top */
+.stApp::before {
+    content: '';
+    position: fixed;
+    top: -120px;
+    left: 50%;
+    translate: -50% 0;
+    width: 600px;
+    height: 300px;
+    background: radial-gradient(ellipse, var(--amber-dim) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ============================================================
+   HEADER — bracket-corner decorations
+   ============================================================ */
+.main-header {
+    position: relative;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    padding: 2rem 2.5rem;
+    margin-bottom: 2rem;
+    border-radius: var(--radius-lg);
+}
+
+/* Corner brackets */
+.main-header::before,
+.main-header::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-color: var(--amber);
+    border-style: solid;
+}
+.main-header::before {
+    top: 8px; left: 8px;
+    border-width: 2px 0 0 2px;
+}
+.main-header::after {
+    top: 8px; right: 8px;
+    border-width: 2px 2px 0 0;
+}
+
+.header-bottom-left,
+.header-bottom-right {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-color: var(--amber);
+    border-style: solid;
+}
+.header-bottom-left  { bottom: 8px; left: 8px;  border-width: 0 0 2px 2px; }
+.header-bottom-right { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
+
+.main-header h1 {
+    font-family: 'Syne', sans-serif;
+    color: var(--text-1);
+    font-size: 2.2rem;
+    font-weight: 800;
+    margin: 0;
+    letter-spacing: -1px;
+    line-height: 1.15;
+}
+
+.main-header .subtitle {
+    font-family: 'Space Mono', monospace;
+    color: var(--text-3);
+    font-size: 0.7rem;
+    margin-top: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+}
+
+/* System ready pill — pulsing green dot */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 0.8rem;
+    padding: 4px 14px;
+    background: rgba(34, 197, 94, .08);
+    border: 1px solid rgba(34, 197, 94, .25);
+    border-radius: 999px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--green);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.status-pill::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,.4); }
+    50%      { opacity: .6; box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+}
+
+/* ============================================================
+   CHAT MESSAGES — fade-up animation, accent line
+   ============================================================ */
+.chat-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+/* Streamlit native chat messages */
+.stChatMessage {
+    animation: fadeUp .4s ease-out both;
+    border-radius: var(--radius-lg) !important;
+}
+.stChatMessage:nth-child(odd)  { animation-delay: .05s; }
+.stChatMessage:nth-child(even) { animation-delay: .12s; }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* User bubble */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+    background: var(--surface-2) !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* Assistant bubble — left accent gradient line */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {
+    background: var(--surface-1) !important;
+    border: 1px solid var(--border) !important;
+    border-left: 3px solid transparent !important;
+    border-image: linear-gradient(180deg, var(--amber), transparent) 1 !important;
+    border-image-slice: 1 !important;
+}
+
+/* Square avatar corners */
+[data-testid="stChatMessage"] [data-testid^="chatAvatarIcon"] {
+    border-radius: 4px !important;
+}
+
+/* Custom message bubbles (HTML) */
+.message-bubble {
+    padding: 1.25rem 1.5rem;
+    border-radius: var(--radius-lg);
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+    animation: fadeUp .4s ease-out both;
+}
+
+.user-message {
+    background: var(--surface-2);
+    margin-left: 3rem;
+}
+
+.assistant-message {
+    background: var(--surface-1);
+    margin-right: 3rem;
+    border-left: 3px solid var(--amber);
+}
+
+.message-role {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-3);
+    margin-bottom: 0.5rem;
+}
+
+.message-content {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: var(--text-1);
+}
+
+/* ============================================================
+   FINANCIAL DATA BADGE
+   ============================================================ */
+.financial-data {
+    font-family: 'Space Mono', monospace;
+    background: var(--amber-dim);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--amber);
+}
+
+/* ============================================================
+   SOURCE CARDS — amber stripe reveal, filing badges
+   ============================================================ */
+.source-card {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+/* Hover amber gradient stripe across top */
+.source-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--amber), transparent);
+    opacity: 0;
+    transition: opacity .25s ease;
+}
+.source-card:hover::before { opacity: 1; }
+.source-card:hover {
+    border-color: var(--border-hover);
+    box-shadow: 0 4px 20px rgba(232,168,32,.08);
+}
+
+.source-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.source-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    color: var(--text-1);
+    font-size: 0.9rem;
+}
+
+/* Relevance badge — color-coded tiers */
+.source-relevance {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+.relevance-high   { background: rgba(34,197,94,.12); color: var(--green); }
+.relevance-medium { background: var(--amber-dim);    color: var(--amber); }
+.relevance-low    { background: rgba(72,79,88,.2);   color: var(--text-3); }
+
+/* Filing type badges */
+.badge-filing {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    display: inline-block;
+    margin-right: 4px;
+}
+.badge-10k     { background: var(--amber-dim);       color: var(--amber); }
+.badge-8k      { background: rgba(239,68,68,.12);    color: var(--red); }
+.badge-def14a  { background: rgba(34,197,94,.12);    color: var(--green); }
+.badge-form4   { background: rgba(59,130,246,.12);   color: var(--blue); }
+.badge-default { background: rgba(72,79,88,.2);      color: var(--text-2); }
+
+.source-metadata {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-2);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.source-snippet {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    color: var(--text-2);
+    line-height: 1.5;
+    padding: 0.75rem;
+    background: var(--surface-1);
+    border-radius: 6px;
+    border-left: 2px solid var(--border);
+    font-style: italic;
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+.stChatInput > div {
+    border-color: var(--border) !important;
+    background: var(--surface-2) !important;
+    border-radius: var(--radius-lg) !important;
+}
+.stChatInput > div:focus-within {
+    border-color: var(--amber) !important;
+    box-shadow: 0 0 0 3px var(--amber-dim) !important;
+}
+.stChatInput input, .stChatInput textarea {
+    font-family: 'DM Sans', sans-serif !important;
+    color: var(--text-1) !important;
+}
+
+.stTextInput > div > div > input {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.95rem;
+    color: var(--text-1);
+    transition: border-color .2s ease;
+}
+.stTextInput > div > div > input:focus {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 3px var(--amber-dim);
+}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.stButton > button {
+    background: var(--surface-2) !important;
+    color: var(--text-1) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    padding: 0.6rem 1.2rem !important;
+    transition: all .2s ease !important;
+}
+.stButton > button:hover {
+    border-color: var(--amber) !important;
+    box-shadow: 0 0 12px var(--amber-dim) !important;
+    color: var(--amber) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ============================================================
+   SIDEBAR — metric cards with corner-notch decorations
+   ============================================================ */
+section[data-testid="stSidebar"] {
+    background: var(--surface-1) !important;
+    border-right: 1px solid var(--border) !important;
+}
+
+section[data-testid="stSidebar"] .stMarkdown h3 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: var(--text-2);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.sidebar-header {
+    font-family: 'Syne', sans-serif;
+    color: var(--amber);
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Metric cards — corner notch */
+.metric-card {
+    position: relative;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem 1rem;
+    text-align: center;
+    transition: all .25s ease;
+    overflow: hidden;
+}
+
+/* Corner notch decorations */
+.metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 12px; height: 12px;
+    border-top: 2px solid var(--amber);
+    border-left: 2px solid var(--amber);
+}
+.metric-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 12px; height: 12px;
+    border-bottom: 2px solid var(--amber);
+    border-right: 2px solid var(--amber);
+}
+
+.metric-card:hover {
+    border-color: var(--amber);
+    box-shadow: 0 0 20px var(--amber-dim);
+}
+
+.metric-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--amber);
+}
+
+.metric-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-top: 0.5rem;
+}
+
+/* Streamlit native metrics */
+[data-testid="stMetric"] {
+    background: var(--surface-2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 1rem !important;
+}
+[data-testid="stMetric"] label {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.65rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 2px !important;
+    color: var(--text-3) !important;
+}
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-family: 'Space Mono', monospace !important;
+    color: var(--amber) !important;
+}
+
+/* ============================================================
+   EXPANDER
+   ============================================================ */
+.streamlit-expanderHeader {
+    background: var(--surface-2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 600 !important;
+    color: var(--text-1) !important;
+}
+
+details[data-testid="stExpander"] {
+    background: var(--surface-1) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+}
+
+/* ============================================================
+   LOADING SPINNER — ring animation
+   ============================================================ */
+.loading-ring {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-2);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 1rem 0;
+}
+
+.loading-ring .ring {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--amber);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   MULTISELECT & SELECT
+   ============================================================ */
+.stMultiSelect > div,
+.stSelectbox > div {
+    font-family: 'DM Sans', sans-serif !important;
+}
+.stMultiSelect [data-baseweb="select"] > div,
+.stSelectbox [data-baseweb="select"] > div {
+    background: var(--surface-2) !important;
+    border-color: var(--border) !important;
+    color: var(--text-1) !important;
+}
+
+/* ============================================================
+   DIVIDERS
+   ============================================================ */
+hr, .stDivider {
+    border-color: var(--border) !important;
+}
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--void); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ============================================================
+   SUGGESTED QUERY CHIPS (for empty state)
+   ============================================================ */
+.suggestion-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-align: center;
+    margin: 2rem 0 1rem 0;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 768px) {
+    .main-header h1 { font-size: 1.6rem; }
+    .user-message    { margin-left: 1rem; }
+    .assistant-message { margin-right: 1rem; }
+}
