@@ -51,7 +51,7 @@ class Fund(StructuredNode):
     has_assets = RelationshipTo('Asset', 'HAS_ASSET')
     managed_by = RelationshipTo('Person', 'MANAGED_BY')
     has_charts = RelationshipTo('Image', 'HAS_CHART')
-    has_risks = RelationshipTo('Risks', 'HAS_RISKS')
+    has_risks = RelationshipTo('Risks', 'HAS_RISK_NODE')
     has_performance = RelationshipTo('TrailingPerformance', 'HAS_PERFORMANCE')
     has_credit_ratings = RelationshipTo('CreditRating', 'HAS_CREDIT_RATING')
     defined_by = RelationshipTo('Profile', 'DEFINED_BY')

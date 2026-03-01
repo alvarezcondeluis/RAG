@@ -103,45 +103,96 @@ def process_portfolio_holdings(investments: List) -> List[PortfolioHolding]:
     holdings = []
     
     for inv in investments:
+        # Handle different input types
+        if isinstance(inv, str):
+            # If it's just a string, create a minimal holding
+            holdings.append(PortfolioHolding(
+                name=inv,
+                ticker=None,
+                cusip=None,
+                isin='',
+                lei=None,
+                shares=0,
+                market_value=0,
+                weight_pct=0,
+                asset_category='',
+                asset_category_desc='',
+                issuer_category='',
+                issuer_category_desc='',
+                country='',
+                currency='USD',
+                payoff_profile=None,
+                is_restricted=False,
+                fair_value_level=None,
+            ))
+            continue
+        
+        if isinstance(inv, dict):
+            # If it's a dict, extract values directly
+            holdings.append(PortfolioHolding(
+                name=inv.get('name', ''),
+                ticker=inv.get('ticker'),
+                cusip=inv.get('cusip') if _is_valid_cusip(inv.get('cusip')) else None,
+                isin=inv.get('isin', ''),
+                lei=inv.get('lei'),
+                shares=float(inv.get('balance', 0)) if inv.get('balance') else 0,
+                market_value=float(inv.get('value_usd', 0)) if inv.get('value_usd') else 0,
+                weight_pct=float(inv.get('pct_value', 0)),
+                asset_category=inv.get('asset_category', ''),
+                asset_category_desc=ASSET_TO_SECTOR_MAP.get(inv.get('asset_category', ''), inv.get('asset_category', '')),
+                issuer_category=inv.get('issuer_category', ''),
+                issuer_category_desc=ISSUER_CATEGORY_MAP.get(inv.get('issuer_category', ''), inv.get('issuer_category', '')),
+                country=inv.get('investment_country', ''),
+                currency=inv.get('currency_code', 'USD'),
+                payoff_profile=inv.get('payoff_profile'),
+                is_restricted=inv.get('is_restricted_security', False),
+                fair_value_level=inv.get('fair_value_level'),
+            ))
+            continue
+        
+        # Handle object with attributes (original logic)
         # Extract ISIN safely
         isin = ''
-        if inv.identifiers:
+        if hasattr(inv, 'identifiers') and inv.identifiers:
             if hasattr(inv.identifiers, 'isin') and inv.identifiers.isin:
                 isin = inv.identifiers.isin
         
         # Extract ticker safely
         ticker = None
-        if inv.identifiers and hasattr(inv.identifiers, 'ticker'):
+        if hasattr(inv, 'identifiers') and inv.identifiers and hasattr(inv.identifiers, 'ticker'):
             ticker = inv.identifiers.ticker
         
         # Map asset category to readable sector
-        sector = ASSET_TO_SECTOR_MAP.get(inv.asset_category, inv.asset_category)
+        asset_cat = getattr(inv, 'asset_category', '')
+        sector = ASSET_TO_SECTOR_MAP.get(asset_cat, asset_cat)
         
         # Map issuer category
-        issuer_type = ISSUER_CATEGORY_MAP.get(inv.issuer_category, inv.issuer_category)
+        issuer_cat = getattr(inv, 'issuer_category', '')
+        issuer_type = ISSUER_CATEGORY_MAP.get(issuer_cat, issuer_cat)
         
         # Validate CUSIP - set to None if invalid
-        cusip = inv.cusip if _is_valid_cusip(inv.cusip) else None
+        cusip_val = getattr(inv, 'cusip', None)
+        cusip = cusip_val if _is_valid_cusip(cusip_val) else None
         
         # Create enriched holding
         holding = PortfolioHolding(
-            name=inv.name,
+            name=getattr(inv, 'name', ''),
             ticker=ticker,
             cusip=cusip,
             isin=isin,
-            lei=inv.lei if hasattr(inv, 'lei') else None,
-            shares=float(inv.balance) if inv.balance else 0,
-            market_value=float(inv.value_usd) if inv.value_usd else 0,
-            weight_pct=float(inv.pct_value),
-            asset_category=inv.asset_category,
+            lei=getattr(inv, 'lei', None),
+            shares=float(getattr(inv, 'balance', 0)) if getattr(inv, 'balance', None) else 0,
+            market_value=float(getattr(inv, 'value_usd', 0)) if getattr(inv, 'value_usd', None) else 0,
+            weight_pct=float(getattr(inv, 'pct_value', 0)),
+            asset_category=asset_cat,
             asset_category_desc=sector,
-            issuer_category=inv.issuer_category,
+            issuer_category=issuer_cat,
             issuer_category_desc=issuer_type,
-            country=inv.investment_country,
-            currency=inv.currency_code if hasattr(inv, 'currency_code') else 'USD',
-            payoff_profile=inv.payoff_profile if hasattr(inv, 'payoff_profile') else None,
-            is_restricted=inv.is_restricted_security if hasattr(inv, 'is_restricted_security') else False,
-            fair_value_level=inv.fair_value_level if hasattr(inv, 'fair_value_level') else None,
+            country=getattr(inv, 'investment_country', ''),
+            currency=getattr(inv, 'currency_code', 'USD'),
+            payoff_profile=getattr(inv, 'payoff_profile', None),
+            is_restricted=getattr(inv, 'is_restricted_security', False),
+            fair_value_level=getattr(inv, 'fair_value_level', None),
         )
         holdings.append(holding)
     

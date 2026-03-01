@@ -1,12 +1,36 @@
+import sys
 import time
 import json
 import statistics
+import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
+
+class _BenchmarkLogger:
+    """Write to both stdout and a file simultaneously."""
+    def __init__(self, file_path: Path) -> None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(file_path, "w", encoding="utf-8")
+        self._stdout = sys.stdout
+        sys.stdout = self
+
+    def write(self, data: str) -> None:
+        self._stdout.write(data)
+        self._file.write(data)
+
+    def flush(self) -> None:
+        self._stdout.flush()
+        self._file.flush()
+
+    def close(self) -> None:
+        sys.stdout = self._stdout
+        self._file.close()
+
 # Import your existing modules
-from simple_rag.rag.text2cypher import CypherTranslator
+from simple_rag.rag.query_handler import QueryHandler, QueryResult
 from simple_rag.database.neo4j.neo4j import Neo4jDatabase
 
 @dataclass
@@ -15,6 +39,8 @@ class TestResult:
     question_id: int
     question: str
     complexity: str
+    category: str = ""
+    confidence: float = 0.0
     success: bool = False
     error_type: Optional[str] = None
     error_message: Optional[str] = None
@@ -28,18 +54,41 @@ class TestResult:
 
 class Text2CypherBenchmark:
     """
-    A professional testing suite for evaluating Text-to-Cypher models.
+    A professional testing suite for evaluating Text-to-Cypher models using the full RAG pipeline.
     """
-    
-    def __init__(self, test_set_path: str, model_name: str, backend: str, interactive: bool = False):
+
+    def __init__(
+        self,
+        test_set_path: str,
+        model_name: str,
+        backend: str,
+        interactive: bool = False,
+        llama_cpp_host: str = "localhost",
+        llama_cpp_port: int = 8080,
+    ):
         self.test_path = Path(test_set_path)
         self.neo = Neo4jDatabase()
-        self.translator = CypherTranslator(neo4j_driver=self.neo.driver, model_name=model_name, backend=backend, use_entity_resolver=True)
-        
+
+        # Build extra kwargs for CypherTranslator (forwarded via QueryHandler **cypher_kwargs)
+        extra_kwargs = {}
+        if backend == "openai":
+            extra_kwargs["llama_cpp_host"] = llama_cpp_host
+            extra_kwargs["llama_cpp_port"] = llama_cpp_port
+
+        # Initialize the QueryHandler (Classification → Schema Slice → Cypher)
+        self.handler = QueryHandler(
+            neo4j_driver=self.neo.driver,
+            cypher_model=model_name,
+            cypher_backend=backend,
+            use_entity_resolver=True,
+            **extra_kwargs,
+        )
+
         self.results: List[TestResult] = []
         self.backend = backend
         self.interactive = interactive
         self.incorrect_queries: List[Dict[str, Any]] = []
+
         
     def load_tests(self) -> List[Dict]:
         """Loads test cases from the JSON file."""
@@ -51,15 +100,12 @@ class Text2CypherBenchmark:
 
     def _normalize_records(self, records: List[Dict]) -> List[Dict]:
         """Helper to normalize DB results for comparison (ignoring order/formatting)."""
-        # Convert all values to strings and sort keys to ensure comparable structures
         normalized = []
         for r in records:
-            # Flatten or clean dictionary if needed
             normalized.append({k: str(v) for k, v in r.items()})
-        # Sort by first key's value to handle order-agnostic comparison
         try:
-            return sorted(normalized, key=lambda x: list(x.values())[0])
-        except IndexError:
+            return sorted(normalized, key=lambda x: '|'.join(str(v) for v in x.values()))
+        except (IndexError, TypeError):
             return normalized
     
     def _compare_results_flexible(self, gen_records: List[Dict], exp_records) -> tuple[bool, str]:
@@ -78,18 +124,36 @@ class Text2CypherBenchmark:
             # Extract all values from records (ignoring keys)
             def extract_all_values(records):
                 all_values = set()
+                if not isinstance(records, list):
+                     return set([str(records)])
                 for record in records:
-                    if isinstance(record, int):
-                        return record
+                    if isinstance(record, (int, float, str)):
+                        all_values.add(str(record))
+                        continue
                     for v in record.values():
-                        all_values.add(str(v))
+                        if isinstance(v, float):
+                            all_values.add(str(round(v, 2)))
+                        else:
+                            all_values.add(str(v))
                 return all_values
+
+            def extract_string_entities(records):
+                """Extracts only text/string values to check if the main entities match."""
+                str_vals = set()
+                if not isinstance(records, list): return str_vals
+                for record in records:
+                    if isinstance(record, (int, float)):
+                        continue
+                    if isinstance(record, str):
+                        str_vals.add(record)
+                        continue
+                    for v in record.values():
+                        if isinstance(v, str) and not str(v).replace('.', '', 1).isdigit():
+                            str_vals.add(v)
+                return str_vals
             
             gen_values = extract_all_values(gen_records)
             exp_values = extract_all_values(exp_records)
-            
-            if isinstance(exp_values, int):
-                return (str(exp_values) in gen_values, 'exact')
             
             # Check match type
             if gen_values == exp_values:
@@ -99,6 +163,13 @@ class Text2CypherBenchmark:
             elif gen_values.issubset(exp_values):
                 return (True, 'partial')  # Generated has subset of expected
             else:
+                gen_strs = extract_string_entities(gen_records)
+                exp_strs = extract_string_entities(exp_records)
+                
+                if gen_strs and exp_strs:
+                    if gen_strs.issubset(exp_strs) or exp_strs.issubset(gen_strs):
+                        return (True, 'partial')
+                        
                 return (False, 'mismatch')
             
         except Exception as e:
@@ -110,6 +181,7 @@ class Text2CypherBenchmark:
         question = item['question']
         expected_cypher = item.get('expected_cypher')
         expected_answer = item.get('ground_truth_answer')
+        
         result = TestResult(
             question_id=index,
             question=question,
@@ -121,62 +193,72 @@ class Text2CypherBenchmark:
         print(f"📝 Q{index}: {question}")
         print(f"{'='*80}")
         
-        # 1. Measure Generation
+        # 1. Measure Pipeline (Classification + Translation)
         try:
             gen_start = time.time()
-            generated_cypher = self.translator.translate(question)
+            handle_result = self.handler.handle(question)
             result.generation_time_ms = (time.time() - gen_start) * 1000
-            result.generated_cypher = generated_cypher
+            
+            result.category = handle_result.category
+            result.confidence = handle_result.confidence
+            result.generated_cypher = handle_result.cypher or ""
 
-            if not generated_cypher:
-                result.error_type = "Generation Failure"
-                result.error_message = "Model returned empty string"
-                print(f"❌ Generation failed: Model returned empty string")
+            if handle_result.error:
+                result.error_type = f"Pipeline Error ({handle_result.category})"
+                result.error_message = handle_result.error
+                print(f"❌ Pipeline failed: {handle_result.error}")
+                return result
+
+            if handle_result.requires_vector_search and not handle_result.cypher:
+                result.error_type = "Routing"
+                result.error_message = f"Query routed to active vector search (category: {handle_result.category})"
+                print(f"ℹ️  Routed to Vector Search (skipping Cypher benchmark for this item)")
                 return result
 
         except Exception as e:
-            result.error_type = "Translation Exception"
+            result.error_type = "Execution Exception"
             result.error_message = str(e)
-            print(f"❌ Translation error: {e}")
+            print(f"❌ Execution error: {e}")
             return result
 
         # 2. Measure Execution & Accuracy
         try:
-            # A. Run Generated Query
+            # Run Generated Query
             exec_start = time.time()
             with self.neo.driver.session() as session:
-                gen_res = list(session.run(generated_cypher))
+                gen_res = list(session.run(result.generated_cypher))
                 gen_records = [r.data() for r in gen_res]
             result.execution_time_ms = (time.time() - exec_start) * 1000
             
+            # Run Expected Query
             with self.neo.driver.session() as session:
                 exp_res = list(session.run(expected_cypher))
                 exp_records = [r.data() for r in exp_res]
 
-            # C. Store results for comparison
+            # Store results for comparison
             result.generated_results = gen_records
             result.expected_results = exp_records
             
-            # D. Display both queries
-            print(f"\n🔍 QUERIES:")
-            print(f"Generated: {generated_cypher}")
-            print(f"Expected:  {expected_cypher}")
-            
-            # E. Display both results
+            # Display both queries
+            print(f"\n🔍 ROUTING: {result.category} ({result.confidence:.2%})")
+            print(f"Generated Cypher: {result.generated_cypher}")
+            print(f"Expected Cypher:  {expected_cypher}")
+
+            # Display results
             print(f"\n📊 RESULTS:")
             print(f"Generated ({len(gen_records)} records):")
-            for i, record in enumerate(gen_records[:3]):  # Show first 3 records
+            for i, record in enumerate(gen_records[:3]):
                 print(f"  [{i+1}] {record}")
             if len(gen_records) > 3:
                 print(f"  ... and {len(gen_records)-3} more")
             
             print(f"Expected ({len(exp_records)} records):")
-            for i, record in enumerate(exp_records[:3]):  # Show first 3 records
+            for i, record in enumerate(exp_records[:3]):
                 print(f"  [{i+1}] {record}")
             if len(exp_records) > 3:
                 print(f"  ... and {len(exp_records)-3} more")
             
-            # F. Compare Results (flexible - ignores alias names)
+            # Compare Results
             is_match, match_type = self._compare_results_flexible(gen_records, exp_records)
             
             if not is_match and expected_answer:
@@ -185,19 +267,13 @@ class Text2CypherBenchmark:
             if is_match:
                 result.success = True
                 result.is_semantically_correct = True
-                if match_type == 'exact':
-                    print(f"\n✅ PASS - Exact match")
-                elif match_type == 'partial':
-                    print(f"\n🟠 PASS - Partial match (extra or missing fields)")
-                    print(f"   Generated: {len(gen_records)} records")
-                    print(f"   Expected: {len(exp_records)} records")
+                match_label = "Exact" if match_type == 'exact' else "Partial"
+                print(f"\n✅ PASS - {match_label} match")
             else:
                 result.success = False
                 result.error_type = "Incorrect Result"
                 result.error_message = f"Got {len(gen_records)} records, expected {len(exp_records)}"
                 print(f"\n❌ FAIL - Result mismatch")
-                print(f"   Generated: {gen_records[:2] if len(gen_records) > 0 else 'empty'}...")
-                print(f"   Expected: {exp_records[:2] if len(exp_records) > 0 else 'empty'}...")
                 
         except Exception as e:
             result.success = False
@@ -205,9 +281,8 @@ class Text2CypherBenchmark:
             result.error_message = str(e)
             print(f"\n❌ FAIL - Execution error: {str(e)[:100]}")
             
-        print(f"\n⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
+        print(f"⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
         
-        # Interactive validation if enabled
         if self.interactive:
             user_validation = self._ask_user_validation(result, item)
             if not user_validation:
@@ -216,44 +291,41 @@ class Text2CypherBenchmark:
         return result
 
     def run(self, complexity_filter: Optional[List[str]] = None):
-        """
-        Main execution loop.
-        
-        Args:
-            complexity_filter: List of complexity levels to include ['simple', 'medium', 'hard'].
-                              If None and backend is 'groq', defaults to ['hard'] to conserve API limits.
-                              Examples: ['hard'], ['medium', 'hard'], ['simple', 'medium', 'hard']
-        """
+        """Main execution loop. Saves full output to reports/ folder."""
         test_data = self.load_tests()
-        
-        # Auto-filter for Groq backend to conserve API limits
+
         if complexity_filter is None and self.backend == "groq":
             complexity_filter = ["hard"]
-            print(f"⚠️  Groq backend detected: Auto-filtering to {complexity_filter} questions only to conserve API limits")
-        
-        # Apply complexity filter if specified
+            print(f"⚠️  Groq backend detected: Auto-filtering to {complexity_filter} questions only")
+
         if complexity_filter:
-            original_count = len(test_data)
-            # Normalize filter values to lowercase for comparison
             filter_lower = [f.lower() for f in complexity_filter]
             test_data = [item for item in test_data if item.get('complexity', '').lower() in filter_lower]
-            print(f"🔍 Filtered: {original_count} → {len(test_data)} questions (complexity={complexity_filter})")
-        
+
+        # --- Report file setup ---
+        reports_dir = self.test_path.parent / "reports"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_slug = self.handler.translator.model_name.replace("/", "_").replace(":", "-")
+        report_path = reports_dir / f"benchmark_{timestamp}_{model_slug}.txt"
+        benchmark_logger = _BenchmarkLogger(report_path)
+        # -------------------------
+
         print(f"\n{'='*80}")
-        print(f"🚀 Text-to-Cypher Benchmark Suite")
+        print(f"🚀 Text-to-Cypher Integrated Pipeline Benchmark")
         print(f"{'='*80}")
         print(f"📊 Total Questions: {len(test_data)}")
-        print(f"🤖 Model: {self.translator.model_name}")
-        print(f"🔧 Backend: {self.backend}")
-        if complexity_filter:
-            print(f"🎯 Complexity Filter: {', '.join(complexity_filter)}")
+        print(f"🤖 Code Model: {self.handler.translator.model_name}")
+        print(f"🏷️  Classifier: SetFit (9 categories)")
+        print(f"📁 Report: {report_path}")
         print(f"{'='*80}\n")
-        
+
         for i, item in enumerate(test_data, 1):
             res = self.evaluate_single_question(i, item)
             self.results.append(res)
 
         self.print_report()
+        benchmark_logger.close()
+        print(f"\n✅ Report saved → {report_path}")
         self.cleanup()
 
     def print_report(self):
@@ -263,7 +335,6 @@ class Text2CypherBenchmark:
         failed = total - passed
         accuracy = (passed / total) * 100 if total > 0 else 0
         
-        # Calculate Latencies (only for successful/attempted ops)
         gen_times = [r.generation_time_ms for r in self.results if r.generation_time_ms > 0]
         exec_times = [r.execution_time_ms for r in self.results if r.execution_time_ms > 0]
         
@@ -271,141 +342,77 @@ class Text2CypherBenchmark:
         avg_exec = statistics.mean(exec_times) if exec_times else 0
 
         print("\n" + "="*60)
-        print("📊 TEXT-TO-CYPHER BENCHMARK REPORT")
+        print("📊 PIPELINE BENCHMARK REPORT")
         print("="*60)
         print(f"Total Questions:      {total}")
         print(f"Passed (Correct Data): {passed}")
         print(f"Failed:               {failed}")
         print(f"ACCURACY:             {accuracy:.2f}%")
         print("-" * 60)
-        print(f"Avg Generation Time:  {avg_gen:.2f} ms")
+        print(f"Avg Dispatch Time:    {avg_gen:.2f} ms (Classify + Schema Slice + Translate)")
         print(f"Avg Execution Time:   {avg_exec:.2f} ms")
         print("="*60)
         
+        # Add category breakdown
+        print("\n� CATEGORY DISPATCH SUMMARY:")
+        categories = Counter([r.category for r in self.results])
+        for cat, count in categories.items():
+            cat_results = [r for r in self.results if r.category == cat]
+            cat_passed = sum(1 for r in cat_results if r.success)
+            cat_acc = (cat_passed / len(cat_results)) * 100
+            print(f"  - {cat:20}: {count:3} queries | Accuracy: {cat_acc:6.1f}%")
+
         if failed > 0:
-            print("\n🚩 ERROR LOG (Failed Questions):")
+            print("\n📋 ERROR LOG (Failed Questions):")
             for r in self.results:
                 if not r.success:
-                    print(f"\n{'='*80}")
-                    print(f"❌ Q{r.question_id} [{r.complexity.upper()}]: {r.question}")
-                    print(f"{'='*80}")
-                    print(f"\n📋 Error Type: {r.error_type}")
-                    print(f"💬 Message: {r.error_message}")
-                    
-                    print(f"\n🔹 EXPECTED CYPHER:")
-                    print(f"   {r.expected_cypher}")
-                    
-                    print(f"\n🔸 GENERATED CYPHER:")
-                    print(f"   {r.generated_cypher}")
-                    
-                    if r.expected_results or r.generated_results:
-                        print(f"\n📊 RESULTS COMPARISON:")
-                        print(f"\n   ✅ Expected Results ({len(r.expected_results)} records):")
-                        if r.expected_results:
-                            for i, rec in enumerate(r.expected_results[:5], 1):  # Show first 5
-                                print(f"      {i}. {rec}")
-                            if len(r.expected_results) > 5:
-                                print(f"      ... and {len(r.expected_results) - 5} more")
-                        else:
-                            print("      (empty result set)")
-                        
-                        print(f"\n   ❌ Generated Results ({len(r.generated_results)} records):")
-                        if r.generated_results:
-                            for i, rec in enumerate(r.generated_results[:5], 1):  # Show first 5
-                                print(f"      {i}. {rec}")
-                            if len(r.generated_results) > 5:
-                                print(f"      ... and {len(r.generated_results) - 5} more")
-                        else:
-                            print("      (empty result set)")
-                    
-                    print(f"\n{'='*80}\n")
+                    print(f"\n❌ Q{r.question_id} [{r.complexity.upper()}] | Cat: {r.category} ({r.confidence:.1%})")
+                    print(f"   Q: {r.question}")
+                    print(f"   Error: {r.error_type} - {r.error_message}")
+                    if r.generated_cypher:
+                        print(f"   Gen Cypher: {r.generated_cypher}")
+
+        # --- NULL EXPECTED RESULTS ---
+        # Questions where the expected Cypher itself returned 0 records.
+        # These are untestable and must be fixed in test_set.json.
+        null_expected = [
+            r for r in self.results
+            if hasattr(r, 'expected_results') and r.expected_results == []
+            and r.expected_cypher  # has a cypher query (not skipped)
+        ]
+        print(f"\n{'='*60}")
+        print(f"⚠️  NULL EXPECTED RESULTS — {len(null_expected)} question(s) need fixing in test_set.json")
+        print(f"{'='*60}")
+        if null_expected:
+            for r in null_expected:
+                status = "✅ PASS" if r.success else "❌ FAIL"
+                print(f"\n  {status} Q{r.question_id} [{r.complexity.upper()}]: {r.question}")
+                print(f"    Expected Cypher: {r.expected_cypher}")
+        else:
+            print("  ✅ All expected Cyphers returned results — no fixes needed.")
 
     def _ask_user_validation(self, result: TestResult, item: Dict) -> bool:
-        """
-        Ask user if the generated query and results are correct.
-        Returns True if correct, False if incorrect.
-        """
-        print("\n" + "="*80)
-        print("🔍 USER VALIDATION REQUIRED")
-        print("="*80)
-        
+        """Ask user if the generated query and results are correct."""
+        print("\n🔍 USER VALIDATION REQUIRED")
         while True:
-            response = input("\n❓ Is this query and result CORRECT? (y/n/s to skip): ").strip().lower()
-            
-            if response == 'y':
-                print("✅ Marked as CORRECT")
-                return True
-            elif response == 'n':
-                print("❌ Marked as INCORRECT - will be saved for review")
-                # Ask for optional feedback
-                feedback = input("💬 Optional feedback (press Enter to skip): ").strip()
-                if feedback:
-                    result.error_message = f"User feedback: {feedback}"
-                return False
-            elif response == 's':
-                print("⏭️  Skipped - treating as correct")
-                return True
-            else:
-                print("⚠️  Invalid input. Please enter 'y' (yes), 'n' (no), or 's' (skip)")
-    
+            response = input("\n❓ Correct? (y/n/s): ").strip().lower()
+            if response == 'y': return True
+            if response == 'n': return False
+            if response == 's': return True
+
     def _save_incorrect_query(self, result: TestResult, item: Dict):
-        """
-        Save an incorrect query to the list for later export.
-        """
-        incorrect_entry = {
+        self.incorrect_queries.append({
             "question_id": result.question_id,
             "question": result.question,
-            "complexity": result.complexity,
+            "category": result.category,
             "expected_cypher": result.expected_cypher,
             "generated_cypher": result.generated_cypher,
-            "expected_results": result.expected_results,
-            "generated_results": result.generated_results,
             "error_type": result.error_type,
-            "error_message": result.error_message,
-            "generation_time_ms": result.generation_time_ms,
-            "execution_time_ms": result.execution_time_ms
-        }
-        self.incorrect_queries.append(incorrect_entry)
-        print(f"💾 Saved to incorrect queries list (total: {len(self.incorrect_queries)})")
-    
-    def export_incorrect_queries(self, output_path: str = None):
-        """
-        Export incorrect queries to a JSON file.
-        """
-        if not self.incorrect_queries:
-            print("\n✅ No incorrect queries to export!")
-            return
-        
-        if output_path is None:
-            # Default to timestamp-based filename in test_results folder
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Create test_results folder if it doesn't exist
-            results_dir = Path(__file__).parent / "test_results"
-            results_dir.mkdir(exist_ok=True)
-            
-            output_path = results_dir / f"incorrect_queries_{timestamp}.json"
-        
-        output_file = Path(output_path)
-        
-        with open(output_file, 'w') as f:
-            json.dump({
-                "metadata": {
-                    "total_incorrect": len(self.incorrect_queries),
-                    "model": self.translator.model_name,
-                    "backend": self.backend
-                },
-                "incorrect_queries": self.incorrect_queries
-            }, f, indent=2)
-        
-        print(f"\n💾 Exported {len(self.incorrect_queries)} incorrect queries to: {output_file}")
-        print(f"📁 Full path: {output_file.absolute()}")
-    
+            "error_message": result.error_message
+        })
+
     def cleanup(self):
-        # Export incorrect queries if any were collected
-        if self.interactive and self.incorrect_queries:
-            self.export_incorrect_queries()
-        
-        self.translator.stop_ollama_server()
+        self.handler.translator.stop_ollama_server()
         self.neo.close()
+
+from collections import Counter

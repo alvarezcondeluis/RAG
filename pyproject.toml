@@ -36,6 +36,7 @@ dependencies = [
     "kaleido>=1.2.0",
     "markdownify>=1.2.2",
     "faiss-cpu>=1.13.2",
+    "langchain-openai>=1.1.10",
 ]
 
 [dependency-groups]

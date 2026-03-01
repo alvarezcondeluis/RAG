@@ -193,7 +193,7 @@ class TestCompanyDataIngestion:
     def test_company_has_10k_filings(self, db):
         """Test that companies have 10-K filings."""
         query = """
-        MATCH (c:Company)-[:HAS_FILING]->(f:`10KFiling`)
+        MATCH (c:Company)-[:HAS_FILING]->(f:Filing10K)
         RETURN count(f) as filing_count
         """
         
@@ -204,7 +204,7 @@ class TestCompanyDataIngestion:
     def test_10k_has_sections(self, db):
         """Test that 10-K filings have section nodes."""
         query = """
-        MATCH (f:`10KFiling`)-[:HAS_RISK_FACTORS|HAS_BUSINESS_INFORMATION|HAS_FINACIALS]->(s:Section)
+        MATCH (f:Filing10K)-[:HAS_RISK_FACTORS|HAS_BUSINESS_INFORMATION|HAS_FINACIALS]->(s:Section)
         RETURN count(s) as section_count
         """
         
@@ -291,7 +291,7 @@ class TestFundCompanyRelationships:
         MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)
               -[:CONTAINS]->(h:Holding)
               -[:IS_EQUITY_OF]->(c:Company)
-              -[:HAS_FILING]->(:10KFiling)
+              -[:HAS_FILING]->(:Filing10K)
               -[:HAS_FINACIALS]->(fin:Financials)
               -[:HAS_METRIC]->(fm:FinancialMetric {label: "Revenue"})
         RETURN f.ticker as fund_ticker,
@@ -330,14 +330,68 @@ class TestDataIntegrity:
     
     def test_no_orphan_sections(self, db):
         """Test that all sections are connected to a filing."""
+        
+        # First, check what filing labels exist in the database
+        print("\n=== Checking Filing Labels in Database ===")
+        label_query = """
+        CALL db.labels() YIELD label
+        WHERE label CONTAINS 'Filing' OR label CONTAINS '10K'
+        RETURN label
+        """
+        labels = db._execute_query(label_query)
+        print(f"Filing-related labels found: {[l['label'] for l in labels]}")
+        
+        # Check how many nodes exist for each filing label
+        old_label_query = "MATCH (f:`10KFiling`) RETURN count(f) as count"
+        new_label_query = "MATCH (f:Filing10K) RETURN count(f) as count"
+        
+        try:
+            old_count = db._execute_query(old_label_query)[0]["count"]
+            print(f"Nodes with old label '10KFiling': {old_count}")
+        except:
+            old_count = 0
+            print(f"Nodes with old label '10KFiling': 0 (label doesn't exist)")
+        
+        try:
+            new_count = db._execute_query(new_label_query)[0]["count"]
+            print(f"Nodes with new label 'Filing10K': {new_count}")
+        except:
+            new_count = 0
+            print(f"Nodes with new label 'Filing10K': 0 (label doesn't exist)")
+        
+        # Check orphan sections
         query = """
         MATCH (s:Section)
         WHERE NOT (s)<-[:HAS_RISK_FACTORS|HAS_BUSINESS_INFORMATION|HAS_FINACIALS|
-                        HAS_LEGAL_PROCEEDINGS|HAS_MANAGEMENT_DISCUSSION|HAS_PROPERTIES]-(:10KFiling)
+                        HAS_LEGAL_PROCEEDINGS|HAS_MANAGEMENT_DISCUSSION|HAS_PROPERTIES]-(:Filing10K)
         RETURN count(s) as orphan_count
         """
         
         result = db._execute_query(query)
+        orphan_count = result[0]["orphan_count"]
+        
+        if orphan_count > 0:
+            print(f"\n=== Found {orphan_count} Orphan Sections ===")
+            
+            # Get sample orphan sections and check what they ARE connected to
+            sample_query = """
+            MATCH (s:Section)
+            WHERE NOT (s)<-[:HAS_RISK_FACTORS|HAS_BUSINESS_INFORMATION|HAS_FINACIALS|
+                            HAS_LEGAL_PROCEEDINGS|HAS_MANAGEMENT_DISCUSSION|HAS_PROPERTIES]-(:Filing10K)
+            OPTIONAL MATCH (s)<-[r]-(connected)
+            RETURN s.id as section_id, 
+                   labels(s) as section_labels,
+                   type(r) as relationship_type,
+                   labels(connected) as connected_labels
+            LIMIT 5
+            """
+            samples = db._execute_query(sample_query)
+            print("\nSample orphan sections:")
+            for sample in samples:
+                print(f"  Section ID: {sample['section_id']}")
+                print(f"    Labels: {sample['section_labels']}")
+                print(f"    Connected via: {sample['relationship_type']} to {sample['connected_labels']}")
+        
         assert result[0]["orphan_count"] == 0, f"Found {result[0]['orphan_count']} orphan sections"
     
     def test_documents_have_accession_numbers(self, db):
@@ -435,7 +489,7 @@ class TestComplexQueries:
     def test_revenue_by_segment(self, db):
         """Test query to get revenue breakdown by segment."""
         query = """
-        MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(:10KFiling)
+        MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(:Filing10K)
               -[:HAS_FINACIALS]->(fin:Financials)
               -[:HAS_METRIC]->(fm:FinancialMetric {label: "Revenue"})
               -[:HAS_SEGMENT]->(seg:Segment)

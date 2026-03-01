@@ -1,9 +1,14 @@
 {
-  "normalize_embeddings": false,
   "labels": [
-    "not related",
-    "simple query",
-    "complex query",
-    "vector search"
-  ]
+    "not_related",
+    "fund_basic",
+    "fund_performance",
+    "fund_portfolio",
+    "fund_profile",
+    "company_filing",
+    "company_people",
+    "hybrid_graph_vector",
+    "cross_entity"
+  ],
+  "normalize_embeddings": false
 }
