@@ -285,7 +285,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
         expense_ratio: Optional[float] = None,
         total_return: Optional[float] = None,
         net_assets: Optional[float] = None,
-        net_assets_value_begining: Optional[float] = None,
+        net_assets_value_beginning: Optional[float] = None,
         net_assets_value_end: Optional[float] = None,
         net_income_ratio: Optional[float] = None
     ):
@@ -299,7 +299,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
             expense_ratio: Total expense ratio (percentage)
             total_return: Total return for the period (percentage)
             net_assets: Total net assets under management (in millions)
-            net_assets_value_begining: Price of one share at period start
+            net_assets_value_beginning: Price of one share at period start
             net_assets_value_end: Price of one share at period end
             net_income_ratio: Net investment income ratio (percentage)
         
@@ -319,7 +319,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 fh.expenseRatio = $expense_ratio,
                 fh.totalReturn = $total_return,
                 fh.netAssets = $net_assets,
-                fh.netAssetsValueBeginning = $net_assets_value_begining,
+                fh.netAssetsValueBeginning = $net_assets_value_beginning,
                 fh.netAssetsValueEnd = $net_assets_value_end,
                 fh.netIncomeRatio = $net_income_ratio,
                 fh.createdAt = timestamp()
@@ -328,7 +328,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 fh.expenseRatio = $expense_ratio,
                 fh.totalReturn = $total_return,
                 fh.netAssets = $net_assets,
-                fh.netAssetsValueBeginning = $net_assets_value_begining,
+                fh.netAssetsValueBeginning = $net_assets_value_beginning,
                 fh.netAssetsValueEnd = $net_assets_value_end,
                 fh.netIncomeRatio = $net_income_ratio,
                 fh.updatedAt = timestamp()
@@ -346,7 +346,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 "expense_ratio": expense_ratio,
                 "total_return": total_return,
                 "net_assets": net_assets,
-                "net_assets_value_begining": net_assets_value_begining,
+                "net_assets_value_beginning": net_assets_value_beginning,
                 "net_assets_value_end": net_assets_value_end,
                 "net_income_ratio": net_income_ratio,
             }

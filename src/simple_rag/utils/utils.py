@@ -67,8 +67,6 @@ class XBRLUtils:
             if "credit rating*" in df_str: return "Credit Rating"
             if "issuer " in df_str: return "Issuer Allocation"
             
-            
-            print("Unknown Table: ", df)
             return "Unknown"
         except Exception as e:
             print("Failed to classify table: ", e)

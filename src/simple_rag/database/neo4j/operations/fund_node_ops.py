@@ -50,92 +50,65 @@ class FundNodeOperations(Neo4jDatabaseBase):
         accession_number: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Create TrailingPerformance node and link to Fund.
-        
-        Args:
-            fund_ticker: Fund ticker symbol
-            performance_data: Performance metrics snapshot
-            date: Date object for the performance data
-            accession_number: Optional SEC accession number to link to source Document
-        
-        Returns:
-            Created TrailingPerformance node or None
+        Create Average Returns node and link to Fund.
         """
         if performance_data is None:
             return None
         
+        # If a dictionary (e.g. fund.performance) is passed, extract the first snapshot
+        if isinstance(performance_data, dict):
+            if not performance_data:
+                return None
+            performance_data = list(performance_data.values())[0]
+            
+        # Prepare properties from the snapshot
         perf_props = {}
-        if performance_data:
-                    
-            if hasattr(performance_data, 'return_1y') and performance_data.return_1y is not None:
-                perf_props["return1y"] = performance_data.return_1y
-            if hasattr(performance_data, 'return_5y') and performance_data.return_5y is not None:
-                perf_props["return5y"] = performance_data.return_5y
-            if hasattr(performance_data, 'return_10y') and performance_data.return_10y is not None:
-                perf_props["return10y"] = performance_data.return_10y
-            if hasattr(performance_data, 'return_inception') and performance_data.return_inception is not None:
-                perf_props["returnInception"] = performance_data.return_inception
+        if hasattr(performance_data, 'return_1y') and performance_data.return_1y is not None:
+            perf_props["return1y"] = float(performance_data.return_1y)
+        if hasattr(performance_data, 'return_5y') and performance_data.return_5y is not None:
+            perf_props["return5y"] = float(performance_data.return_5y)
+        if hasattr(performance_data, 'return_10y') and performance_data.return_10y is not None:
+            perf_props["return10y"] = float(performance_data.return_10y)
+        if hasattr(performance_data, 'return_inception') and performance_data.return_inception is not None:
+            perf_props["returnInception"] = float(performance_data.return_inception)
+
+        # Convert date to string for ID and properties
+        date_str = date.isoformat() if date else "LATEST"
+        perf_id = f"{fund_ticker}_{date_str}_perf"
         
-        # Convert date object to string for Neo4j storage
-        date_str = date.isoformat() if date else None
-        perf_id = fund_ticker + "_" + date_str if date_str else fund_ticker
+        query = """
+        MATCH (f:Fund {ticker: $fund_ticker})
+        MERGE (ar:AverageReturns {id: $perf_id})
+        SET ar.return1y = $return1y,
+            ar.return5y = $return5y,
+            ar.return10y = $return10y,
+            ar.returnInception = $returnInception,
+            ar.year = $year,
+            ar.updatedAt = timestamp()
         
-        # Extract year from date for easy filtering
-        year = None
-        if date:
-            year = date.year
+        MERGE (f)-[rel:HAS_AVERAGE_RETURNS]->(ar)
+        SET rel.date = $date
+        RETURN ar
+        """
         
-        # Build SET clause for performance properties
-        perf_set_parts = [f"tp.{k} = ${k}" for k in perf_props.keys()]
-        
-        # Add year property if available
-        if year:
-            perf_set_parts.append("tp.year = $year")
-        
-        perf_set = ", ".join(perf_set_parts)
-        set_clause = f"SET {perf_set}" if perf_set else ""
-        
-        # Build query with optional Document linking
-        if accession_number:
-            query = f"""
-            MATCH (f:Fund {{ticker: $fund_ticker}})
-            MERGE (tp:TrailingPerformance {{id: $perf_id}})
-            {set_clause}
-            MERGE (f)-[r:HAS_TRAILING_PERFORMANCE {{date: $date}}]->(tp)
-            
-            // Link to source Document if accession number provided
-            WITH tp
-            MATCH (d:Document {{id: $accession_number}})
-            MERGE (tp)-[:EXTRACTED_FROM]->(d)
-            
-            RETURN tp
-            """
-        else:
-            query = f"""
-            MATCH (f:Fund {{ticker: $fund_ticker}})
-            MERGE (tp:TrailingPerformance {{id: $perf_id}})
-            {set_clause}
-            MERGE (f)-[r:HAS_TRAILING_PERFORMANCE {{date: $date}}]->(tp)
-            RETURN tp
-            """
-        
-        params = {"fund_ticker": fund_ticker, "perf_id": perf_id}
-        params.update(perf_props)
-        if date_str:
-            params["date"] = date_str
-        if year:
-            params["year"] = year
-        if accession_number:
-            params["accession_number"] = accession_number
+        params = {
+            "fund_ticker": fund_ticker,
+            "perf_id": perf_id,
+            "return1y": perf_props.get("return1y"),
+            "return5y": perf_props.get("return5y"),
+            "return10y": perf_props.get("return10y"),
+            "returnInception": perf_props.get("returnInception"),
+            "year": date.year if date else None,
+            "date": date.isoformat() if date else None,
+            "accession_number": accession_number
+        }
         
         result = self._execute_write(query, params)
         if result:
-            logger.info(f"Created performance node for fund {fund_ticker} (year: {year})")
-            print(result)
-            return result[0]["tp"]
+            logger.info(f"Created AverageReturns node for {fund_ticker} date {date_str}")
+            return result[0]["ar"]
         return None
     
-
     def create_strategy_node(
         self,
         fund_ticker: str,

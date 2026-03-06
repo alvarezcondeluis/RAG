@@ -32,39 +32,32 @@ from typing import Dict
 SCHEMA_SLICES: Dict[str, str] = {
 
     "fund_basic": """
-Relevant schema:
+Relevant schema: 
 (:Provider /* properties: name */)-[:MANAGES]->(:Trust /* properties: name */)-[:ISSUES]->(f:Fund /* properties: ticker, name, expenseRatio, netAssets, turnoverRate, advisoryFees, numberHoldings, costsPer10k, securityExchange */)
 (:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass /* properties: name, description */)
 (:Fund)-[:HAS_CHART]->(:Image /* properties: category, svg, title */)
 (:Fund)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, accessionNumber */)
-
+(:Fund)-[:HAS_AVERAGE_RETURNS /* properties: date */]->(:AverageReturns /* properties: return1y, return5y, return10y, returnInception */)
+(:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT /* properties: year */]->(:FinancialHighlight /* properties: turnover, expenseRatio, totalReturn, netAssets, netAssetsValueBeginning, netAssetsValueEnd, netIncomeRatio */)
+(:Fund)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, reportingDate, accessionNumber */)
+(:Fund)-[r:HAS_SECTOR_ALLOCATION /* properties: weight, date */]->(:Sector /* properties: name */)
+(:Fund)-[r:HAS_REGION_ALLOCATION /* properties: weight, date */]->(:Region /* properties: name */)
 QUERY RULES:
 - For name searches use CALL db.index.fulltext.queryNodes('fundNameIndex', 'search_term')
 - For exact ticker matching use {ticker: 'VTI'} directly.
 - numberHoldings is pre-calculated — do NOT count holdings.
+- The year is on the RELATIONSHIP, not the node: use r.year.
+- turnover is absolute (2 = 2%, not 0.02).
+- ALWAYS return the sourc of the information via the EXTRACTED FROM document node.
 
 CRITICAL CYPHER SYNTAX & LOGIC RULES:
 1. STRICT SCHEMA ALIGNMENT: `netAssets` and `turnoverRate` are DIRECTLY on the `Fund` node. Do NOT look for them on Portfolio or FinancialHighlight nodes. `turnoverRate` is absolute (2 = 2%, not 0.02).
 2. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`. NEVER place `WHERE` after `RETURN`.
 3. COMPARING ENTITIES: When asked to compare multiple funds (e.g., "Compare VTI and VOO"), DO NOT match them into a single row. Return each fund as a separate row using `IN` (e.g., `WHERE f.ticker IN ['VTI', 'VOO'] RETURN f.ticker...`).
-4. INCOMPLETE FILTERS: NEVER generate empty or incomplete property filters like `(n:Label {name})`. Only include explicit values like `{name: 'Vanguard'}`.
-""",
-
-    "fund_performance": """
-Relevant schema:
-(:Fund /* properties: ticker, name */)-[:HAS_TRAILING_PERFORMANCE /* properties: date */]->(:TrailingPerformance /* properties: return1y, return5y, return10y, returnInception */)
-(:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT /* properties: year */]->(:FinancialHighlight /* properties: turnover, expenseRatio, totalReturn, netAssets, netAssetsValueBeginning, netAssetsValueEnd, netIncomeRatio */)
-
-QUERY RULES:
-- The year is on the RELATIONSHIP, not the node: use r.year.
-- turnover is absolute (2 = 2%, not 0.02).
-- ALWAYS return fund ticker and name alongside the requested data.
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. LATEST / LAST DATA: When a user asks for the "last", "latest", or "current" metric, ALWAYS use `ORDER BY r.year DESC LIMIT 1`.
-2. HISTORICAL GROWTH (Since X years ago): To calculate growth over time, MATCH the highlights, order by year, `collect(fh)`, and compare `highlights[0]` (latest) to `highlights[X]` (previous). 
-3. DIVISION BY ZERO: When calculating percentages, ALWAYS use `CASE WHEN denominator = 0 THEN 0 ELSE (numerator * 100.0 / denominator) END`.
-4. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`. NEVER place `WHERE` after `RETURN`.
+4. LATEST / LAST DATA: When a user asks for the "last", "latest", or "current" metric, ALWAYS use `ORDER BY r.year DESC LIMIT 1`.
+5. HISTORICAL GROWTH (Since X years ago): To calculate growth over time, MATCH the highlights, order by year, `collect(fh)`, and compare `highlights[0]` (latest) to `highlights[X]` (previous). 
+6. DIVISION BY ZERO: When calculating percentages, ALWAYS use `CASE WHEN denominator = 0 THEN 0 ELSE (numerator * 100.0 / denominator) END`.
+7. INCOMPLETE FILTERS: NEVER generate empty or incomplete property filters like `(n:Label {name})`. Only include explicit values like `{name: 'Vanguard'}`.
 """,
 
     "fund_portfolio": """
@@ -72,13 +65,10 @@ Relevant schema:
 (:Fund /* properties: ticker, name */)-[:HAS_PORTFOLIO]->(p:Portfolio /* properties: date, seriesId */)
 (p)-[:HAS_HOLDING /* properties: shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile */]->(h:Holding /* properties: name, ticker, isin, lei, category, country, sector, assetCategory, issuerCategory */)
 (:Holding)-[:REPRESENTS]->(:Company /* properties: ticker, name */)
-(:Fund)-[:HAS_SECTOR_ALLOCATION /* properties: weight, date */]->(:Sector /* properties: name */)
-(:Fund)-[:HAS_GEOGRAPHIC_ALLOCATION /* properties: weight, date */]->(:GeographicAllocation /* properties: name */)
-
+(p)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, reportingDate, accessionNumber */)
 QUERY RULES:
 - Use f.numberHoldings for count — do NOT count holdings manually.
 - Weight on HAS_HOLDING is the portfolio weight.
-- Weight on HAS_SECTOR_ALLOCATION / HAS_GEOGRAPHIC_ALLOCATION is allocation weight.
 
 CRITICAL CYPHER SYNTAX & LOGIC RULES:
 1. STRICT SCHEMA ALIGNMENT: `payoffProfile`, `marketValue`, and `weight` are properties of the `[r:HAS_HOLDING]` relationship, NOT the `Holding` node. 
@@ -88,12 +78,13 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 """,
 
     "fund_profile": """
-Relevant schema (use vector similarity search on these nodes):
+Contains all the general information of the fund, like the objective the risks, the performance commentary, etc:
 (:Fund /* properties: ticker, name */)-[:DEFINED_BY /* properties: date */]->(:Profile /* properties: id, summaryProspectus */)
 (:Profile)-[:HAS_STRATEGY]->(:StrategyChunk /* properties: id, title, text, embedding */)
 (:Profile)-[:HAS_RISK_NODE]->(:RiskChunk /* properties: id, title, text, embedding */)
 (:Profile)-[:HAS_OBJECTIVE]->(:Objective /* properties: id, text, embedding */)
 (:Profile)-[:HAS_PERFORMANCE_COMMENTARY]->(:PerformanceCommentary /* properties: id, text, embedding */)
+(:Profile)-[:EXTRACTED_FROM]->(:Document /* properties: accessionNumber, url,reportingDate, filingDate */)
 
 QUERY RULES:
 - These nodes have embeddings — use vector search for semantic queries.
@@ -126,42 +117,19 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
     "company_people": """
 Relevant schema:
 (:Fund /* properties: ticker, name */)-[:MANAGED_BY /* properties: date */]->(:Person /* properties: name */)
-(:Company /* properties: ticker, name, cik */)-[:EMPLOYED_AS_CEO /* properties: ceoCompensation, ceoActuallyPaid, date */]->(:Person /* properties: name */)
+(:Company /* properties: ticker, name, cik */)-[:HAS_CEO /* properties: ceoCompensation, ceoActuallyPaid, date */]->(:Person /* properties: name */)
 (:Company)-[:HAS_INSIDER_TRANSACTION]->(:InsiderTransaction /* properties: position, transactionType, shares, price, value, remainingShares */)-[:MADE_BY]->(:Person /* properties: name */)
 (:Person)-[:RECEIVED_COMPENSATION]->(:CompensationPackage /* properties: totalCompensation, shareholderReturn, date */)
 (:CompensationPackage)-[:AWARDED_BY]->(:Company)
 
 QUERY RULES:
 - Fund managers are linked via MANAGED_BY.
-- Company CEOs are linked via EMPLOYED_AS_CEO.
+- Company CEOs are linked via HAS_CEO.
 - Use personNameIndex for fuzzy person name search.
 
 CRITICAL CYPHER SYNTAX & LOGIC RULES:
 1. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`. NEVER place `WHERE` after `RETURN`.
 2. INLINE MATH: NEVER use math operators (`>`, `<`) inside node patterns. Use `WHERE` clauses.
-""",
-
-    "hybrid_graph_vector": """
-Relevant schema (combines graph traversal with vector similarity):
-
-# Fund structure (for filtering)
-(:Provider /* properties: name */)-[:MANAGES]->(:Trust /* properties: name */)-[:ISSUES]->(f:Fund /* properties: ticker, name, expenseRatio, netAssets, turnoverRate, advisoryFees, numberHoldings, costsPer10k */)
-
-# Semantic content (for vector search)
-(:Fund)-[:DEFINED_BY]->(:Profile /* properties: summaryProspectus */)
-(:Profile)-[:HAS_STRATEGY]->(:StrategyChunk /* properties: id, title, text, embedding */)
-(:Profile)-[:HAS_RISK_NODE]->(:RiskChunk /* properties: id, title, text, embedding */)
-(:Profile)-[:HAS_OBJECTIVE]->(:Objective /* properties: id, text, embedding */)
-(:Profile)-[:HAS_PERFORMANCE_COMMENTARY]->(:PerformanceCommentary /* properties: id, text, embedding */)
-
-# Performance & Portfolio
-(:Fund)-[:HAS_TRAILING_PERFORMANCE]->(:TrailingPerformance /* properties: return1y, return5y, return10y */)
-(:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT /* properties: year */]->(:FinancialHighlight /* properties: turnover, expenseRatio, totalReturn */)
-(:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING /* properties: weight */]->(:Holding /* properties: name, ticker */)
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`.
-2. DIVISION BY ZERO: When calculating percentage ratios, ALWAYS use `CASE WHEN total = 0 THEN 0 ELSE (part * 100.0 / total) END`.
 """,
 
     "cross_entity": """
@@ -170,7 +138,7 @@ Relevant schema (multi-domain traversal):
 (:Fund)-[:MANAGED_BY /* properties: date */]->(:Person /* properties: name */)
 (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING /* properties: weight, shares, marketValue */]->(h:Holding /* properties: name, ticker */)
 (:Holding)-[:REPRESENTS]->(c:Company /* properties: ticker, name, cik */)
-(:Company)-[:EMPLOYED_AS_CEO /* properties: ceoCompensation, ceoActuallyPaid */]->(:Person /* properties: name */)
+(:Company)-[:HAS_CEO /* properties: ceoCompensation, ceoActuallyPaid */]->(:Person /* properties: name */)
 (:Company)-[:HAS_INSIDER_TRANSACTION]->(:InsiderTransaction /* properties: position, transactionType, shares, price, value, remainingShares */)-[:MADE_BY]->(:Person)
 
 CRITICAL CYPHER SYNTAX & LOGIC RULES:

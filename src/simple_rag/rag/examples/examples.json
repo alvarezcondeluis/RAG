@@ -89,7 +89,7 @@
   },
   {
     "question": "Show me the ordered list of funds in decreasing order of the 10 year returns",
-    "cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) WHERE p.return10y IS NOT NULL RETURN f.name AS fundName, p.return10y AS tenYearReturn ORDER BY tenYearReturn DESC"
+    "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(p:AverageReturns) WHERE p.return10y IS NOT NULL RETURN f.name AS fundName, p.return10y AS tenYearReturn ORDER BY tenYearReturn DESC"
   },
   {
     "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
@@ -129,7 +129,7 @@
   },
   {
     "question": "Show me the 1y, 5y and inception returns for VTI.",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_TRAILING_PERFORMANCE]->(p:TrailingPerformance) RETURN p.return1y AS oneYear, p.return5y AS fiveYear, p.returnInception AS inception"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_AVERAGE_RETURNS]->(p:AverageReturns) RETURN p.return1y AS oneYear, p.return5y AS fiveYear, p.returnInception AS inception"
   },
   {
     "question": "Find the provider managing funds with the lowest average turnover rate.",
@@ -176,6 +176,10 @@
     "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_RISK_FACTORS]->(rf:Section:RiskFactor) RETURN rf.text AS riskFactor LIMIT 10"
   },
   {
+    "question": "What are the funds that have more than 10% invested in the United States?",
+    "cypher": "MATCH (f:Fund)-[r:HAS_REGION_ALLOCATION]->(:Region {name: 'United States'}) WHERE r.weight > 10.0 RETURN DISTINCT f.name AS fundName, f.ticker AS fundTicker"
+  },
+  {
     "question": "Show me the business description from the 10-K for Google.",
     "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_BUSINESS_INFORMATION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5"
   },
@@ -212,8 +216,8 @@
     "cypher": "MATCH (s:Sector) RETURN DISTINCT s.name AS sectorName"
   },
   {
-    "question": "Show me the geographic allocation for the Total International Stock fund.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_REGION_ALLOCATION]->(g:Region) WHERE f.name CONTAINS 'Total International Stock' RETURN g.name AS region, r.weight AS weight ORDER BY r.weight DESC"
+    "question": "What is the geographic distribution of the Mega Cap Index fund.",
+    "cypher": "MATCH (f:Fund)-[r:HAS_REGION_ALLOCATION]->(g:Region) WHERE f.name CONTAINS 'Mega Cap Index' RETURN g.name AS region, r.weight AS weight ORDER BY r.weight DESC"
   },
   {
     "question": "Which funds hold shares of both Apple and Microsoft?",
@@ -228,6 +232,10 @@
     "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding {ticker: 'AAPL'}) RETURN f.name AS fundName, r.shares AS shares ORDER BY r.shares DESC LIMIT 1"
   },
   {
+    "question": "Show me all the funds that hold shares of Nvidia (NVDA), Meta (META), and Amazon (AMZN) in their portfolios.",
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(:Holding)-[:REPRESENTS]->(:Company {ticker: 'NVDA'}) MATCH (f)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(:Holding)-[:REPRESENTS]->(:Company {ticker: 'META'}) MATCH (f)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(:Holding)-[:REPRESENTS]->(:Company {ticker: 'AMZN'}) RETURN DISTINCT f.name AS FundName, f.ticker AS FundTicker ORDER BY FundName ASC"
+  },
+  {
     "question": "Compare the expense ratios of all ETF share class funds.",
     "cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'ETF'}) RETURN f.ticker AS ticker, f.name AS fundName, f.expenseRatio AS expenseRatio ORDER BY f.expenseRatio ASC"
   },
@@ -237,7 +245,7 @@
   },
   {
     "question": "Which fund has the best 1-year return among Bond funds?",
-    "cypher": "MATCH (f:Fund)-[:HAS_TRAILING_PERFORMANCE]->(tp:TrailingPerformance) WHERE f.name CONTAINS 'Bond' AND tp.return1y IS NOT NULL RETURN f.name AS fundName, tp.return1y AS oneYearReturn ORDER BY tp.return1y DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE f.name CONTAINS 'Bond' AND ar.return1y IS NOT NULL RETURN f.name AS fundName, ar.return1y AS oneYearReturn ORDER BY ar.return1y DESC LIMIT 1"
   },
   {
     "question": "How many different trusts does Vanguard manage?",

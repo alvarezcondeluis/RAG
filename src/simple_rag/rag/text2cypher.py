@@ -31,7 +31,7 @@ class CypherTranslator:
         entity_resolver_debug: bool = False,
         groq_api_key: Optional[str] = None,
         llama_cpp_host: str = "localhost",
-        llama_cpp_port: int = 8080,
+        llama_cpp_port: int = 1234,
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -50,7 +50,7 @@ class CypherTranslator:
             entity_resolver_debug: Enable debug output for entity resolution.
             groq_api_key:        Groq API key (reads GROQ_API_KEY env var if None).
             llama_cpp_host:      Hostname of the llama.cpp server (default: localhost).
-            llama_cpp_port:      Port of the llama.cpp server (default: 8080).
+            llama_cpp_port:      Port of the llama.cpp server (default: 1234).
         """
         self.llama_cpp_host = llama_cpp_host
         self.llama_cpp_port = llama_cpp_port

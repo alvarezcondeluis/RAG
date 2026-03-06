@@ -93,7 +93,7 @@ class FinancialHighlights(BaseModel):
     expense_ratio: float = Field(description="Total expense ratio (percentage)")
     total_return: float = Field(description="Total return for the period (percentage)")
     net_assets: float = Field(description="Total net assets under management (in millions) dollars")
-    net_assets_value_begining: float = Field(description="Price of one share at period start (in dollars)")
+    net_assets_value_beginning: float = Field(description="Price of one share at period start (in dollars)")
     net_assets_value_end: float = Field(description="Price of one share at the end of the period (in dollars)")
     net_income_ratio: float = Field(description=(
         "The ratio of net investment income to average net assets, expressed as a percentage. "
@@ -156,13 +156,13 @@ class FundData(BaseModel):
     
     report_date: Optional[date] = Field(None, description="Date of the report or filing")
     # Performance data
-    annual_returns: Optional[Dict[str, float]] = Field(None, description="Annual returns by year")
+    annual_returns: Optional[Dict[str, float]] = Field(None, description="Average annual returns for specific time periods from the performance table")
     performance: Optional[Dict[str, AverageReturnSnapshot]] = Field(
         default_factory=dict,
         description="Performance snapshots for different time periods"
     )
 
-    avg_annual_returns: Optional[pd.DataFrame] = Field(None, description="Average annual returns table")
+    avg_annual_returns: Optional[pd.DataFrame] = Field(None, description="Average annual returns for specific time periods")
     performance_table: Optional[pd.DataFrame] = Field(None, description="Detailed performance metrics table")
     
     # Financial highlights
@@ -219,6 +219,9 @@ class FundData(BaseModel):
     @classmethod
     def parse_integer_fields(cls, v):
         """Convert cleaned numeric values to integers."""
+        if v is None:
+            return 0
+            
         if isinstance(v, int):
             return v
         
@@ -226,7 +229,9 @@ class FundData(BaseModel):
             return int(v)
         
         if isinstance(v, str):
-            v = v.replace('$', '').replace(',', '')
+            v = v.strip().replace('$', '').replace(',', '')
+            if v in ['', 'N/A', 'n/a', 'NA', 'None', 'null', '—', '-']:
+                return 0
             try:
                 return int(float(v))
             except (ValueError, TypeError) as e:
@@ -238,11 +243,16 @@ class FundData(BaseModel):
     @classmethod
     def parse_float_fields(cls, v):
         """Convert cleaned numeric values to floats."""
+        if v is None:
+            return 0.0
+            
         if isinstance(v, (int, float, Decimal)):
             return float(v)
         
         if isinstance(v, str):
-            v = v.replace('$', '').replace(',', '')
+            v = v.strip().replace('$', '').replace(',', '')
+            if v in ['', 'N/A', 'n/a', 'NA', 'None', 'null', '—', '-']:
+                return 0.0
             try:
                 return float(v)
             except (ValueError, TypeError) as e:
