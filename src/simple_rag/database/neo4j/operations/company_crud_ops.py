@@ -172,7 +172,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             MERGE (rf:Section:RiskFactor {id: $section_id})
             SET rf.fullText = $full_text,
                 rf.updatedAt = timestamp()
-            MERGE (f)-[:HAS_RISK_FACTORS]->(rf)
+            MERGE (f)-[:HAS_RISK_FACTOR_CHUNK]->(rf)
             RETURN rf
             """
             
@@ -207,7 +207,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             MERGE (bi:Section:BusinessInformation {id: $section_id})
             SET bi.fullText = $full_text,
                 bi.updatedAt = timestamp()
-            MERGE (f)-[:HAS_BUSINESS_INFORMATION]->(bi)
+            MERGE (f)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(bi)
             RETURN bi
             """
             
@@ -243,7 +243,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             SET lp.fullTitleSection = $title,
                 lp.fullText = $full_text,
                 lp.updatedAt = timestamp()
-            MERGE (f)-[:HAS_LEGAL_PROCEEDINGS]->(lp)
+            MERGE (f)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp)
             RETURN lp
             """
             
@@ -279,7 +279,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             MERGE (md:Section:ManagemetDiscussion {id: $section_id})
             SET md.fullText = $full_text,
                 md.updatedAt = timestamp()
-            MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION]->(md)
+            MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md)
             RETURN md
             """
             
@@ -368,7 +368,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 fin.cashFlow = $cash_flow,
                 fin.fiscalYear = $fiscal_year,
                 fin.updatedAt = timestamp()
-            MERGE (f)-[:HAS_FINACIALS]->(fin)
+            MERGE (f)-[:HAS_FINANCIALS]->(fin)
             RETURN fin
             """
             
@@ -719,3 +719,106 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         except Exception as e:
             print(f"❌ Error adding insider transaction for {company_ticker}: {e}")
             return None
+
+    def add_section_chunks(
+        self,
+        company_ticker: str,
+        filing_date: date,
+        section_name: str,
+        chunks: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Batch-create SectionChunk nodes linked to their parent Section node.
+
+        Each chunk stores text, metadata, and an embedding vector for
+        similarity search via the ``section_chunk_vector_index``.
+
+        Args:
+            company_ticker: Company ticker symbol (e.g. "AAPL")
+            filing_date: Date of the 10-K filing
+            section_name: One of 'risk_factors', 'business_info', 'mda',
+                          'legal_proceedings', 'properties'
+            chunks: List of dicts with keys:
+                    id, title, text, embedding, section_type, subsection,
+                    chunk_index, filing_cik, filing_date, section_name
+
+        Returns:
+            Number of SectionChunk nodes created/updated
+        """
+        if not chunks:
+            return 0
+
+        filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+        section_id = f"{filing_id}_{section_name}"
+
+        # Map section_name → relationship type on the Filing10K
+        section_rel_map = {
+            "risk_factors": "HAS_RISK_FACTOR_CHUNK",
+            "business_info": "HAS_BUSINESS_INFORMATION_CHUNK",
+            "business_information": "HAS_BUSINESS_INFORMATION_CHUNK",
+            "mda": "HAS_MANAGEMENT_DISCUSSION_CHUNK",
+            "management_discussion_and_analysis": "HAS_MANAGEMENT_DISCUSSION_CHUNK",
+            "legal_proceedings": "HAS_LEGAL_PROCEEDING_CHUNK",
+            "properties": "HAS_PROPERTIES_CHUNK",
+        }
+
+        rel_type = section_rel_map.get(section_name)
+        if not rel_type:
+            logger.warning(f"Unknown section_name '{section_name}', skipping chunks")
+            return 0
+
+        try:
+            # Prepare chunk data list for UNWIND
+            chunk_list = []
+            for c in chunks:
+                chunk_list.append({
+                    "id": c["id"],
+                    "title": c["title"],
+                    "text": c["text"],
+                    "embedding": c["embedding"],
+                    "sectionType": c.get("section_type"),
+                    "subsection": c.get("subsection"),
+                    "chunkIndex": c.get("chunk_index"),
+                    "filingCik": c.get("filing_cik"),
+                    "filingDate": c.get("filing_date"),
+                    "sectionName": c.get("section_name"),
+                })
+
+            query = f"""
+            MATCH (sec:Section {{id: $section_id}})
+            WITH sec
+            UNWIND $chunks AS chunk
+            MERGE (sc:SectionChunk {{id: chunk.id}})
+            SET sc.title        = chunk.title,
+                sc.text         = chunk.text,
+                sc.embedding    = chunk.embedding,
+                sc.sectionType  = chunk.sectionType,
+                sc.subsection   = chunk.subsection,
+                sc.chunkIndex   = chunk.chunkIndex,
+                sc.filingCik    = chunk.filingCik,
+                sc.filingDate   = chunk.filingDate,
+                sc.sectionName  = chunk.sectionName,
+                sc.updatedAt    = timestamp()
+            MERGE (sec)-[:HAS_CHUNK]->(sc)
+            RETURN count(sc) AS created
+            """
+
+            result = self._execute_write(query, {
+                "section_id": section_id,
+                "chunks": chunk_list,
+            })
+
+            created = result[0]["created"] if result else 0
+            if created:
+                logger.info(
+                    f"✅ Added {created} SectionChunk nodes for "
+                    f"{company_ticker}/{section_name}"
+                )
+            return created
+
+        except Exception as e:
+            logger.error(
+                f"❌ Error adding section chunks for "
+                f"{company_ticker}/{section_name}: {e}"
+            )
+            return 0

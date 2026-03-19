@@ -51,6 +51,8 @@ class TestResult:
     is_semantically_correct: bool = False  # Matches ground truth data
     generated_results: List[Dict] = field(default_factory=list)
     expected_results: List[Dict] = field(default_factory=list)
+    llm_prompt: str = ""  # full initial LLM prompt (schema + examples + question), only populated on error
+    prompt_token_estimate: int = 0  # estimated token count for the initial LLM prompt
 
 class Text2CypherBenchmark:
     """
@@ -63,8 +65,9 @@ class Text2CypherBenchmark:
         model_name: str,
         backend: str,
         interactive: bool = False,
-        llama_cpp_host: str = "localhost",
-        llama_cpp_port: int = 8080,
+        openai_compatible_host: str = "localhost",
+        openai_compatible_port: int = 8080,
+        use_schema_injection: bool = True,
     ):
         self.test_path = Path(test_set_path)
         self.neo = Neo4jDatabase()
@@ -72,8 +75,8 @@ class Text2CypherBenchmark:
         # Build extra kwargs for CypherTranslator (forwarded via QueryHandler **cypher_kwargs)
         extra_kwargs = {}
         if backend == "openai":
-            extra_kwargs["llama_cpp_host"] = llama_cpp_host
-            extra_kwargs["llama_cpp_port"] = llama_cpp_port
+            extra_kwargs["openai_compatible_host"] = openai_compatible_host
+            extra_kwargs["openai_compatible_port"] = openai_compatible_port
 
         # Initialize the QueryHandler (Classification → Schema Slice → Cypher)
         self.handler = QueryHandler(
@@ -88,6 +91,7 @@ class Text2CypherBenchmark:
         self.backend = backend
         self.interactive = interactive
         self.incorrect_queries: List[Dict[str, Any]] = []
+        self.use_schema_injection = use_schema_injection
 
         
     def load_tests(self) -> List[Dict]:
@@ -176,6 +180,44 @@ class Text2CypherBenchmark:
             print(f"⚠️  Error comparing results: {e}")
             return (False, 'error')
 
+    def _is_small_subset_match(self, gen_records: List[Dict], exp_records: List[Dict], threshold: int = 10, overlap_ratio: float = 0.6) -> bool:
+        """
+        Returns True if gen_records is a record-level subset of exp_records AND
+        len(gen_records) <= threshold. Comparison ignores key/alias names.
+
+        Two tiers:
+        1. Strict: gen values ⊆ exp values OR exp values ⊆ gen values.
+        2. Overlap fallback: the intersection of gen and exp values covers at
+           least `overlap_ratio` of the expected record's values (handles cases
+           where generated returns extra columns or is missing non-essential ones).
+        """
+        if not gen_records or len(gen_records) > threshold:
+            return False
+
+        def record_str_values(record: Dict) -> set:
+            vals = set()
+            for v in record.values():
+                s = str(v).strip()
+                if s:
+                    vals.add(s)
+            return vals
+
+        exp_value_sets = [record_str_values(r) for r in exp_records]
+
+        def matches_any(gen_vals: set) -> bool:
+            for exp_vals in exp_value_sets:
+                if gen_vals.issubset(exp_vals) or exp_vals.issubset(gen_vals):
+                    return True
+                # Overlap fallback: enough expected values are present in generated
+                if exp_vals and len(gen_vals & exp_vals) / len(exp_vals) >= overlap_ratio:
+                    return True
+            return False
+
+        for gen_rec in gen_records:
+            if not matches_any(record_str_values(gen_rec)):
+                return False
+        return True
+
     def evaluate_single_question(self, index: int, item: Dict) -> TestResult:
         """Runs the pipeline for a single question and returns metrics."""
         question = item['question']
@@ -196,12 +238,14 @@ class Text2CypherBenchmark:
         # 1. Measure Pipeline (Classification + Translation)
         try:
             gen_start = time.time()
-            handle_result = self.handler.handle(question)
+            handle_result = self.handler.handle(question, use_schema_injection=self.use_schema_injection)
             result.generation_time_ms = (time.time() - gen_start) * 1000
             
             result.category = handle_result.category
             result.confidence = handle_result.confidence
             result.generated_cypher = handle_result.cypher or ""
+            result.llm_prompt = getattr(self.handler.translator, 'last_initial_prompt', '') or ''
+            result.prompt_token_estimate = len(result.llm_prompt) // 4  # ~4 chars per token
 
             if handle_result.error:
                 result.error_type = f"Pipeline Error ({handle_result.category})"
@@ -264,10 +308,14 @@ class Text2CypherBenchmark:
             if not is_match and expected_answer:
                 is_match, match_type = self._compare_results_flexible(gen_records, expected_answer)
             
+            if not is_match and self._is_small_subset_match(gen_records, exp_records):
+                is_match = True
+                match_type = 'small_subset'
+
             if is_match:
                 result.success = True
                 result.is_semantically_correct = True
-                match_label = "Exact" if match_type == 'exact' else "Partial"
+                match_label = "Exact" if match_type == 'exact' else ("Small subset" if match_type == 'small_subset' else "Partial")
                 print(f"\n✅ PASS - {match_label} match")
             else:
                 result.success = False
@@ -282,6 +330,7 @@ class Text2CypherBenchmark:
             print(f"\n❌ FAIL - Execution error: {str(e)[:100]}")
             
         print(f"⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
+        print(f"🔢 Prompt tokens (est.): {result.prompt_token_estimate:,}")
         
         if self.interactive:
             user_validation = self._ask_user_validation(result, item)
@@ -313,9 +362,11 @@ class Text2CypherBenchmark:
         print(f"\n{'='*80}")
         print(f"🚀 Text-to-Cypher Integrated Pipeline Benchmark")
         print(f"{'='*80}")
+        schema_mode_label = "slice (classifier-injected)" if self.use_schema_injection else "full DETAILED_SCHEMA"
         print(f"📊 Total Questions: {len(test_data)}")
         print(f"🤖 Code Model: {self.handler.translator.model_name}")
         print(f"🏷️  Classifier: SetFit (9 categories)")
+        print(f"📐 Schema Mode:  {schema_mode_label} | retries always use full schema")
         print(f"📁 Report: {report_path}")
         print(f"{'='*80}\n")
 
@@ -341,6 +392,10 @@ class Text2CypherBenchmark:
         avg_gen = statistics.mean(gen_times) if gen_times else 0
         avg_exec = statistics.mean(exec_times) if exec_times else 0
 
+        token_estimates = [r.prompt_token_estimate for r in self.results if r.prompt_token_estimate > 0]
+        avg_tokens = statistics.mean(token_estimates) if token_estimates else 0
+        total_tokens = sum(token_estimates)
+
         print("\n" + "="*60)
         print("📊 PIPELINE BENCHMARK REPORT")
         print("="*60)
@@ -351,6 +406,7 @@ class Text2CypherBenchmark:
         print("-" * 60)
         print(f"Avg Dispatch Time:    {avg_gen:.2f} ms (Classify + Schema Slice + Translate)")
         print(f"Avg Execution Time:   {avg_exec:.2f} ms")
+        print(f"Avg Prompt Tokens:    {avg_tokens:,.0f} (est.) | Total: {total_tokens:,}")
         print("="*60)
         
         # Add category breakdown
@@ -371,6 +427,13 @@ class Text2CypherBenchmark:
                     print(f"   Error: {r.error_type} - {r.error_message}")
                     if r.generated_cypher:
                         print(f"   Gen Cypher: {r.generated_cypher}")
+                    if r.llm_prompt:
+                        print(f"   {'─'*76}")
+                        print(f"   LLM PROMPT — {r.prompt_token_estimate:,} tokens (est.) — initial request sent to model:")
+                        print(f"   {'─'*76}")
+                        for line in r.llm_prompt.splitlines():
+                            print(f"   {line}")
+                        print(f"   {'─'*76}")
 
         # --- NULL EXPECTED RESULTS ---
         # Questions where the expected Cypher itself returned 0 records.

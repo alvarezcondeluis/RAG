@@ -19,8 +19,14 @@ PATH = Path("./src/simple_rag/evaluation/test_set.json")
 GROQ_MODEL = "llama-3.3-70b-versatile"
 backend = "openai"  # llama.cpp server
 
+# Schema mode:
+#   True  — classifier picks a focused schema slice for each query (default)
+#   False — full DETAILED_SCHEMA is always used (classifier still routes, but no slice injection)
+# Regardless of this setting, retries on failed queries always use the full DETAILED_SCHEMA.
+USE_SCHEMA_INJECTION = True
+
 if backend == "groq":
-    benchmark = Text2CypherBenchmark(PATH, GROQ_MODEL, backend="groq")
+    benchmark = Text2CypherBenchmark(PATH, GROQ_MODEL, backend="groq", use_schema_injection=USE_SCHEMA_INJECTION)
     try:
         benchmark.run(complexity_filter=["hard"])
     except KeyboardInterrupt:
@@ -32,8 +38,9 @@ else:
         MODEL,
         backend="openai",
         interactive=False,
-        llama_cpp_host="localhost",
-        llama_cpp_port=8081,
+        openai_compatible_host="localhost",
+        openai_compatible_port=8081,
+        use_schema_injection=USE_SCHEMA_INJECTION,
     )
     try:
         benchmark.run()

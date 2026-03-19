@@ -256,6 +256,14 @@ class SchemaManager(Neo4jDatabaseBase):
                 `vector.dimensions`: {dimensions},
                 `vector.similarity_function`: 'cosine'
             }}}}
+            """,
+            f"""
+            CREATE VECTOR INDEX section_chunk_vector_index IF NOT EXISTS
+            FOR (n:SectionChunk) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
             """
         ]
         
@@ -277,7 +285,8 @@ class SchemaManager(Neo4jDatabaseBase):
             "CREATE CONSTRAINT strategy_chunk_unique IF NOT EXISTS FOR (s:StrategyChunk) REQUIRE s.id IS UNIQUE",
             "CREATE CONSTRAINT objective_unique IF NOT EXISTS FOR (o:Objective) REQUIRE o.id IS UNIQUE",
             "CREATE CONSTRAINT commentary_unique IF NOT EXISTS FOR (c:PerformanceCommentary) REQUIRE c.id IS UNIQUE",
-            "CREATE CONSTRAINT perf_id_unique IF NOT EXISTS FOR (tp:TrailingPerformance) REQUIRE tp.id IS UNIQUE"
+            "CREATE CONSTRAINT perf_id_unique IF NOT EXISTS FOR (tp:TrailingPerformance) REQUIRE tp.id IS UNIQUE",
+            "CREATE CONSTRAINT section_chunk_id_unique IF NOT EXISTS FOR (sc:SectionChunk) REQUIRE sc.id IS UNIQUE"
         ]
 
         # 3. FULLTEXT INDEXES (For Keyword Search)

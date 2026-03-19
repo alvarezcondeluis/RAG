@@ -257,7 +257,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     if filing_10k.risk_factors:
                         risk_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_RISK_FACTORS]->(rf:Section:RiskFactor {id: $section_id})
+                        MERGE (f)-[:HAS_RISK_FACTOR_CHUNK]->(rf:Section:RiskFactor {id: $section_id})
                         SET rf.fullText = $full_text
                         RETURN rf
                         """
@@ -275,7 +275,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     if filing_10k.business_information:
                         business_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_BUSINESS_INFORMATION]->(bi:Section:BusinessInformation {id: $section_id})
+                        MERGE (f)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(bi:Section:BusinessInformation {id: $section_id})
                         SET bi.fullText = $full_text
                         RETURN bi
                         """
@@ -293,7 +293,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     if filing_10k.legal_proceedings:
                         legal_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_LEGAL_PROCEEDINGS]->(lp:Section:LegalProceeding {id: $section_id})
+                        MERGE (f)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp:Section:LegalProceeding {id: $section_id})
                         SET lp.fullTitleSection = $title,
                             lp.fullText = $full_text
                         RETURN lp
@@ -313,7 +313,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     if filing_10k.management_discussion_and_analysis:
                         mda_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION]->(md:Section:ManagemetDiscussion {id: $section_id})
+                        MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md:Section:ManagemetDiscussion {id: $section_id})
                         SET md.fullText = $full_text
                         RETURN md
                         """
@@ -331,7 +331,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     if filing_10k.properties:
                         properties_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_PROPERTIES]->(prop:Section:Properties {id: $section_id})
+                        MERGE (f)-[:HAS_PROPERTIES_CHUNK]->(prop:Section:Properties {id: $section_id})
                         SET prop.fullText = $full_text
                         RETURN prop
                         """
@@ -358,7 +358,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             fin.cashFlow = $cash_flow_text,
                             fin.fiscalYear = $fiscal_year
                         
-                        MERGE (f)-[:HAS_FINACIALS]->(fin)
+                        MERGE (f)-[:HAS_FINANCIALS]->(fin)
                         RETURN fin
                         """
                         
@@ -694,7 +694,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                                 }
                                 for seg in income_stmt.revenue.segments
                             ] if income_stmt.revenue.segments else None
-                            
+                             
                             self.add_financial_metric(
                                 company_ticker=company.ticker,
                                 filing_date=filing.filing_metadata.filing_date,
@@ -762,31 +762,47 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             )
                             stats['financial_metrics'] += 1
                 
-                # 3. Process Executive Compensation
+               # 3. Process Executive Compensation
                 if company.executive_compensation:
                     if verbose:
                         print(f"\n  👔 Processing executive compensation")
                     
                     exec_comp = company.executive_compensation
                     
-                    # Parse filing date from URL or use a default
-                    exec_filing_date = None
-                    if exec_comp.url and 'accession_number' in dir(exec_comp):
-                        # Try to extract date from accession number if available
-                        pass
+                    # 1. Extract the Accession Number from the SEC URL
+                    import re
+                    accession_num = None
+                    if exec_comp.url:
+                        # Looks for the standard SEC pattern: "0001308179-26-000008" before "-index.html"
+                        match = re.search(r'/([^/]+)-index\.html$', exec_comp.url)
+                        if match:
+                            accession_num = match.group(1)
                     
+                    # Fallback ID just in case the regex fails
+                    if not accession_num:
+                        accession_num = f"{company.ticker}_DEF14A_auto"
+
+                    # 2. Extract the Date from the text field (e.g., "DEF 14A: Apple Inc. - 2026-01-08")
+                    exec_filing_date = None
+                    if exec_comp.text:
+                        date_match = re.search(r'\d{4}-\d{2}-\d{2}', exec_comp.text)
+                        if date_match:
+                            from datetime import datetime
+                            exec_filing_date = datetime.strptime(date_match.group(), "%Y-%m-%d").date()
+                    
+                    # 3. Send it to the database!
                     self.add_ceo_and_compensation(
                         company_ticker=company.ticker,
                         ceo_name=exec_comp.ceo_name,
                         ceo_compensation=exec_comp.ceo_compensation,
                         ceo_actually_paid=exec_comp.ceo_actually_paid,
                         shareholder_return=exec_comp.shareholder_return,
-                        accession_number=None,  # You may need to add this to ExecutiveCompensation model
+                        accession_number=accession_num,  # <--- FIXED! Now passes the actual ID
                         filing_url=exec_comp.url,
                         filing_date=exec_filing_date
                     )
                     stats['compensation_packages'] += 1
-                
+                    
                 # 4. Process Insider Transactions
                 if company.insider_trades:
                     if verbose:
@@ -845,4 +861,97 @@ class CompanyIngestionOperations(CompanyCrudOperations):
             print(f"Errors: {stats['errors']}")
             print(f"{'='*80}")
         
+        return stats
+
+    def ingest_filing_chunks(
+        self,
+        companies: List['CompanyEntity'],
+        verbose: bool = True
+    ) -> Dict[str, int]:
+        """
+        Ingest pre-chunked and pre-embedded 10-K filing sections into Neo4j.
+
+        Expects that each Filing10K already has its ``*_chunks`` lists
+        populated with ``CompanyContentChunk`` objects whose ``embedding``
+        field is filled.  The parent Section nodes (RiskFactor,
+        BusinessInformation, etc.) must already exist in the graph — i.e.
+        ``ingest_companies_batch`` should have been called first.
+
+        Graph effect:
+            (Section)-[:HAS_CHUNK]->(SectionChunk {embedding, text, …})
+
+        Args:
+            companies: List of CompanyEntity objects with chunked filings.
+            verbose: Whether to print progress.
+
+        Returns:
+            Dictionary with ``{'chunks_created': N, 'errors': N}``.
+        """
+        stats: Dict[str, int] = {"chunks_created": 0, "errors": 0}
+
+        # Map Filing10K chunk-list attribute → section_id suffix used in
+        # add_section_chunks (must match the suffixes created by
+        # add_*_section() in company_crud_ops.py).
+        SECTION_MAP = [
+            ("risk_factors_chunks",          "risk_factors"),
+            ("business_information_chunks",  "business_info"),
+            ("management_discussion_chunks", "mda"),
+            ("legal_proceedings_chunks",     "legal_proceedings"),
+            ("properties_chunks",           "properties"),
+        ]
+
+        total = len(companies)
+
+        for idx, company in enumerate(companies, 1):
+            try:
+                if verbose:
+                    print(
+                        f"\n[{idx}/{total}] 🧩 Ingesting chunks for "
+                        f"{company.name} ({company.ticker})"
+                    )
+
+                for _filing_date, filing in company.filings_10k.items():
+                    for chunk_attr, section_key in SECTION_MAP:
+                        chunk_list: list = getattr(filing, chunk_attr, [])
+                        if not chunk_list:
+                            continue
+
+                        # Convert CompanyContentChunk objects → dicts
+                        chunk_dicts = [c.model_dump() for c in chunk_list]
+
+                        created = self.add_section_chunks(
+                            company_ticker=company.ticker,
+                            filing_date=filing.filing_metadata.filing_date,
+                            section_name=section_key,
+                            chunks=chunk_dicts,
+                        )
+                        stats["chunks_created"] += created
+
+                        if verbose:
+                            print(
+                                f"  ✅ {company.ticker} / {section_key}: "
+                                f"{created} chunks"
+                            )
+
+                if verbose:
+                    print(f"  ✅ Completed {company.ticker}")
+
+            except Exception as e:
+                stats["errors"] += 1
+                logger.error(
+                    f"Error ingesting chunks for {company.ticker}: {e}",
+                    exc_info=True,
+                )
+                if verbose:
+                    print(f"  ❌ Error for {company.ticker}: {e}")
+                continue
+
+        if verbose:
+            print(f"\n{'='*60}")
+            print("🧩 CHUNK INGESTION SUMMARY")
+            print(f"{'='*60}")
+            print(f"SectionChunk nodes created: {stats['chunks_created']}")
+            print(f"Errors: {stats['errors']}")
+            print(f"{'='*60}")
+
         return stats

@@ -41,11 +41,11 @@ OLLAMA_MODEL = "tomasonjo/llama3-text2cypher-demo:8b_4bit"
 # Groq model (cloud)
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
-# llama.cpp local server settings (only used when BACKEND = "openai")
-LLAMA_CPP_HOST = "localhost"
-LLAMA_CPP_PORT = 8081
-# Model name is passed to the API but llama.cpp ignores it — any string works.
-LLAMA_CPP_MODEL = "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M"
+# OpenAI-compatible server settings (LM Studio, llama.cpp, vLLM, etc.)
+OPENAI_COMPATIBLE_HOST = "localhost"
+OPENAI_COMPATIBLE_PORT = 8081
+# Model name is passed to the API but the server may ignore it
+OPENAI_COMPATIBLE_MODEL = "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M"
 
 PATH = SRC_DIR / "simple_rag" / "evaluation" / "test_set.json"
 
@@ -64,14 +64,14 @@ if __name__ == "__main__":
             benchmark.run(complexity_filter=["hard"])
 
         elif BACKEND == "openai":
-            print(f"Model    : {LLAMA_CPP_MODEL}", flush=True)
-            print(f"Server   : http://{LLAMA_CPP_HOST}:{LLAMA_CPP_PORT}", flush=True)
+            print(f"Model    : {OPENAI_COMPATIBLE_MODEL}", flush=True)
+            print(f"Server   : http://{OPENAI_COMPATIBLE_HOST}:{OPENAI_COMPATIBLE_PORT}", flush=True)
             benchmark = Text2CypherBenchmark(
                 str(PATH),
-                LLAMA_CPP_MODEL,
+                OPENAI_COMPATIBLE_MODEL,
                 backend="openai",
-                llama_cpp_host=LLAMA_CPP_HOST,
-                llama_cpp_port=LLAMA_CPP_PORT,
+                openai_compatible_host=OPENAI_COMPATIBLE_HOST,
+                openai_compatible_port=OPENAI_COMPATIBLE_PORT,
             )
             benchmark.run()
 

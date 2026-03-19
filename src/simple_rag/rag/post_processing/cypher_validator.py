@@ -68,22 +68,24 @@ class CypherValidator:
         "Fund": {"ticker", "name", "securityExchange", "costsPer10k", "advisoryFees",
                  "numberHoldings", "expenseRatio", "netAssets", "turnoverRate", "updatedAt"},
         "ShareClass": {"name", "description"},
-        "Profile": {"id", "summaryProspectus"},
+        "Profile": {"id", "summaryProspectus", "summary_prospectus"},
         "Objective": {"id", "text", "embedding"},
         "RiskChunk": {"id", "title", "text", "embedding"},
         "StrategyChunk": {"id", "title", "text", "embedding"},
         "PerformanceCommentary": {"id", "text", "embedding"},
         "Image": {"id", "title", "category", "svg"},
         "Sector": {"name"},
-        "GeographicAllocation": {"name"},
+        "Region": {"name"},
+        "AverageReturns": {"return1y", "return5y", "return10y", "returnInception"},
         "Person": {"name"},
         "Portfolio": {"id", "ticker", "count", "seriesId", "date"},
         "Holding": {"id", "name", "ticker", "cusip", "isin", "lei", "country",
-                    "sector", "assetCategory", "assetDesc", "issuerCategory", "issuerDesc"},
+                    "category", "category_desc", "issuerCategory", "issuer_category",
+                    "issuerDesc", "businessAddress", "assetCategory", "assetDesc"},
         "FinancialHighlight": {"id", "turnover", "expenseRatio", "totalReturn",
-                               "netAssets", "netAssetsValueBeginning", "netAssetsValueEnd",
+                               "netAssets", "distributionShares",
+                               "netAssetsValueBeginning", "netAssetsValueEnd",
                                "netIncomeRatio"},
-        "TrailingPerformance": {"return1y", "return5y", "return10y", "returnInception"},
         "Company": {"ticker", "name", "cik"},
         "CompensationPackage": {"totalCompensation", "shareholderReturn", "date"},
         "InsiderTransaction": {"position", "transactionType", "shares", "price",
@@ -94,12 +96,16 @@ class CypherValidator:
         "BusinessInformation": {"id", "text", "embedding"},
         "LegalProceeding": {"id", "text", "embedding"},
         "ManagemetDiscussion": {"id", "text", "embedding"},
-        "Properties": {"id", "text", "embedding"},
-        "Financials": {"incomeStatement", "balanceSheet", "cashFlow", "fiscalYear"},
+        "Properties": {"id", "fullText", "text", "embedding"},
+        "Financials": {"incomeStatement", "balanceSheet", "cashFlow", "fiscalYear", "fiscalYeat"},
         "FinancialMetric": {"label", "value"},
         "Segment": {"label", "value", "percentage"},
-        "Document": {"id", "accession_number", "url", "form", "filing_date",
-                     "reporting_date", "accessionNumber", "filingDate", "reportingDate", "type"},
+        "Document": {"id", "accession_number", "url", "form", "type",
+                     "filing_date", "filingdate", "filingDate",
+                     "reporting_date", "reportingDate",
+                     "accessionNumber", "accesionNumber"},
+        "SectionChunk": {"id", "text", "embedding", "title", "section_name",
+                         "chunk_index", "token_count", "ticker", "filing_date"},
     }
 
     # ─── Schema: valid relationship types and their (start, end) pairs ───
@@ -107,39 +113,43 @@ class CypherValidator:
         "MANAGES": {("Provider", "Trust")},
         "ISSUES": {("Trust", "Fund")},
         "HAS_SHARE_CLASS": {("Fund", "ShareClass")},
-        "DEFINED_BY": {("Fund", "Profile")},
-        "HAS_OBJECTIVE": {("Profile", "Objective")},
-        "HAS_RISK_NODE": {("Profile", "RiskChunk")},
-        "HAS_STRATEGY": {("Profile", "StrategyChunk")},
-        "HAS_PERFORMANCE_COMMENTARY": {("Profile", "PerformanceCommentary")},
         "HAS_CHART": {("Fund", "Image")},
+        "HAS_AVERAGE_RETURNS": {("Fund", "AverageReturns")},
         "HAS_SECTOR_ALLOCATION": {("Fund", "Sector")},
-        "HAS_GEOGRAPHIC_ALLOCATION": {("Fund", "Region")},
+        "HAS_REGION_ALLOCATION": {("Fund", "Region")},
         "MANAGED_BY": {("Fund", "Person")},
         "HAS_PORTFOLIO": {("Fund", "Portfolio")},
-        "HAS_HOLDING": {("Portfolio", "Holding")},
         "HAS_FINANCIAL_HIGHLIGHT": {("Fund", "FinancialHighlight")},
-        "HAS_TRAILING_PERFORMANCE": {("Fund", "TrailingPerformance")},
+        "DEFINED_BY": {("Fund", "Profile")},
+        "HAS_OBJECTIVE_CHUNK": {("Profile", "Objective")},
+        "HAS_RISK_CHUNK": {("Profile", "RiskChunk")},
+        "HAS_STRATEGY_CHUNK": {("Profile", "StrategyChunk")},
+        "HAS_PERFORMANCE_COMMENTARY_CHUNK": {("Profile", "PerformanceCommentary")},
+        "HAS_HOLDING": {("Portfolio", "Holding")},
         "REPRESENTS": {("Holding", "Company")},
-        "EMPLOYED_AS_CEO": {("Company", "Person")},
-        "AWARDED_BY": {("Company", "CompensationPackage")},
-        "RECEIVED_COMPENSATION": {("Person", "CompensationPackage")},
+        "HAS_CEO": {("Company", "Person")},
+        "AWARDED_BY": {("CompensationPackage", "Company")},
         "HAS_INSIDER_TRANSACTION": {("Company", "InsiderTransaction")},
         "MADE_BY": {("InsiderTransaction", "Person")},
+        "RECEIVED_COMPENSATION": {("Person", "CompensationPackage")},
+        "DISCLOSED_IN": {("CompensationPackage", "Document"),
+                         ("InsiderTransaction", "Document")},
         "HAS_FILING": {("Company", "Filing10K")},
-        "HAS_RISK_FACTORS": {("Filing10K", "RiskFactor")},
-        "HAS_BUSINESS_INFORMATION": {("Filing10K", "BusinessInformation")},
-        "HAS_LEGAL_PROCEEDINGS": {("Filing10K", "LegalProceeding")},
-        "HAS_MANAGEMENT_DISCUSSION": {("Filing10K", "ManagemetDiscussion")},
+        "HAS_RISK_FACTOR_CHUNK": {("Filing10K", "RiskFactor")},
+        "HAS_BUSINESS_INFORMATION_CHUNK": {("Filing10K", "BusinessInformation")},
+        "HAS_LEGAL_PROCEEDING_CHUNK": {("Filing10K", "LegalProceeding")},
+        "HAS_MANAGEMENT_DISCUSSION_CHUNK": {("Filing10K", "ManagemetDiscussion")},
         "HAS_PROPERTIES_CHUNK": {("Filing10K", "Properties")},
-        "HAS_FINACIALS": {("Filing10K", "Financials")},
+        "HAS_FINACIALS": {("Filing10K", "Financials")},  # typo preserved from schema
         "HAS_FINANCIALS": {("Filing10K", "Financials")},
         "HAS_METRIC": {("Financials", "FinancialMetric")},
         "HAS_SEGMENT": {("FinancialMetric", "Segment")},
         "EXTRACTED_FROM": {("Fund", "Document"), ("Profile", "Document"),
-                           ("Portfolio", "Document"), ("Filing10K", "Document")},
-        "DISCLOSED_IN": {("InsiderTransaction", "Document"),
-                         ("CompensationPackage", "Document")},
+                           ("Portfolio", "Document"), ("Filing10K", "Document"),
+                           ("InsiderTransaction", "Document")},
+        "HAS_CHUNK": {("RiskFactor", "SectionChunk"), ("BusinessInformation", "SectionChunk"),
+                      ("LegalProceeding", "SectionChunk"), ("ManagemetDiscussion", "SectionChunk"),
+                      ("Properties", "SectionChunk"), ("Financials", "SectionChunk")},
     }
 
     # Flat sets for quick lookup
@@ -150,16 +160,17 @@ class CypherValidator:
     REL_PROPERTIES: Dict[str, Set[str]] = {
         "DEFINED_BY": {"date"},
         "HAS_CHART": {"date"},
-        "HAS_SECTOR_ALLOCATION": {"weight", "reportDate", "date"},
-        "HAS_GEOGRAPHIC_ALLOCATION": {"weight", "reportDate", "date"},
+        "HAS_SECTOR_ALLOCATION": {"weight", "date"},
+        "HAS_REGION_ALLOCATION": {"weight", "date"},
+        "HAS_AVERAGE_RETURNS": {"date"},
         "MANAGED_BY": {"date"},
+        "HAS_CEO": {"ceoCompensation", "ceoActuallyPaid", "date"},
         "HAS_HOLDING": {"shares", "marketValue", "weight", "currency",
                         "fairValueLevel", "isRestricted", "payoffProfile"},
         "HAS_FINANCIAL_HIGHLIGHT": {"year"},
-        "HAS_TRAILING_PERFORMANCE": {"date"},
-        "EMPLOYED_AS_CEO": {"ceoCompensation", "ceoActuallyPaid", "date"},
         "HAS_FILING": {"date"},
         "HAS_PORTFOLIO": {"date"},
+        "EXTRACTED_FROM": {"date"},
     }
 
     def __init__(self, neo4j_driver=None, block_writes: bool = True, use_syntax_check: bool = True):
@@ -205,6 +216,54 @@ class CypherValidator:
                 "Move the condition to a WHERE clause after MATCH. "
                 "BAD:  MATCH (n:Node {prop: > 10}) "
                 "GOOD: MATCH (n:Node)-[r:REL]->(m) WHERE r.prop > 10"
+            )
+            return result
+
+        # Step 0b: Catch WHERE clause placed after RETURN
+        where_after_return = re.search(r'\bRETURN\b.+\bWHERE\b', query, re.IGNORECASE | re.DOTALL)
+        if where_after_return:
+            result.is_valid = False
+            result.syntax_errors.append(
+                "CLAUSE ORDER ERROR: You placed a WHERE clause after RETURN. "
+                "In Cypher, WHERE must come before RETURN (right after MATCH/WITH). "
+                "BAD:  MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name WHERE f.turnoverRate > 10 "
+                "GOOD: MATCH (f:Fund {ticker: 'VTI'}) WHERE f.turnoverRate > 10 RETURN f.name"
+            )
+            return result
+
+        # Step 0c: Catch aggregate functions used inside WHERE clauses (invalid Cypher)
+        # e.g. WHERE year = max(r.year) - 2  →  aggregates cannot appear in predicates
+        # Strip {} blocks first to avoid false-positives from EXISTS{} subqueries and literal maps
+        _query_no_braces = re.sub(r'\{[^{}]*\}', '', query)
+        where_agg = re.search(
+            r'\bWHERE\b[^;]*?\b(COUNT|SUM|AVG|MIN|MAX)\s*\(',
+            _query_no_braces, re.IGNORECASE
+        )
+        if where_agg:
+            agg_fn = where_agg.group(1).upper()
+            result.is_valid = False
+            result.syntax_errors.append(
+                f"AGGREGATE IN WHERE ERROR: You used {agg_fn}() inside a WHERE clause. "
+                "Aggregate functions (COUNT, SUM, AVG, MIN, MAX) cannot be used in WHERE predicates. "
+                "To filter or compare against an aggregated value, compute it first in a WITH clause. "
+                "BAD:  WITH f, r.year AS year WHERE year = max(r.year) - 2 "
+                "GOOD: WITH f, r.year AS year ORDER BY year DESC "
+                "      WITH f, collect(year) AS years "
+                "      MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh) WHERE r.year = years[2]"
+            )
+            return result
+
+        # Step 0d: Catch count(var)-[:REL]-> pattern — aggregate applied as if it were a node
+        count_then_rel = re.search(r'\bcount\s*\([^)]*\)\s*-\s*\[', query, re.IGNORECASE)
+        if count_then_rel:
+            result.is_valid = False
+            result.syntax_errors.append(
+                "AGGREGATE TRAVERSAL ERROR: You used count(...)-[:REL]->... which is invalid. "
+                "count() returns a number, not a node — you cannot traverse a relationship from it. "
+                "Fix: use OPTIONAL MATCH to traverse the path first, then aggregate in RETURN. "
+                "BAD:  RETURN f.name, count(f)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) AS holdingsCount "
+                "GOOD: OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) "
+                "      RETURN f.name, count(h) AS holdingsCount"
             )
             return result
 

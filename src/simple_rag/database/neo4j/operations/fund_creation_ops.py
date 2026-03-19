@@ -135,14 +135,14 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 MERGE (obj:Objective {id: $obj_id})
                 SET obj.text = $objective_text,
                     obj.embedding = $objective_vector
-                MERGE (prof)-[:HAS_OBJECTIVE]->(obj)
+                MERGE (prof)-[:HAS_OBJECTIVE_CHUNK]->(obj)
             )
 
             FOREACH (_ IN CASE WHEN $perf_text IS NOT NULL THEN [1] ELSE [] END |
                 MERGE (perf:PerformanceCommentary {id: $perf_id})
                 SET perf.text = $perf_text,
                     perf.embedding = $perf_vector
-                MERGE (prof)-[:HAS_PERFORMANCE_COMMENTARY]->(perf)
+                MERGE (prof)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(perf)
             )
 
             // --- D. CHUNK NODES (Risks & Strategies) ---
@@ -162,7 +162,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
             SET sc.title = s_item.title,
                 sc.text  = s_item.text,
                 sc.embedding = s_item.vector
-            MERGE (prof)-[:HAS_STRATEGY]->(sc)
+            MERGE (prof)-[:HAS_STRATEGY_CHUNK]->(sc)
             
             RETURN f.ticker as ticker
             """

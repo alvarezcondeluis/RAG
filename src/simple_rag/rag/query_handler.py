@@ -19,9 +19,9 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from simple_rag.rag.query.query_classification import QueryClassifier, QueryCategory, LABELS
 from simple_rag.rag.text2cypher import CypherTranslator
+from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
 
 logger = logging.getLogger(__name__)
-
 
 # ─── Schema slices ────────────────────────────────────────────────────────────
 # Each slice contains ONLY the subgraph relevant to its category,
@@ -48,7 +48,8 @@ QUERY RULES:
 - numberHoldings is pre-calculated — do NOT count holdings.
 - The year is on the RELATIONSHIP, not the node: use r.year.
 - turnover is absolute (2 = 2%, not 0.02).
-- ALWAYS return the sourc of the information via the EXTRACTED FROM document node.
+- Use the numberHoldings property of the Fund node to get the number of holdings.
+- ALWAYS return the source of the information via the EXTRACTED FROM document node.
 
 CRITICAL CYPHER SYNTAX & LOGIC RULES:
 1. STRICT SCHEMA ALIGNMENT: `netAssets` and `turnoverRate` are DIRECTLY on the `Fund` node. Do NOT look for them on Portfolio or FinancialHighlight nodes. `turnoverRate` is absolute (2 = 2%, not 0.02).
@@ -80,10 +81,10 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
     "fund_profile": """
 Contains all the general information of the fund, like the objective the risks, the performance commentary, etc:
 (:Fund /* properties: ticker, name */)-[:DEFINED_BY /* properties: date */]->(:Profile /* properties: id, summaryProspectus */)
-(:Profile)-[:HAS_STRATEGY]->(:StrategyChunk /* properties: id, title, text, embedding */)
-(:Profile)-[:HAS_RISK_NODE]->(:RiskChunk /* properties: id, title, text, embedding */)
-(:Profile)-[:HAS_OBJECTIVE]->(:Objective /* properties: id, text, embedding */)
-(:Profile)-[:HAS_PERFORMANCE_COMMENTARY]->(:PerformanceCommentary /* properties: id, text, embedding */)
+(:Profile)-[:HAS_STRATEGY_CHUNK]->(:StrategyChunk /* properties: id, title, text, embedding */)
+(:Profile)-[:HAS_RISK_CHUNK]->(:RiskChunk /* properties: id, title, text, embedding */)
+(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(:Objective /* properties: id, text, embedding */)
+(:Profile)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(:PerformanceCommentary /* properties: id, text, embedding */)
 (:Profile)-[:EXTRACTED_FROM]->(:Document /* properties: accessionNumber, url,reportingDate, filingDate */)
 
 QUERY RULES:
@@ -96,10 +97,11 @@ QUERY RULES:
     "company_filing": """
 Relevant schema:
 (:Company /* properties: ticker, name, cik */)-[:HAS_FILING /* properties: date */]->(filing:Filing10K /* properties: id */)
-(filing)-[:HAS_RISK_FACTORS]->(:Section:RiskFactor /* properties: id, text, embedding */)
-(filing)-[:HAS_BUSINESS_INFORMATION]->(:Section:BusinessInformation /* properties: id, text, embedding */)
-(filing)-[:HAS_MANAGEMENT_DISCUSSION]->(:Section:ManagemetDiscussion /* properties: id, text, embedding */)
-(filing)-[:HAS_LEGAL_PROCEEDINGS]->(:Section:LegalProceeding /* properties: id, text, embedding */)
+(filing)-[:HAS_RISK_FACTOR_CHUNK]->(:Section:RiskFactor /* properties: id, text, embedding */)
+(filing)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(:Section:BusinessInformation /* properties: id, text, embedding */)
+(filing)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(:Section:ManagemetDiscussion /* properties: id, text, embedding */)
+(filing)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(:Section:LegalProceeding /* properties: id, text, embedding */)
+(filing)-[:HAS_PROPERTIES_CHUNK]->(:Section:Properties /* properties: id, fullText, embedding */)
 (filing)-[:HAS_FINACIALS]->(fin:Section:Financials /* properties: incomeStatement, balanceSheet, cashFlow, fiscalYear */)
 (fin)-[:HAS_METRIC]->(:FinancialMetric /* properties: label, value */)
 (:FinancialMetric)-[:HAS_SEGMENT]->(:Segment /* properties: label, value, percentage */)
@@ -132,20 +134,6 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 2. INLINE MATH: NEVER use math operators (`>`, `<`) inside node patterns. Use `WHERE` clauses.
 """,
 
-    "cross_entity": """
-Relevant schema (multi-domain traversal):
-(:Provider /* properties: name */)-[:MANAGES]->(:Trust /* properties: name */)-[:ISSUES]->(f:Fund /* properties: ticker, name */)
-(:Fund)-[:MANAGED_BY /* properties: date */]->(:Person /* properties: name */)
-(:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING /* properties: weight, shares, marketValue */]->(h:Holding /* properties: name, ticker */)
-(:Holding)-[:REPRESENTS]->(c:Company /* properties: ticker, name, cik */)
-(:Company)-[:HAS_CEO /* properties: ceoCompensation, ceoActuallyPaid */]->(:Person /* properties: name */)
-(:Company)-[:HAS_INSIDER_TRANSACTION]->(:InsiderTransaction /* properties: position, transactionType, shares, price, value, remainingShares */)-[:MADE_BY]->(:Person)
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. INLINE MATH: NEVER use math/comparison operators (`>`, `<`, `gt`) inside curly braces in MATCH patterns (e.g., BAD: `[r:HAS_HOLDING {marketValue: > 10000}]`). ALWAYS use a `WHERE` clause (e.g., `WHERE r.marketValue > 10000`).
-2. PROPERTY SYNTAX: NEVER generate incomplete property filters like `(c:Company {ticker, name})`. Only use specific values like `{ticker: 'AAPL'}` or omit the brackets entirely if you are just defining variables.
-3. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`.
-"""
 }
 
 
@@ -183,11 +171,7 @@ class QueryHandler:
         **cypher_kwargs:  Extra keyword arguments forwarded to CypherTranslator.
     """
 
-    # Categories that need both graph traversal + vector similarity search
-    HYBRID_CATEGORIES = {
-        QueryCategory.HYBRID_GRAPH_VECTOR.value,
-        QueryCategory.FUND_PROFILE.value,
-    }
+    
 
     def __init__(
         self,
@@ -225,15 +209,22 @@ class QueryHandler:
         user_query: str,
         execute: bool = False,
         temperature: Optional[float] = None,
+        use_schema_injection: bool = True,
     ) -> QueryResult:
         """
         Full pipeline: classify → select schema → translate → optionally execute.
 
         Args:
-            user_query:  Natural-language question.
-            execute:     If True, run the generated Cypher against Neo4j
-                         and attach the rows to ``result.data``.
-            temperature: Override temperature for the Text2Cypher LLM.
+            user_query:           Natural-language question.
+            execute:              If True, run the generated Cypher against Neo4j
+                                  and attach the rows to ``result.data``.
+            temperature:          Override temperature for the Text2Cypher LLM.
+            use_schema_injection: If True (default), the query classifier selects a
+                                  focused schema slice for the initial LLM call.
+                                  If False, the full DETAILED_SCHEMA is used from
+                                  the start (classification still runs for routing,
+                                  but the schema sent to the LLM is always complete).
+                                  Note: retries always use the full schema regardless.
 
         Returns:
             QueryResult with category, cypher, and optional data.
@@ -245,64 +236,67 @@ class QueryHandler:
         start_classification = time.time()
         prediction = self.classifier.predict(user_query)
         classification_time = time.time() - start_classification
-        
-        category = prediction["label"]
-        confidence = prediction["confidence"]
-        top_2 = prediction.get("top_2", [])
 
-        if top_2 and len(top_2) == 2:
-            cat1, conf1 = top_2[0]
-            cat2, conf2 = top_2[1]
-            logger.info(f"Classification: 1. {cat1} ({conf1:.2%}) | 2. {cat2} ({conf2:.2%})")
-            print(f"🏷️  Top Matches: 1️⃣ {cat1} ({conf1:.2%}) | 2️⃣ {cat2} ({conf2:.2%})")
-        else:
-            cat1, conf1 = category, confidence
-            cat2, conf2 = None, 0.0
-            logger.info(f"Classification: {category} ({confidence:.2%})")
-            print(f"🏷️  Category: {category}  (confidence {confidence:.2%})")
+        active_labels: list = prediction["labels"]          # e.g. ["fund_basic", "fund_portfolio"]
+        top_label: str       = prediction["top_label"]       # highest-confidence label
+        confidence: float    = prediction["confidence"]
+        per_conf: dict       = prediction["per_label_confidence"]
 
-        # Step 2 — pick schema slice
-        # Low-confidence fallback → widest schema
-        if confidence < self.confidence_threshold:
-            logger.warning(
-                f"Low confidence ({confidence:.2%}), falling back to cross_entity"
-            )
-            print(f"⚠️  Low confidence — falling back to cross_entity schema")
-            selected_schema_name = QueryCategory.CROSS_ENTITY.value
-            schema_slice = SCHEMA_SLICES.get(selected_schema_name, "")
-        elif top_2 and conf1 < 0.85 and cat2 != QueryCategory.NOT_RELATED.value:
-            print(f"⚖️  Medium confidence -> Injecting combined schema for '{cat1}' and '{cat2}'")
-            schema1 = SCHEMA_SLICES.get(cat1, "")
-            schema2 = SCHEMA_SLICES.get(cat2, "")
-            schema_slice = f"=== COMBINED SCHEMA OPTIONS ===\n\n--- Option A ({cat1}) ---\n{schema1}\n\n--- Option B ({cat2}) ---\n{schema2}"
-            selected_schema_name = f"{cat1} + {cat2}"
-        else:
-            selected_schema_name = category
-            schema_slice = SCHEMA_SLICES.get(category, "")
-
-        # Step 3 — route
-        result = QueryResult(
-            query=user_query,
-            category=category,
-            confidence=confidence,
-            schema_used=selected_schema_name,
+        # Display
+        label_str = " | ".join(
+            f"{l} ({per_conf[l]:.2%})" for l in active_labels
         )
+        logger.info(f"Classification: {label_str}")
+        print(f"🏷️  Active labels: {label_str}")
 
-        # not_related → short-circuit
-        if category == QueryCategory.NOT_RELATED.value:
+        # Step 2 — pick schema slice(s)
+        if QueryCategory.NOT_RELATED.value in active_labels:
+            result = QueryResult(
+                query=user_query, category=QueryCategory.NOT_RELATED.value,
+                confidence=confidence, schema_used="",
+            )
             result.error = "Query is not related to the financial database."
             print("🚫 Not related — skipping.")
             return result
 
-        # hybrid (includes fund_profile): flag vector AND generate Cypher
-        if category in self.HYBRID_CATEGORIES or (selected_schema_name == f"{cat1} + {cat2}" and cat2 in self.HYBRID_CATEGORIES):
+        if len(active_labels) == 1:
+            selected_schema_name = active_labels[0]
+            schema_slice = SCHEMA_SLICES.get(active_labels[0], "")
+            print(f"→ Single label: {active_labels[0]} ({confidence:.2%})")
+        else:
+            # Merge all active schema slices
+            selected_schema_name = " + ".join(active_labels)
+            parts = []
+            for lbl in active_labels:
+                s = SCHEMA_SLICES.get(lbl, "")
+                if s:
+                    parts.append(f"=== Schema: {lbl} ===\n{s}")
+            schema_slice = "\n\n".join(parts)
+            print(f"🔀 Multi-label: [{', '.join(active_labels)}] — merging schemas")
+
+        # Step 3 — build result container
+        result = QueryResult(
+            query=user_query,
+            category=top_label,
+            confidence=confidence,
+            schema_used=selected_schema_name,
+        )
+
+        # fund_profile → also flag vector search
+        if QueryCategory.FUND_PROFILE.value in active_labels:
             result.requires_vector_search = True
             print("🔀 Hybrid — will generate Cypher AND flag vector search.")
 
-        # Step 4 — translate with the sliced schema
+        # Step 4 — translate with the sliced schema (or full schema if injection disabled)
+        if use_schema_injection:
+            effective_schema = schema_slice
+            print(f"📐 Schema: slice ({selected_schema_name})")
+        else:
+            effective_schema = DETAILED_SCHEMA
+            print("📐 Schema: full DETAILED_SCHEMA (injection disabled)")
         start_translation = time.time()
         cypher = self._translate_with_schema(
-            user_query, schema_slice, temperature=temperature
+            user_query, effective_schema, temperature=temperature
         )
         translation_time = time.time() - start_translation
         result.cypher = cypher

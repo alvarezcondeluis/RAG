@@ -3,6 +3,7 @@ import time
 import requests
 import re
 import logging
+import warnings
 from typing import Optional, Literal
 from datetime import datetime, timedelta
 from langchain_ollama import ChatOllama
@@ -14,24 +15,52 @@ from simple_rag.rag.dynamic_few_shot import DynamicFewShotSelector
 from simple_rag.rag.entity_resolver import EntityResolver
 from simple_rag.rag.groq_wrapper import GroqWrapper
 from simple_rag.rag.post_processing.cypher_validator import CypherValidator
+from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
+from simple_rag.rag.prompt_templates import CYPHER_GENERATION_TEMPLATE, CYPHER_RETRY_TEMPLATE
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# === CONFIGURATION CONSTANTS ===
+# ============================================================
+
+# LLM Configuration
+DEFAULT_MAX_TOKENS = 512
+DEFAULT_NUM_PREDICT = 512
+DEFAULT_VALIDATION_RETRIES = 3
+DEFAULT_TEMPERATURE = 0.2
+
+# Groq Rate Limits
+GROQ_70B_DAILY_LIMIT = 1000
+GROQ_8B_DAILY_LIMIT = 14400
+GROQ_TPM_LIMIT = 6000
+
+# Ollama Configuration
+OLLAMA_DEFAULT_URL = "http://localhost:11434"
+OLLAMA_MAX_STARTUP_WAIT = 30
+
+# OpenAI-compatible Configuration
+OPENAI_COMPATIBLE_DEFAULT_HOST = "localhost"
+OPENAI_COMPATIBLE_DEFAULT_PORT = 1234  # LM Studio default
 
 class CypherTranslator:
     def __init__(
         self,
         neo4j_driver,
         model_name: str = "llama3.1:8b",
-        api_url: str = "http://localhost:11434",
+        api_url: str = OLLAMA_DEFAULT_URL,
         auto_start_ollama: bool = True,
         backend: Literal["ollama", "huggingface", "groq", "openai"] = "ollama",
         device: str = "cuda",
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_TEMPERATURE,
         use_entity_resolver: bool = True,
         entity_resolver_debug: bool = False,
         groq_api_key: Optional[str] = None,
-        llama_cpp_host: str = "localhost",
-        llama_cpp_port: int = 1234,
+        openai_compatible_host: str = OPENAI_COMPATIBLE_DEFAULT_HOST,
+        openai_compatible_port: int = OPENAI_COMPATIBLE_DEFAULT_PORT,
+        max_validation_retries: int = DEFAULT_VALIDATION_RETRIES,
+        llama_cpp_host: Optional[str] = None,
+        llama_cpp_port: Optional[int] = None,
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -39,21 +68,43 @@ class CypherTranslator:
         Args:
             neo4j_driver:        Neo4j driver instance for entity resolution.
             model_name:          Model identifier (Ollama model, HuggingFace path, Groq model,
-                                 or any string for llama.cpp — the server ignores it).
+                                 or any string for OpenAI-compatible servers).
             api_url:             Ollama base URL (only used when backend="ollama").
             auto_start_ollama:   Auto-start Ollama if not running (ignored for other backends).
             backend:             "ollama" | "huggingface" | "groq" | "openai".
-                                 Use "openai" to target a local llama.cpp server.
+                                 Use "openai" for LM Studio, llama.cpp, vLLM, or any OpenAI-compatible server.
             device:              Device for HuggingFace model ("cuda" or "cpu").
             temperature:         Sampling temperature (lower = more deterministic).
             use_entity_resolver: Enable EntityResolver for name/ticker pre-resolution.
             entity_resolver_debug: Enable debug output for entity resolution.
             groq_api_key:        Groq API key (reads GROQ_API_KEY env var if None).
-            llama_cpp_host:      Hostname of the llama.cpp server (default: localhost).
-            llama_cpp_port:      Port of the llama.cpp server (default: 1234).
+            openai_compatible_host: Hostname for OpenAI-compatible server (LM Studio, llama.cpp, etc.).
+            openai_compatible_port: Port for OpenAI-compatible server (default: 1234 for LM Studio).
+            max_validation_retries: Maximum number of validation retry attempts (default: 3).
+            llama_cpp_host:      DEPRECATED: Use openai_compatible_host instead.
+            llama_cpp_port:      DEPRECATED: Use openai_compatible_port instead.
         """
-        self.llama_cpp_host = llama_cpp_host
-        self.llama_cpp_port = llama_cpp_port
+        # Handle deprecated parameters
+        if llama_cpp_host is not None:
+            warnings.warn(
+                "Parameter 'llama_cpp_host' is deprecated and will be removed in a future version. "
+                "Use 'openai_compatible_host' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            openai_compatible_host = llama_cpp_host
+        if llama_cpp_port is not None:
+            warnings.warn(
+                "Parameter 'llama_cpp_port' is deprecated and will be removed in a future version. "
+                "Use 'openai_compatible_port' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            openai_compatible_port = llama_cpp_port
+        
+        self.openai_compatible_host = openai_compatible_host
+        self.openai_compatible_port = openai_compatible_port
+        self.max_validation_retries = max_validation_retries
         self.model_name = model_name
         self.api_url = api_url
         self.ollama_process = None
@@ -97,7 +148,6 @@ class CypherTranslator:
 
         # Initialize Cypher validator
         self.validator = CypherValidator(neo4j_driver=neo4j_driver, block_writes=True)
-        self.max_validation_retries = 3
         print("✓ CypherValidator initialized")
 
         # LangChain components
@@ -105,229 +155,19 @@ class CypherTranslator:
         self.chain = None
         self.llama_cpp_process = None  # managed llama.cpp subprocess (if launched by us)
         
-        # Complete Neo4j schema
-        self.optimized_schema = """
-        // === GRAPH SCHEMA ===
-        // 1. FUND MANAGEMENT & PROFILE
-        (:Provider{name})-[:MANAGES]->(:Trust{name})-[:ISSUES]->(f:Fund{ticker,name,securityExchange,costsPer10k,advisoryFees,numberHoldings,expenseRatio,netAssets,turnoverRate})
-        (f)-[:HAS_SHARE_CLASS]->(:ShareClass{name,description})
-        (f)-[:DEFINED_BY{date}]->(p:Profile{summaryProspectus})-[:HAS_OBJECTIVE]->(:Objective{id,text,embedding})
-        (p)-[:HAS_RISK_NODE]->(:RiskChunk{id,title,text,embedding})
-        (p)-[:HAS_STRATEGY]->(:StrategyChunk{id,title,text,embedding})
-        (p)-[:HAS_PERFORMANCE_COMMENTARY]->(:PerformanceCommentary{id,text,embedding})
-        (f)-[:HAS_CHART{date}]->(:Image{id,title,category,svg})
-        (f)-[:HAS_SECTOR_ALLOCATION{weight,date}]->(:Sector{name})
-        (f)-[:HAS_REGION_ALLOCATION{weight,date}]->(:Region{name})
-
-        // 2. PORTFOLIO & PERFORMANCE
-        (f)-[:MANAGED_BY{date}]->(per:Person{name})
-        (f)-[:HAS_PORTFOLIO]->(port:Portfolio{seriesId,date})-[:HAS_HOLDING{shares,marketValue,weight,fairValueLevel,isRestricted,payoffProfile}]->(h:Holding{name,ticker,isin,lei,category,category_desc,issuer_category,businessAddress})
-        (f)-[:HAS_FINANCIAL_HIGHLIGHT{year}]->(:FinancialHighlight{turnover,expenseRatio,totalReturn,netAssets,netAssetsValueBeginning,netAssetsValueEnd,netIncomeRatio})
-        (f)-[:HAS_TRAILING_PERFORMANCE{date}]->(:TrailingPerformance{return1y,return5y,return10y,returnInception})
-
-        // 3. COMPANY, 10-K & FINANCIALS
-        (h)-[:REPRESENTS]->(c:Company{ticker,name,cik})
-        (c)-[:EMPLOYED_AS_CEO{ceoCompensation,ceoActuallyPaid,date}]->(per)
-        (c)<-[:AWARDED_BY]-(comp:CompnesationPackage{totalCompensation,shareholderReturn,date})<-[:RECEIVED_COMPENSATION]-(per)
-        (c)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction{position,transactionType,shares,price,value,remainingShares})-[:MADE_BY]->(per)
-        (c)-[:HAS_FILING{date}]->(filing:Filing10K)-[:HAS_RISK_FACTORS]->(:Section:RiskFactor{id,text,embedding})
-        (filing)-[:HAS_BUSINESS_INFORMATION]->(:Section:BusinessInformation{id,text,embedding})
-        (filing)-[:HAS_LEGAL_PROCEEDINGS]->(:Section:LegalProceeding{id,text,embedding})
-        (filing)-[:HAS_MANAGEMENT_DISCUSSION]->(:Section:ManagemetDiscussion{id,text,embedding})
-        (filing)-[:HAS_PROPERTIES_CHUNK]->(:Section:Properties{id,text,embedding})
-        (filing)-[:HAS_FINACIALS]->(fin:Section:Financials{incomeStatement,balanceSheet,cashFlow,fiscalYeat})-[:HAS_METRIC]->(met:FinancialMetric{label,value})
-        (met)-[:HAS_SEGMENT]->(:Segment{label,value,percentage})
-
-        // 4. DOCUMENTS (Sources)
-        (f)-[:EXTRACTED_FROM]->(d:Document{accessionNumber,url,type,filingDate,reportingDate})
-        (p)-[:EXTRACTED_FROM]->(d)
-        (port)-[:EXTRACTED_FROM]->(d)
-        (filing)-[:EXTRACTED_FROM]->(d)
-        (it)-[:DISCLOSED_IN]->(d)<-[:DISCLOSED_IN]-(comp)
-
-        // === QUERY RULES ===
-        1. INDEXES FIRST: For name searches use CALL db.index.fulltext.queryNodes('indexName', 'search_term') [providerNameIndex, trustNameIndex, fundNameIndex, personNameIndex].
-        2. EXACT MATCH: For symbols use {ticker: 'VTI'} directly.
-        3. Use f.numberHoldings to calculate the number of holdings a fund has.
-        3. PROPERTY FILTERS: Never generate incomplete filters like (n:Label {name}). Only use explicit values e.g., (n:Label {name: 'Value'}). If value is unknown, omit the {} block.
-        4. METRICS: netAssets is directly on Fund. numberHoldings is pre-calculated. turnoverRate is absolute (2 = 2%, not 0.02).
-        5. ALWAYS return general information about the fund, ticker and name in the response.
-    """
-
+        self.detailed_schema = DETAILED_SCHEMA  # always the full schema — never overwritten by slicing
+        self.schema = DETAILED_SCHEMA           # may be temporarily replaced by a schema slice
+        self.last_initial_prompt: Optional[str] = None  # prompt used on the first LLM call (captured for debugging)
         
-        self.schema = """
-        # ============================================================
-        # === FUND MANAGEMENT STRUCTURE ===
-        # ============================================================
-        (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund)
-        # === FUND NODE PROPERTIES (Use these directly!) ===
-        (:Fund {
-            ticker,              # Symbol like 'VTI' (use for matching symbols)
-            name,                # Full name like 'Vanguard Total Stock Market Index Fund'
-            securityExchange,    # Exchange like 'NASDAQ', 'NYSE'
-            costsPer10k,         # Costs per $10,000 invested (numeric)
-            advisoryFees,        # Advisory fees (numeric)
-            numberHoldings,      # Total number of holdings (integer) - USE THIS, not count(h)!
-            expenseRatio,        # Expense ratio (numeric)
-            netAssets,           # Net assets value (numeric) - DIRECTLY ON FUND NODE
-            turnoverRate        # Portfolio Turnover Rate in ABSOLUTE terms (e.g., 2 means 2%, NOT 0.02) 
-        })
-        # FULL-TEXT INDEXES (use for fuzzy/partial name matching):
-        # - Provider.name -> use CALL db.index.fulltext.queryNodes('providerNameIndex', 'search_term')
-        # - Trust.name -> use CALL db.index.fulltext.queryNodes('trustNameIndex', 'search_term')
-        # - Fund.name -> use CALL db.index.fulltext.queryNodes('fundNameIndex', 'search_term')
-        # - Person.name -> use CALL db.index.fulltext.queryNodes('personNameIndex', 'search_term')
-        # For exact ticker matching, use {ticker: 'VTI'} (no index needed)
-
-        # === FUND RELATIONSHIPS ===
-        # Share Classes
-        (:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name, description})
-        # Document node
-        (:Fund)-[:EXTRACTED_FROM]->(:Document {accessionNumber, url, type, filingDate, reportingDate})
-        # Profile (versioned by date)
-        (:Fund)-[:DEFINED_BY {date}]->(:Profile {id, summaryProspectus})
-        (:Profile)-[:HAS_OBJECTIVE]->(:Objective {id, text, embedding})
-        (:Profile)-[:HAS_PERFORMANCE_COMMENTARY]->(:PerformanceCommentary {id, text, embedding})
-        (:Profile)-[:HAS_RISK_NODE]->(:RiskChunk {id, title, text, embedding})
-        (:Profile)-[:HAS_STRATEGY]->(:StrategyChunk {id, title, text, embedding})
-        (:Profile)-[:EXTRACTED_FROM]->(:Document)
-        # Charts/Images (dated)
-        (:Fund)-[:HAS_CHART {date}]->(:Image {id, title, category, svg})
-        
-        # Management Team
-        (:Fund)-[:MANAGED_BY]->(:Person {name})
-        
-        # Allocations (by report date)
-        (:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, date}]->(:Sector {name})
-        (:Fund)-[h:HAS_GEOGRAPHIC_ALLOCATION {weight, date}]->(:GeographicAllocation {name})
-                    
-        # Holdings Structure
-        (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {id, ticker, date, count})
-        (:Portfolio)-[:HAS_HOLDING {shares, marketValue, weight, currency, fairValueLevel, isRestricted, payoffProfile}]->(:Holding {
-            id, name, ticker, cusip, isin, lei, country, sector, assetCategory, assetDesc, issuerCategory, issuerDesc})
-        (:Portfolio)-[:EXTRACTED_FROM]->(:Document)
-        # Financial Highlights
-        (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT {year}]->(:FinancialHighlight {turnover, expenseRatio, totalReturn, netAssets, netAssetsValueBeginning, netAssetsValueEnd, netIncomeRatio})
-
-        # Trailing Performance
-        (:Fund)-[:HAS_TRAILING_PERFORMANCE {date}]->(:TrailingPerformance {return1y, return5y, return10y, returnInception})
-
-        # ============================================================
-        # === COMPANY STRUCTURE (10-K Filings) ===
-        # ============================================================
-        
-        # === COMPANY NODE PROPERTIES ===
-        (:Company {
-            ticker,              # Stock ticker symbol like 'AAPL', 'MSFT'
-            name,                # Company name like 'Apple Inc.'
-            cik                  # SEC Central Index Key
-        })
-        # === COMPANY RELATIONSHIPS ===
-        # Document and Filing Structure
-        # Funds can hold Company stocks
-        (:Holding {ticker})-[:REPRESENTS]->(:Company {ticker})
-        
-        (:Company)-[:HAS_FILING]->(:Filing10K {id, filingDate, reportPeriodEnd, url})
-        (:Filing10K)-[:EXTRACTED_FROM]->(:Document {accessionNumber, form, url, filingDate, reportingDate})
-        
-        # 10-K Section Types (all inherit from :Section base label)
-        (:Filing10K)-[:HAS_RISK_FACTORS]->(:Section:RiskFactor {id, text, embedding})
-        (:Filing10K)-[:HAS_BUSINESS_INFORMATION]->(:Section:BusinessInformation {id, text, embedding})
-        (:Filing10K)-[:HAS_LEGAL_PROCEEDINGS]->(:Section:LegalProceeding {id, text, embedding})
-        (:Filing10K)-[:HAS_MANAGEMENT_DISCUSSION]->(:Section:ManagemetDiscussion {id, text, embedding})
-        (:Filing10K)-[:HAS_PROPERTIES_CHUNK]->(:Section:Properties {id, text, embedding})
-        (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {id})
-        
-        # === COMPANY PEOPLE & COMPENSATION ===
-        (:Company)-[:HAS_CEO]->(:Person {name})
-        (:Person)-[:RECEIVED]->(:CompensationPackage {
-            id, year, totalCompensation, salary, bonus, stockAwards, 
-            optionAwards, nonEquityIncentive, changeInPensionValue, otherCompensation
-        })
-        (:Company)-[:HAS_INSIDER_TRANSACTION]->(:InsiderTransaction {
-            id, date, transactionType, shares, pricePerShare, totalValue, 
-            sharesOwnedAfter, directOrIndirect
-        })
-        (:InsiderTransaction)-[:MADE_BY]->(:Person {name})
-        
-        # === FINANCIAL METRICS & SEGMENTS ===
-        (:Section:Financials)-[:HAS_METRIC]->(:FinancialMetric {
-            id, label, value, unit, period, fiscalYear, fiscalQuarter
-        })
-        (:Section:Financials)-[:HAS_SEGMENT]->(:Segment {
-            id, name, revenue, operatingIncome, assets
-        })
-
-        # === IMPORTANT NOTES ===
-        # 1. netAssets is DIRECTLY on Fund node, not in a separate FinancialHighlight node
-        # 2. numberHoldings property already contains the count - don't recalculate!
-        # 3. turnoverRate is absolute (2 = 2%, not 0.02)
-        # 4. Use 'ticker' for symbols (VTI), 'name' for full names
-        # 5. Vector indexes exist on embedding properties for semantic search
-        # 6. Fulltext indexes exist on name properties for fuzzy/partial name matchings USE THEM before the MATCH
-        # 7. NEVER generate incomplete property filters like (n:Label {name}). Only use property filters with values like (n:Label {name: 'Value'}).
-        # 8. If you do not know the value of a property, DO NOT include it in the curly braces {}.
-        # 9. ALWAYS return general information about the fund, ticker and name in the response.
-        # 10. Whenever it exists, return the document information from which it has been extracted.
-        """
-        
-        # Define the prompt template
-        self.prompt_template = """You are a Neo4j Cypher expert. Convert the natural language question to a valid Cypher query.
-
-Neo4j Schema:
-{schema}
-
-Examples:
-{examples}
-
-{entity_context}
-
-Rules:
-1. Output ONLY the Cypher query, no explanations or markdown
-2. Use proper Cypher syntax with MATCH, WHERE, RETURN, COUNT(*)
-3. Use property names exactly as shown in schema
-4. For numeric comparisons, use appropriate operators (>, <, =, etc.) just after the MATCH clause
-5. For text search, use CONTAINS or regular expressions
-6. Always return more properties than the ones asked. Include ticker, name, etc.
-7. If entity names are provided in the Entity Context, use them EXACTLY as shown
-
-Question: {question}
-
-Cypher Query:"""
-        
+        # Use imported prompt templates
         self.prompt = PromptTemplate(
             input_variables=["schema", "examples", "entity_context", "question"],
-            template=self.prompt_template
+            template=CYPHER_GENERATION_TEMPLATE
         )
-        
-        # Retry prompt for when validation fails
-        self.retry_prompt_template = """You are a Neo4j Cypher expert. Your previous Cypher query had errors. Fix them.
-
-Neo4j Schema:
-{schema}
-
-{entity_context}
-
-Original Question: {question}
-
-Your Previous (Invalid) Query:
-{failed_query}
-
-Validation Errors:
-{validation_errors}
-
-Rules:
-1. Output ONLY the corrected Cypher query, no explanations or markdown
-2. Fix ALL the validation errors listed above
-3. Use ONLY node labels, relationship types, and property names that exist in the schema
-4. Use proper Cypher syntax
-5. Do NOT use MERGE, CREATE, SET, DELETE, or any write operations
-
-Corrected Cypher Query:"""
         
         self.retry_prompt = PromptTemplate(
             input_variables=["schema", "entity_context", "question", "failed_query", "validation_errors"],
-            template=self.retry_prompt_template
+            template=CYPHER_RETRY_TEMPLATE
         )
         
         # Initialize based on backend
@@ -378,7 +218,7 @@ Corrected Cypher Query:"""
                 model=self.model_name,
                 base_url=self.api_url,
                 temperature=self.temperature,
-                num_predict=512
+                num_predict=DEFAULT_NUM_PREDICT,
             )
             
             # Build the chain: Prompt -> LLM -> Output Parser
@@ -491,21 +331,63 @@ Corrected Cypher Query:"""
             raise RuntimeError(f"Failed to initialize Groq chain: {e}") from e
 
     def _init_openai_chain(self):
-        """Initialize LangChain with an OpenAI-compatible local llama.cpp server."""
+        """Initialize LangChain with an OpenAI-compatible server (LM Studio, llama.cpp, vLLM, etc.)."""
         try:
-            base_url = f"http://{self.llama_cpp_host}:{self.llama_cpp_port}/v1"
+            base_url = f"http://{self.openai_compatible_host}:{self.openai_compatible_port}/v1"
             self.llm = ChatOpenAI(
                 model=self.model_name,
-                openai_api_base=base_url,
-                openai_api_key="llama-cpp",   # required by library; ignored by llama.cpp
+                base_url=base_url,
+                api_key="not-needed",
                 temperature=self.temperature,
-                max_tokens=512,
+                max_tokens=DEFAULT_MAX_TOKENS,
             )
             self.chain = self.prompt | self.llm | StrOutputParser()
-            print(f"✓ llama.cpp OpenAI-compatible backend → {base_url}")
+            print(f"✓ OpenAI-compatible backend initialized → {base_url}")
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Failed to connect to OpenAI-compatible server at {base_url}\n"
+                f"Please ensure LM Studio, llama.cpp, or another OpenAI-compatible server is running on port {self.openai_compatible_port}"
+            )
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize llama.cpp (openai) chain: {e}") from e
+            raise RuntimeError(f"Failed to initialize OpenAI-compatible chain: {e}") from e
 
+    def test_connection(self) -> bool:
+        """
+        Test connection to the configured backend.
+        
+        Returns:
+            True if connection successful, False otherwise.
+        """
+        try:
+            if self.backend == "ollama":
+                return self._is_ollama_running()
+            elif self.backend == "openai":
+                base_url = f"http://{self.openai_compatible_host}:{self.openai_compatible_port}"
+                response = requests.get(f"{base_url}/v1/models", timeout=2)
+                if response.status_code == 200:
+                    print(f"✓ OpenAI-compatible server is running at {base_url}")
+                    return True
+                else:
+                    print(f"✗ OpenAI-compatible server returned status {response.status_code}")
+                    return False
+            elif self.backend == "groq":
+                print("✓ Groq backend configured (API-based, no connection test needed)")
+                return True
+            elif self.backend == "huggingface":
+                print("✓ HuggingFace backend configured (local model, no connection test needed)")
+                return True
+            else:
+                print(f"⚠ Unknown backend: {self.backend}")
+                return False
+        except requests.exceptions.ConnectionError:
+            print(f"✗ Failed to connect to {self.backend} backend")
+            if self.backend == "openai":
+                print(f"  Ensure LM Studio or llama.cpp is running on port {self.openai_compatible_port}")
+            return False
+        except Exception as e:
+            print(f"✗ Connection test failed: {e}")
+            return False
+    
     def _is_ollama_running(self) -> bool:
         """Check if Ollama server is running."""
         try:
@@ -525,8 +407,8 @@ Corrected Cypher Query:"""
                 start_new_session=True
             )
             
-            # Wait for server to be ready (max 30 seconds)
-            max_wait = 30
+            # Wait for server to be ready
+            max_wait = OLLAMA_MAX_STARTUP_WAIT
             wait_interval = 1
             elapsed = 0
             
@@ -598,7 +480,7 @@ Corrected Cypher Query:"""
         
         return True
     
-    def _update_groq_token_usage(self, prompt_tokens: int, completion_tokens: int):
+    def _update_groq_token_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
         """Update Groq token usage tracking."""
         if self.backend != "groq":
             return
@@ -635,7 +517,7 @@ Corrected Cypher Query:"""
             "model": self.model_name
         }
     
-    def reset_groq_usage(self):
+    def reset_groq_usage(self) -> None:
         """Manually reset Groq usage counters (for testing or new day)."""
         if self.backend == "groq":
             self.groq_tokens_used = 0
@@ -764,7 +646,8 @@ Corrected Cypher Query:"""
                 entity_context=entity_context,
                 question=processed_query
             )
-            
+            self.last_initial_prompt = full_prompt  # stored for benchmark error reporting
+
             response = self._invoke_llm(full_prompt)
             cypher_query = self._clean_cypher(response)
             
@@ -800,16 +683,22 @@ Corrected Cypher Query:"""
                     print("❌ Cannot retry: Groq rate limits exceeded")
                     break
                 
-                # Build retry prompt with error feedback
+                # Build retry prompt with error feedback — always use the full detailed
+                # schema on retries so the LLM has the complete graph context to fix errors.
                 retry_prompt_text = self.retry_prompt.format(
-                    schema=self.schema,
+                    schema=self.detailed_schema,
                     entity_context=entity_context,
                     question=processed_query,
                     failed_query=cypher_query,
                     validation_errors=error_summary
                 )
-                
-                print(f"🔄 Retrying with error feedback (attempt {attempt + 1})...")
+
+                token_est = len(retry_prompt_text) // 4
+                print(f"🔄 Retrying with full schema + error feedback (attempt {attempt + 1}) — {token_est:,} tokens (est.):")
+                print(f"{'─'*76}")
+                for line in retry_prompt_text.splitlines():
+                    print(f"  {line}")
+                print(f"{'─'*76}")
                 retry_response = self._invoke_llm(retry_prompt_text)
                 cypher_query = self._clean_cypher(retry_response)
                 
@@ -863,10 +752,43 @@ Corrected Cypher Query:"""
         
         # 3. Clean up accidental double spaces created by the removal
         query = re.sub(r'\s+', ' ', query).strip()
-        
+
+        # 4. Auto-inject DISTINCT when multi-hop traversal could cause duplicate rows
+        query = self._auto_distinct(query)
+
+        return query
+
+    def _auto_distinct(self, query: str) -> str:
+        """
+        Inject DISTINCT into RETURN when a multi-hop MATCH traverses intermediate nodes
+        that are not in the RETURN clause, which would otherwise produce duplicate rows.
+
+        Heuristic: if MATCH has ≥2 relationship arrows AND RETURN has no DISTINCT AND
+        no aggregate functions are used, add RETURN DISTINCT.
+        """
+        if not re.search(r'\bMATCH\b', query, re.IGNORECASE):
+            return query
+        if not re.search(r'\bRETURN\b', query, re.IGNORECASE):
+            return query
+
+        # Already distinct — nothing to do
+        if re.search(r'\bRETURN\s+DISTINCT\b', query, re.IGNORECASE):
+            return query
+
+        # Aggregates collapse duplicates on their own — leave them alone
+        if re.search(r'\b(COUNT|SUM|AVG|MIN|MAX|COLLECT)\s*\(', query, re.IGNORECASE):
+            return query
+
+        # Count relationship hops in the MATCH portion only
+        match_part = re.split(r'\bRETURN\b', query, maxsplit=1, flags=re.IGNORECASE)[0]
+        hop_count = len(re.findall(r'->|<-', match_part))
+
+        if hop_count >= 2:
+            query = re.sub(r'\bRETURN\b', 'RETURN DISTINCT', query, count=1, flags=re.IGNORECASE)
+
         return query
     
-    def stop_ollama_server(self):
+    def stop_ollama_server(self) -> None:
         """Stop the Ollama server if it was started by this instance. No-op for other backends."""
         if self.backend != "ollama":
             return

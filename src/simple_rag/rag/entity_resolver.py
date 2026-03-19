@@ -57,11 +57,13 @@ class EntityResolver:
         query_lower = query.lower()
         
         # Step 1: Detect keywords to determine which entity types to search
-        provider_keywords = ['provider']
+        # 'manage'/'manages' are added because the schema has Provider -[:MANAGES]-> Trust,
+        # so queries about what something "manages" are asking about a Provider entity.
+        provider_keywords = ['provider', 'manage', 'manages', 'managed']
         trust_keywords = ['trust', 'vanguard index funds']
         fund_keywords = ['fund', 'etf', 'index']
         ticker_keywords = ['ticker', 'symbol', 'stock']
-        
+
         search_providers = any(keyword in query_lower for keyword in provider_keywords)
         search_trusts = any(keyword in query_lower for keyword in trust_keywords)
         search_funds = any(keyword in query_lower for keyword in fund_keywords)
@@ -92,8 +94,10 @@ class EntityResolver:
                 }
 
         # B. Check Trusts (Use partial_ratio for substring matching)
+        # Cutoff raised to 75: generic uses of the word "trust" (e.g. "how many trusts")
+        # produce false-positive matches around 60. Specific trust names score 90+.
         if search_trusts:
-            match = process.extractOne(query, self.trusts, scorer=fuzz.partial_ratio, score_cutoff=60)
+            match = process.extractOne(query, self.trusts, scorer=fuzz.partial_ratio, score_cutoff=75)
             if self.debug and match:
                 print(f"\nTrust Search:")
                 print(f"  Matched: '{match[0]}' with score {match[1]}")
@@ -193,10 +197,11 @@ class EntityResolver:
                             "score": 100.0  # Exact match
                         }
             
-            # Case-insensitive ticker check
-            query_upper = query.upper()
+            # Case-insensitive ticker check — word boundary only to avoid
+            # matching tickers as substrings (e.g. "EXI" inside "exist")
+            query_upper_words = set(query.upper().split())
             for ticker in self.tickers:
-                if ticker in query_upper and ticker not in resolved:
+                if ticker in query_upper_words and ticker not in resolved:
                     resolved[ticker] = {
                         "type": "Ticker",
                         "score": 100.0  # Exact match

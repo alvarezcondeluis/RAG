@@ -1,14 +1,12 @@
-import re
 import shutil
 import time
 from typing import List, Dict
-from langchain_core.example_selectors import SemanticSimilarityExampleSelector
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from pathlib import Path
-import os
 import json
 import hashlib
+
 class DynamicFewShotSelector:
     """
     Semantic similarity-based example selector for Cypher query generation.
@@ -126,44 +124,63 @@ class DynamicFewShotSelector:
         )
         return [doc.metadata for doc in docs]
     
-    def format_examples_as_string(self, examples: List[Dict[str, str]]) -> str:
+    @staticmethod
+    def _l2_to_similarity(l2_dist: float) -> float:
+        """
+        Convert FAISS L2 distance to cosine similarity percentage (0–100).
+        For unit-normalized vectors: cos_sim = 1 - (l2_dist^2 / 2).
+        """
+        return max(0.0, (1.0 - (l2_dist ** 2) / 2.0)) * 100.0
+
+    def format_examples_as_string(
+        self, examples: List[Dict[str, str]], scores: List[float] = None
+    ) -> str:
         """
         Format retrieved examples as a string for inclusion in prompts.
-        
-        Args:
-            examples: List of example dicts
-            
-        Returns:
-            Formatted string with examples
+        When scores are provided (cosine similarity 0–100), examples above 85%
+        are flagged so the LLM knows to follow them closely.
         """
+        VERY_SIMILAR_THRESHOLD = 85.0
         formatted = []
         for i, ex in enumerate(examples, 1):
-            formatted.append(f"Example {i}:")
+            sim = scores[i - 1] if scores else None
+            if sim is not None and sim >= VERY_SIMILAR_THRESHOLD:
+                formatted.append(
+                    f"Example {i} [★ VERY SIMILAR — {sim:.1f}% match — follow this pattern closely]:"
+                )
+            else:
+                label = f" [{sim:.1f}% match]" if sim is not None else ""
+                formatted.append(f"Example {i}{label}:")
             formatted.append(f"Question: {ex['question']}")
             formatted.append(f"Cypher: {ex['cypher']}")
             formatted.append("")
-        
+
         return "\n".join(formatted)
 
     def get_formatted_context(self, query: str) -> str:
         """
         Retrieves the top-k most relevant examples and formats them into a string.
+        Uses similarity search with scores so the prompt can emphasize close matches.
         """
         if not self.vector_store:
             raise RuntimeError("Vector store not initialized. Index loading failed.")
 
-        # 1. SEARCH: Use MMR (Maximal Marginal Relevance) for diversity
         start_time = time.time()
-        docs = self.vector_store.max_marginal_relevance_search(
-            query, 
-            k=self.k, 
-            fetch_k=10
+        docs_and_scores = self.vector_store.similarity_search_with_score(
+            query, k=self.k
         )
         search_time = time.time() - start_time
         print(f"⏱ Example search took {search_time:.3f}s")
-        
-        # 2. Extract metadata from Document objects
-        examples = [doc.metadata for doc in docs]
-        
-        # 3. FORMAT: Iterate through the results and build the string
-        return self.format_examples_as_string(examples)
+
+        examples = []
+        sim_scores = []
+        for doc, l2_dist in docs_and_scores:
+            examples.append(doc.metadata)
+            sim_scores.append(self._l2_to_similarity(l2_dist))
+
+        # Log scores so they appear in the benchmark report
+        for i, (ex, sim) in enumerate(zip(examples, sim_scores), 1):
+            marker = " ★ VERY SIMILAR" if sim >= 85.0 else ""
+            print(f"  Example {i}: {sim:.1f}%{marker} — {ex['question'][:60]}")
+
+        return self.format_examples_as_string(examples, sim_scores)

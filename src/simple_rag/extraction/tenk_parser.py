@@ -113,6 +113,8 @@ class TenKParser:
                 
                 # --- Extract DEF 14A Data ---
                 if exec_comp_obj:
+                    tqdm.write(f"[{ticker}] Exec comp: {exec_comp_obj}")
+                    print(exec_comp_obj)
                     # Note: We pass the URL here based on previous user implementation
                     self.extractor.extract_executive_compensation(companies[ticker], exec_comp_obj, metadata, exec_comp_filing.url)
                 
