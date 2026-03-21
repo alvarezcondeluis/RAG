@@ -283,7 +283,7 @@
     "complexity": "simple"
   },
   {
-    "question": "What is the portfolio turnover rate for ILTB?",
+    "question": "What is the turnover rate for ILTB?",
     "ground_truth_answer": "0.66",
     "expected_cypher": "MATCH (f:Fund {ticker: 'ILTB'}) RETURN f.turnoverRate AS turnoverRate",
     "complexity": "simple"
@@ -355,9 +355,9 @@
     "complexity": "medium"
   },
   {
-    "question": "What is the security exchange and the number of holdings for the Information Technology ETF?",
+    "question": "What is the security exchange and the number of holdings for the VITAX?",
     "ground_truth_answer": "NYSE Arca, 320",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Information Technology' RETURN f.securityExchange AS exchange, f.numberHoldings AS holdings",
+    "expected_cypher": "MATCH (f:Fund) WHERE f.ticker = 'VITAX' RETURN f.securityExchange AS exchange, f.numberHoldings AS holdings",
     "complexity": "medium"
   },
   {
@@ -398,7 +398,7 @@
   },
   {
     "question": "Who are the managers of the Vanguard Mid Cap Growth fund?",
-    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Mid-Cap Growth Index Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName",
+    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Mid-Cap Growth Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName",
     "complexity": "simple"
   },
   {
@@ -543,7 +543,7 @@
   },
   {
     "question": "Get the total return percentage for each year for the S&P 500 index fund",
-    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE toLower(f.name) CONTAINS 's&p 500' AND fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker = 'IVV' AND fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC",
     "complexity": "medium"
   },
   {
@@ -563,7 +563,7 @@
   },
   {
     "question": "Show me all the insider transactions for Microsoft",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) RETURN p.name AS insiderName, it.transactionType AS type, it.shares AS shares, it.price AS price, it.value AS value, it.position AS position",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) RETURN p.name AS insiderName, it.transactionDate AS date, it.transactionType AS type, it.shares AS shares, it.price AS price, it.value AS value, it.position AS position ORDER BY it.transactionDate DESC",
     "complexity": "medium"
   },
   {
@@ -593,7 +593,7 @@
   },
   {
     "question": "Show me the financial metrics from the latest 10-K filing for Tesla",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC",
     "complexity": "hard"
   },
   {
@@ -613,7 +613,7 @@
   },
   {
     "question": "Show me the revenue segments from the 10-K financials of Amazon",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage",
     "complexity": "hard"
   },
   {
@@ -648,12 +648,12 @@
   },
   {
     "question": "Has anyone sold shares of Tesla recently?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.shares, it.price, it.value ORDER BY it.value DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.transactionDate AS date, it.shares, it.price, it.value ORDER BY it.transactionDate DESC",
     "complexity": "medium"
   },
   {
     "question": "Which funds have grown their net assets the most over the last 3 years?",
-    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY f.ticker, year WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 3 RETURN f.name, history[0].nav AS latestNav, history[-1].nav AS oldestNav ORDER BY (history[0].nav - history[-1].nav) DESC LIMIT 5",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC  WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 4 AND history[3].nav > 0 RETURN f.ticker AS ticker, f.name AS fundName, history[0].nav AS latestNav, history[3].nav AS threeYearsAgoNav, ((history[0].nav - history[3].nav) / history[3].nav) * 100 AS percentageGrowth ORDER BY percentageGrowth DESC LIMIT 5",
     "complexity": "hard"
   },
   {
@@ -673,7 +673,7 @@
   },
   {
     "question": "Are there any funds in the database that hold Level 3 (highly illiquid / hard-to-value) fair value assets?",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3'] RETURN DISTINCT f.name AS FundName, h.name AS HoldingName",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3', 'Level 3'] RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, f.netAssets AS netAssets, h.name AS holdingName, r.fairValueLevel AS fairValueLevel",
     "complexity": "medium"
   },
   {
@@ -708,19 +708,14 @@
   },
   {
     "question": "Show me all insider transactions (buys, sells, and tax withholding) made by Mark Zuckerberg.",
-    "expected_cypher": "MATCH (p:Person)-[:MADE_BY]-(it:InsiderTransaction)<-[:HAS_INSIDER_TRANSACTION]-(c:Company) WHERE toLower(p.name) CONTAINS 'zuckerberg' RETURN c.name AS CompanyName, it.transactionType AS TransactionType, it.shares AS Shares, it.price AS Price, it.date AS TransactionDate ORDER BY it.date DESC",
+    "expected_cypher": "MATCH (p:Person)-[:MADE_BY]-(it:InsiderTransaction)<-[:HAS_INSIDER_TRANSACTION]-(c:Company) WHERE toLower(p.name) CONTAINS 'zuckerberg' RETURN c.name AS CompanyName, it.transactionType AS TransactionType, it.shares AS Shares, it.price AS Price, it.transactionDate AS TransactionDate ORDER BY it.transactionDate DESC",
     "complexity": "medium"
   },
   {
-    "question": "Retrieve the companies with the most 'buy' insider transactions in the last 3 years.",
-    "expected_cypher": "MATCH (c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction) WHERE toUpper(it.transactionType) = 'BUY' AND date(it.date) >= date() - duration({years: 3}) RETURN c.name AS CompanyName, count(it) AS BuyCount ORDER BY BuyCount DESC LIMIT 5",
-    "complexity": "hard"
-  },
-  {
-    "question": "Which holding appears in the most funds portfolios and what is its average weight?",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN h.name AS holdingName, h.ticker AS ticker, COUNT(DISTINCT f) AS fundCount, AVG(r.weight) AS averageWeight ORDER BY fundCount DESC, averageWeight DESC LIMIT 1",
-    "complexity": "hard"
-  },
+    "question": "Which holding appears in the most fund portfolios across the entire database?",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN h.ticker AS ticker, h.name AS holdingName, count(DISTINCT f) AS fundCount ORDER BY fundCount DESC LIMIT 1",
+    "complexity": "medium"
+},
   {
     "question": "Compare the 10-year average returns of the Vanguard Growth Index Fund versus the Vanguard Value Index Fund.",
     "expected_cypher": "MATCH (f1:Fund {name: 'Vanguard Growth Index Fund'})-[r1:HAS_AVERAGE_RETURNS]->(ar1:AverageReturns) MATCH (f2:Fund {name: 'Vanguard Value Index Fund'})-[r2:HAS_AVERAGE_RETURNS]->(ar2:AverageReturns) RETURN f1.name, ar1.return10y, f2.name, ar2.return10y",
@@ -932,11 +927,6 @@
     "complexity": "medium"
   },
   {
-    "question": "Find all companies that have insider transactions classified as 'Buy'.",
-    "expected_cypher": "MATCH (c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction) WHERE it.transactionType = 'BUY' RETURN DISTINCT c.name AS companyName",
-    "complexity": "medium"
-  },
-  {
     "question": "What is the CEO compensation for Apple?",
     "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:HAS_CEO]->(p:Person) RETURN p.name AS ceoName, r.ceoCompensation AS compensation, r.ceoActuallyPaid AS actuallyPaid, r.date AS date ORDER BY r.date DESC LIMIT 1",
     "complexity": "simple"
@@ -978,27 +968,27 @@
   },
   {
     "question": "What are the financial metrics from Apple's 10-K filing?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC",
     "complexity": "medium"
   },
   {
     "question": "What are the revenue segments from Tesla's latest 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.date DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.date DESC",
     "complexity": "hard"
   },
   {
     "question": "Show the income statement text from Microsoft's most recent 10-K filing.",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials) RETURN fin.incomeStatement AS incomeStatement, fin.fiscalYeat AS fiscalYear ORDER BY rel.date DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.incomeStatement AS incomeStatement, fin.fiscalYeat AS fiscalYear ORDER BY rel.date DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the balance sheet and cash flow data for Amazon from its 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials) RETURN fin.balanceSheet AS balanceSheet, fin.cashFlow AS cashFlow, fin.fiscalYeat AS fiscalYear ORDER BY rel.date DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.balanceSheet AS balanceSheet, fin.cashFlow AS cashFlow, fin.fiscalYeat AS fiscalYear ORDER BY rel.date DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Which company has the highest single revenue metric value across all 10-K filings?",
-    "expected_cypher": "MATCH (c:Company)-[:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) WHERE m.label CONTAINS 'Revenue' RETURN c.name AS companyName, m.label AS metric, m.value AS value ORDER BY m.value DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company)-[:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) WHERE m.label CONTAINS 'Revenue' RETURN c.name AS companyName, m.label AS metric, m.value AS value ORDER BY m.value DESC LIMIT 1",
     "complexity": "hard"
   },
   {

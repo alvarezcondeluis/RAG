@@ -12,7 +12,7 @@ load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
 class Config:
     # Neo4j Settings (matching docker-compose.yml credentials)
-    NEO4J_URL = os.getenv("NEO4J_URL", "bolt://localhost:7687")
+    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
     NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")

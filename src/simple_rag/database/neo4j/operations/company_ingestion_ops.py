@@ -501,7 +501,8 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             MATCH (doc:Document {accesionNumber: $accession_number})
                             
                             MERGE (it:InsiderTransaction {id: $trade_id})
-                            SET it.position = $position,
+                            SET it.transactionDate = $transaction_date,
+                                it.position = $position,
                                 it.transactionType = $transaction_type,
                                 it.shares = $shares,
                                 it.price = $price,
@@ -519,6 +520,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                                 "insider_name": trade.insider_name,
                                 "accession_number": form4_accession,
                                 "trade_id": trade_id,
+                                "transaction_date": trade.date,
                                 "position": trade.position,
                                 "transaction_type": trade.transaction_type,
                                 "shares": trade.shares,

@@ -14,10 +14,17 @@ logger = logging.getLogger(__name__)
 class HoldingsOperations(Neo4jDatabaseBase):
     """Fund holdings, charts, and general query operations."""
 
-    def create_fund_holdings(self, ticker: str, series_id: str, report_date: Optional[date], holdings_df):
+    def create_fund_holdings(self, ticker: str, series_id: str, report_date: Optional[date], holdings_df, nport_metadata: Optional[Dict[str, Any]] = None):
         """
         High-Performance Ingestion for Large Funds (>4k holdings).
         Uses Batching + CREATE logic for maximum speed.
+        
+        Args:
+            ticker: Fund ticker symbol
+            series_id: Portfolio series ID
+            report_date: Reporting date for the portfolio
+            holdings_df: DataFrame containing holdings data
+            nport_metadata: Optional metadata dict with keys: accession_number, filing_date, reporting_date, url, form
         """
         if series_id is None:
             print(f"⚠️ No series_id provided for {ticker}, skipping portfolio and holdings creation")
@@ -67,13 +74,37 @@ class HoldingsOperations(Neo4jDatabaseBase):
         ON MATCH SET
             r.date = $report_date,
             r.updatedAt = timestamp()
+        
+        // Create Document node and EXTRACTED_FROM relationship if metadata provided
+        WITH port
+        FOREACH (_ IN CASE WHEN $has_metadata THEN [1] ELSE [] END |
+            MERGE (doc:Document {accessionNumber: $accession_number})
+            ON CREATE SET
+                doc.url = $url,
+                doc.type = $form,
+                doc.filingDate = $filing_date,
+                doc.reportingDate = $reporting_date,
+                doc.createdAt = timestamp()
+            MERGE (port)-[:EXTRACTED_FROM]->(doc)
+        )
         """
-        self._execute_write(setup_query, {
+        
+        # Prepare metadata parameters
+        has_metadata = nport_metadata is not None
+        metadata_params = {
             "fund_ticker": ticker, 
             "portfolio_id": portfolio_id, 
             "report_date": report_date,
-            "total_count": total_count
-        })
+            "total_count": total_count,
+            "has_metadata": has_metadata,
+            "accession_number": nport_metadata.accession_number if has_metadata else None,
+            "url": nport_metadata.url if has_metadata else None,
+            "form": nport_metadata.form if has_metadata else None,
+            "filing_date": nport_metadata.filing_date if has_metadata else None,
+            "reporting_date": nport_metadata.reporting_date if has_metadata else None
+        }
+        
+        self._execute_write(setup_query, metadata_params)
 
         # 3. BATCHED INSERTION (The Speed Fix)
         # We process holdings in chunks of 1,000 to prevent memory overload

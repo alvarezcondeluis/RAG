@@ -684,7 +684,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             MATCH (doc:Document {id: $accession_number})
             
             MERGE (it:InsiderTransaction {id: $trade_id})
-            SET it.position = $position,
+            SET it.transactionDate = $transaction_date,
+                it.position = $position,
                 it.transactionType = $transaction_type,
                 it.shares = $shares,
                 it.price = $price,
@@ -703,6 +704,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 "insider_name": insider_name,
                 "accession_number": form4_accession,
                 "trade_id": trade_id,
+                "transaction_date": transaction_date,
                 "position": position,
                 "transaction_type": transaction_type,
                 "shares": shares,

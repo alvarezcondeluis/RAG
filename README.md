@@ -76,7 +76,7 @@ The application depends on a running Neo4j Database instance. A Docker Compose c
    Ensure you have a `.env` file within the `neo4j` folder containing your authentication variables. An example structure:
 
    ```env
-   NEO4J_URL=bolt://localhost:7687
+   NEO4J_URI=bolt://localhost:7687
    NEO4J_PASSWORD=YourPassword123
    NEO4J_DATABASE=neo4j
    ```

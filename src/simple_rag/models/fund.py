@@ -3,7 +3,7 @@ from decimal import Decimal
 import pandas as pd
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from enum import Enum
-import re
+
 from datetime import date, datetime
 from decimal import Decimal
 

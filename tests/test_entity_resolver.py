@@ -49,7 +49,7 @@ class TestEntityResolver:
     def neo4j_driver(self):
         """Create Neo4j driver connection"""
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         yield driver
@@ -311,7 +311,7 @@ class TestHyphenationIssues:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=False)
@@ -391,7 +391,7 @@ class TestTickerHallucinations:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=False)
@@ -519,7 +519,7 @@ class TestFuzzyMatching:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=False)
@@ -571,7 +571,7 @@ class TestMultiEntityExtraction:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -619,7 +619,7 @@ class TestEdgeCases:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -688,7 +688,7 @@ class TestRealWorldScenarios:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -747,7 +747,7 @@ class TestCaseSensitivity:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -796,7 +796,7 @@ class TestNumericAndSymbols:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -844,7 +844,7 @@ class TestContextualQueries:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -906,7 +906,7 @@ class TestBoundaryConditions:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -953,7 +953,7 @@ class TestStopwordHandling:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -990,7 +990,7 @@ class TestTypoVariations:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -1048,7 +1048,7 @@ class TestMultiWordMatching:
     @pytest.fixture(scope="class")
     def resolver(self):
         driver = GraphDatabase.driver(
-            settings.NEO4J_URL,
+            settings.NEO4J_URI,
             auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
         )
         resolver = EntityResolver(driver, debug=True)
@@ -1085,7 +1085,7 @@ def test_integration_example():
     print("="*60)
     
     driver = GraphDatabase.driver(
-        settings.NEO4J_URL,
+        settings.NEO4J_URI,
         auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
     )
     

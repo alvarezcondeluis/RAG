@@ -61,8 +61,11 @@ DETAILED_SCHEMA = """
 (:Portfolio)-[:HAS_HOLDING {shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile}]->(:Holding {
     name, ticker, isin, lei, category, category_desc, issuer_category, businessAddress})
 (:Portfolio)-[:EXTRACTED_FROM]->(:Document)
-# Financial Highlights
-(:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT {year}]->(:FinancialHighlight {
+# Financial Highlights — IMPORTANT: 'year' is on the RELATIONSHIP, not the node!
+# ALWAYS use: (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) and access r.year
+(:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT {
+    year                         # ⚠️ CRITICAL: Year is a RELATIONSHIP property! Use r.year, NOT fh.year
+}]->(:FinancialHighlight {
     turnover,                    # Portfolio turnover rate (percentage)
     expenseRatio,                # Total expense ratio (percentage)
     totalReturn,                 # Total return for the period (percentage)
@@ -70,6 +73,8 @@ DETAILED_SCHEMA = """
     netAssetsValueBeginning,     # Price of one share at period start
     netAssetsValueEnd,           # Price of one share at period end
     netIncomeRatio               # Net investment income ratio (percentage)
+})
+# Example: MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN r.year, fh.totalReturn
 
 # ============================================================
 # === COMPANY STRUCTURE (10-K Filings) ===
@@ -96,7 +101,7 @@ DETAILED_SCHEMA = """
 # NOTE: Properties node uses 'fullText', not 'text'
 (:Filing10K)-[:HAS_PROPERTIES_CHUNK]->(:Section:Properties {id, fullText, embedding})
 
-(:Filing10K)-[:HAS_FINACIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
+(:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
 
 # === COMPANY PEOPLE & COMPENSATION ===
 (:Company)-[:HAS_CEO {ceoCompensation, ceoActuallyPaid, date}]->(:Person {name})
@@ -104,7 +109,7 @@ DETAILED_SCHEMA = """
 (:CompensationPackage)-[:AWARDED_BY]->(:Company)
 (:CompensationPackage)-[:DISCLOSED_IN]->(:Document)
 (:Company)-[:HAS_INSIDER_TRANSACTION]->(:InsiderTransaction {
-    position, transactionType, shares, price, value, remainingShares
+    transactionDate, position, transactionType, shares, price, value, remainingShares
 })
 (:InsiderTransaction)-[:MADE_BY]->(:Person {name})
 (:InsiderTransaction)-[:EXTRACTED_FROM]->(:Document)
@@ -124,4 +129,5 @@ DETAILED_SCHEMA = """
 # 8. If you do not know the value of a property, DO NOT include it in the curly braces {}.
 # 9. Whenever it exists, return the document information from which it has been extracted.
 # 10. Do not forget the r in the relationship name like (n:Label)-[r:RELATIONSHIP]->(m:Label) and use it in the return statement.
+# 11. ⚠️ CRITICAL: For HAS_FINANCIAL_HIGHLIGHT, 'year' is on the RELATIONSHIP (r.year), NOT on the FinancialHighlight node (fh.year does NOT exist)!
 """

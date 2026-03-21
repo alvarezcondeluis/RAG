@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from simple_rag.rag.query.query_classification import QueryClassifier, QueryCategory, LABELS
 from simple_rag.rag.text2cypher import CypherTranslator
 from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
+from simple_rag.rag.context_enrichment import ContextEnricher
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,7 @@ class QueryResult:
     data: Any = None
     error: Optional[str] = None
     requires_vector_search: bool = False
+    enrichment: Dict[str, Any] = field(default_factory=dict)
 
 
 # ─── Handler ──────────────────────────────────────────────────────────────────
@@ -199,6 +201,12 @@ class QueryHandler:
 
         self.neo4j_driver = neo4j_driver
         self.confidence_threshold = confidence_threshold
+
+        # Context enrichment engine (reuses the translator's entity resolver)
+        self.enricher = ContextEnricher(
+            neo4j_driver=neo4j_driver,
+            entity_resolver=self.translator.entity_resolver,
+        )
 
         print("✓ QueryHandler ready")
 
@@ -308,6 +316,14 @@ class QueryHandler:
         # Step 5 — optionally execute
         if execute and cypher:
             result.data = self._execute(cypher)
+
+        # Step 6 — context enrichment (supplementary queries for richer LLM context)
+        if execute and result.data is not None:
+            result.enrichment = self.enricher.enrich(
+                category=top_label,
+                user_query=user_query,
+                main_results=result.data,
+            )
 
         total_pipeline_time = time.time() - start_pipeline
         print(f"\n⏱️  Pipeline timings:")

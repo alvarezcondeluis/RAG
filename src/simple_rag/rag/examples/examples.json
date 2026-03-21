@@ -213,11 +213,11 @@
   },
   {
     "question": "What are the insider transactions for Microsoft?",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) RETURN p.name AS insiderName, it.transactionType AS type, it.shares AS shares, it.price AS price, it.value AS value, it.position AS position"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) RETURN p.name AS insiderName, it.transactionDate AS date, it.transactionType AS type, it.shares AS shares, it.price AS price, it.value AS value, it.position AS position ORDER BY it.transactionDate DESC"
   },
   {
     "question": "Show me the financial metrics from the 10-K filing for Tesla.",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC"
   },
   {
     "question": "Return both the expense ratio and the turnover rate for VTI.",
@@ -233,7 +233,7 @@
   },
   {
     "question": "Show me the revenue segments from the 10-K of Amazon.",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage"
   },
   {
     "question": "Which companies have a CEO who is also a fund manager?",
@@ -278,6 +278,10 @@
   {
     "question": "Compare the expense ratios of all ETF share class funds.",
     "cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'ETF'}) RETURN f.ticker AS ticker, f.name AS fundName, f.expenseRatio AS expenseRatio ORDER BY f.expenseRatio ASC"
+  },
+  {
+    "question": "What is the fund with the most average return since inception?",
+    "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE ar.returnInception IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, ar.returnInception AS returnSinceInception ORDER BY ar.returnInception DESC LIMIT 1"
   },
   {
     "question": "What is the average expense ratio across all funds managed by Vanguard?",
@@ -486,7 +490,7 @@
   },
   {
     "question": "List all revenue and cost segments from Apple's 10-K filings.",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINACIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.date DESC"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.date DESC"
   },
   {
     "question": "Which funds hold companies that have disclosed legal proceedings in their 10-K?",
@@ -498,15 +502,15 @@
   },
   {
     "question": "Has anyone sold shares of Tesla recently?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.shares, it.price, it.value ORDER BY it.value DESC"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.transactionDate AS date, it.shares, it.price, it.value ORDER BY it.transactionDate DESC"
   },
   {
     "question": "Are there any recent insider sales of Tesla stock?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.shares, it.price, it.value ORDER BY it.value DESC"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.transactionDate AS date, it.shares, it.price, it.value ORDER BY it.transactionDate DESC"
   },
   {
     "question": "Who has been selling TSLA shares in the latest insider transactions?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.shares, it.price, it.value ORDER BY it.value DESC"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.transactionDate AS date, it.shares, it.price, it.value ORDER BY it.transactionDate DESC"
   },
   {
     "question": "What is the net profit margin for Tesla based on its latest income statement?",
@@ -567,5 +571,113 @@
   {
     "question": "Compare the revenue and net income for Google in its latest annual report.",
     "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, mRev.value AS Revenue, mNet.value AS NetIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
+  },
+  {
+    "question": "Get the total return and expense ratio for each year for the VFIAX fund",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn, fh.expenseRatio AS expenseRatio ORDER BY r.year DESC"
+  },
+  {
+    "question": "Show me the NAV at the beginning and end of each year for VTI",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueBeginning IS NOT NULL AND fh.netAssetsValueEnd IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.netAssetsValueBeginning AS navBeginning, fh.netAssetsValueEnd AS navEnd ORDER BY r.year DESC"
+  },
+  {
+    "question": "What were the turnover rates for VOO over the years?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.turnover AS turnover ORDER BY r.year DESC"
+  },
+  {
+    "question": "Show me the net income ratio for each year for the BND fund",
+    "cypher": "MATCH (f:Fund {ticker: 'BND'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netIncomeRatio IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.netIncomeRatio AS netIncomeRatio ORDER BY r.year DESC"
+  },
+  {
+    "question": "Get the total net assets for VTSAX in each year",
+    "cypher": "MATCH (f:Fund {ticker: 'VTSAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssets IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.netAssets AS netAssets ORDER BY r.year DESC"
+  },
+  {
+    "question": "Show me all financial highlight metrics for VBK from the last 3 years",
+    "cypher": "MATCH (f:Fund {ticker: 'VBK'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, r.year AS year, fh.netAssetsValueBeginning AS navBeginning, fh.netAssetsValueEnd AS navEnd, fh.totalReturn AS totalReturn, fh.expenseRatio AS expenseRatio, fh.turnover AS turnover, fh.netIncomeRatio AS netIncomeRatio ORDER BY r.year DESC LIMIT 3"
+  },
+  {
+    "question": "What was the total return for VDIGX in 2022?",
+    "cypher": "MATCH (f:Fund {ticker: 'VDIGX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE r.year = 2022 AND fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn"
+  },
+  {
+    "question": "Show me the expense ratio and turnover for each year for the Vanguard Wellington Fund",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Wellington' RETURN f.ticker AS ticker, r.year AS year, fh.expenseRatio AS expenseRatio, fh.turnover AS turnover ORDER BY r.year DESC"
+  },
+  {
+    "question": "Which funds have grown their net assets the most over the last 3 years?",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 4 AND history[3].nav > 0 RETURN f.ticker AS ticker, f.name AS fundName, history[0].nav AS latestNav, history[3].nav AS threeYearsAgoNav, ((history[0].nav - history[3].nav) / history[3].nav) * 100 AS percentageGrowth ORDER BY percentageGrowth DESC LIMIT 5"
+  },
+  {
+    "question": "How much has VTI's share price increased over the last 5 years?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 6 AND history[5].nav > 0 RETURN f.ticker AS ticker, f.name AS fundName, history[0].year AS latestYear, history[0].nav AS latestNav, history[5].year AS fiveYearsAgoYear, history[5].nav AS fiveYearsAgoNav, ((history[0].nav - history[5].nav) / history[5].nav) * 100 AS percentageGrowth"
+  },
+  {
+    "question": "Show me the NAV growth for VFIAX comparing 2023 to 2020",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC WITH f, collect({year: year, nav: nav}) AS history RETURN f.ticker AS ticker, f.name AS fundName, history[0].year AS latestYear, history[0].nav AS latestNav, history[3].year AS threeYearsAgoYear, history[3].nav AS threeYearsAgoNav, history[0].nav - history[3].nav AS absoluteGrowth"
+  },
+  {
+    "question": "Which fund had the highest NAV growth percentage in the last 2 years?",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 3 AND history[2].nav > 0 RETURN f.ticker AS ticker, f.name AS fundName, history[0].nav AS latestNav, history[2].nav AS twoYearsAgoNav, ((history[0].nav - history[2].nav) / history[2].nav) * 100 AS percentageGrowth ORDER BY percentageGrowth DESC LIMIT 1"
+  },
+  {
+    "question": "Compare VOO's NAV at the beginning and end of the last 4 years",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 5 RETURN f.ticker AS ticker, f.name AS fundName, history[0].year AS currentYear, history[0].nav AS currentNav, history[4].year AS fourYearsAgoYear, history[4].nav AS fourYearsAgoNav, ((history[0].nav - history[4].nav) / history[4].nav) * 100 AS percentageGrowth"
+  },
+  {
+    "question": "Show me the year-over-year NAV changes for BND over the last 3 years",
+    "cypher": "MATCH (f:Fund {ticker: 'BND'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueEnd IS NOT NULL WITH f, r.year AS year, fh.netAssetsValueEnd AS nav ORDER BY year DESC WITH f, collect({year: year, nav: nav}) AS history WHERE size(history) >= 4 RETURN f.ticker AS ticker, f.name AS fundName, history[0].year AS year1, history[0].nav AS nav1, history[1].year AS year2, history[1].nav AS nav2, history[2].year AS year3, history[2].nav AS nav3, history[3].year AS year4, history[3].nav AS nav4"
+  },
+  {
+    "question": "Show me all holdings in VTI with fair value level 1",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [1, '1', 'Level 1'] RETURN h.ticker AS ticker, h.name AS holdingName, h.isin AS isin, r.fairValueLevel AS fairValueLevel, r.weight AS weight ORDER BY r.weight DESC"
+  },
+  {
+    "question": "Which funds hold Level 2 fair value assets?",
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [2, '2', 'Level 2'] RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, f.netAssets AS netAssets, h.name AS holdingName, r.fairValueLevel AS fairValueLevel"
+  },
+  {
+    "question": "Are there any funds in the database that hold Level 3 highly illiquid assets?",
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3', 'Level 3'] RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, f.netAssets AS netAssets, h.name AS holdingName, r.fairValueLevel AS fairValueLevel"
+  },
+  {
+    "question": "What percentage of VOO's holdings are fair value level 1?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WITH count(h) AS total, count(CASE WHEN r.fairValueLevel IN [1, '1', 'Level 1'] THEN 1 END) AS level1Count RETURN (level1Count * 100.0 / total) AS percentageLevel1"
+  },
+  {
+    "question": "Show me the top 10 holdings in BND that are fair value level 1 or level 2",
+    "cypher": "MATCH (f:Fund {ticker: 'BND'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [1, '1', 'Level 1', 2, '2', 'Level 2'] RETURN h.ticker AS ticker, h.name AS holdingName, r.fairValueLevel AS fairValueLevel, r.weight AS weight, r.marketValue AS marketValue ORDER BY r.weight DESC LIMIT 10"
+  },
+  {
+    "question": "List all fair value levels present in the VFIAX portfolio",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IS NOT NULL RETURN DISTINCT r.fairValueLevel AS fairValueLevel ORDER BY fairValueLevel"
+  },
+  {
+    "question": "What is the average number of holdings across all Vanguard funds?",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE p.name CONTAINS 'Vanguard' RETURN avg(f.numberHoldings) AS averageHoldings"
+  },
+  {
+    "question": "What is the average expense ratio for all funds in the database?",
+    "cypher": "MATCH (f:Fund) WHERE f.expenseRatio IS NOT NULL RETURN avg(f.expenseRatio) AS averageExpenseRatio"
+  },
+  {
+    "question": "Show me the average turnover rate for all Vanguard index funds",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE p.name CONTAINS 'Vanguard' AND f.name CONTAINS 'Index' AND f.turnoverRate IS NOT NULL RETURN avg(f.turnoverRate) AS averageTurnoverRate"
+  },
+  {
+    "question": "What is the total net assets under management across all funds?",
+    "cypher": "MATCH (f:Fund) WHERE f.netAssets IS NOT NULL RETURN sum(f.netAssets) AS totalNetAssets"
+  },
+  {
+    "question": "How many funds does each provider manage?",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN p.name AS providerName, count(f) AS fundCount ORDER BY fundCount DESC"
+  },
+  {
+    "question": "What is the average net assets for bond funds?",
+    "cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Bond' AND f.netAssets IS NOT NULL RETURN avg(f.netAssets) AS averageNetAssets"
+  },
+  {
+    "question": "Show me the minimum and maximum expense ratios across all funds",
+    "cypher": "MATCH (f:Fund) WHERE f.expenseRatio IS NOT NULL RETURN min(f.expenseRatio) AS minExpenseRatio, max(f.expenseRatio) AS maxExpenseRatio"
   }
 ]

@@ -219,6 +219,42 @@ class CypherValidator:
             )
             return result
 
+        # Step 0a: Catch IS NOT NULL, IS NULL, and other operators inside {} property filters
+        # These are conditional operators, not values, and cannot be used in property maps
+        null_check_in_braces = re.search(
+            r'\{[^}]*:\s*(?:IS\s+)?(?:NOT\s+)?NULL\s*[,}]',
+            query,
+            re.IGNORECASE
+        )
+        if null_check_in_braces:
+            result.is_valid = False
+            result.syntax_errors.append(
+                "NULL CHECK IN BRACES ERROR: You used IS NOT NULL, IS NULL, or NOT NULL "
+                "inside curly braces {}. Property maps only accept exact values (strings, numbers, booleans), "
+                "not conditional operators. Move NULL checks to a WHERE clause. "
+                "BAD:  MATCH (ar:AverageReturns {returnInception: IS NOT NULL}) "
+                "GOOD: MATCH (ar:AverageReturns) WHERE ar.returnInception IS NOT NULL"
+            )
+            return result
+        
+        # Step 0b: Catch other operators that don't belong in property maps
+        # CONTAINS, STARTS WITH, ENDS WITH, IN, etc.
+        operator_in_braces = re.search(
+            r'\{[^}]*:\s*(?:CONTAINS|STARTS\s+WITH|ENDS\s+WITH|IN\s+\[)',
+            query,
+            re.IGNORECASE
+        )
+        if operator_in_braces:
+            result.is_valid = False
+            result.syntax_errors.append(
+                "OPERATOR IN BRACES ERROR: You used a conditional operator (CONTAINS, STARTS WITH, ENDS WITH, IN) "
+                "inside curly braces {}. Property maps only accept exact values for equality matching. "
+                "Move these operators to a WHERE clause. "
+                "BAD:  MATCH (f:Fund {name: CONTAINS 'Vanguard'}) "
+                "GOOD: MATCH (f:Fund) WHERE f.name CONTAINS 'Vanguard'"
+            )
+            return result
+
         # Step 0b: Catch WHERE clause placed after RETURN
         where_after_return = re.search(r'\bRETURN\b.+\bWHERE\b', query, re.IGNORECASE | re.DOTALL)
         if where_after_return:
