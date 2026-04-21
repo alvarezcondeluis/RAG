@@ -7,7 +7,6 @@ all data to disk by default. The library caches in memory for performance.
 Solution: We need to explicitly download and save the filing HTML/text to disk.
 """
 import time
-import os
 from pathlib import Path
 from edgar import Company, set_identity
 from tqdm import tqdm

@@ -1,4 +1,4 @@
-import re
+
 import pandas as pd
 
 class XBRLUtils:
@@ -8,6 +8,34 @@ class XBRLUtils:
     def clean_text(tag) -> str:
         if not tag: return "N/A"
         return tag.text.strip().replace('\n', ' ')
+
+    @staticmethod
+    def clean_numeric(tag) -> str:
+        """Like clean_text but applies iXBRL scale to return zero-scale value as string.
+        
+        Scale attribute values: 0=units, 3=thousands, 6=millions, 9=billions.
+        Returns "N/A" if tag is missing, the scaled integer string if numeric,
+        or plain text fallback if parsing fails.
+        """
+        if not tag:
+            return "N/A"
+        raw = tag.text.strip().replace(',', '').replace('\n', ' ')
+        _SCALE_WORDS = {
+            'zero': 0, 'hundreds': 2, 'thousands': 3,
+            'millions': 6, 'billions': 9,
+        }
+        scale_attr = tag.get('scale') or tag.get('Scale')
+        if scale_attr is not None:
+            try:
+                exponent = _SCALE_WORDS.get(str(scale_attr).strip().lower(), int(scale_attr))
+                if exponent < 0:
+                    return raw
+                multiplier = 10 ** exponent
+                scaled = int(float(raw) * multiplier)
+                return str(scaled)
+            except (ValueError, TypeError):
+                pass
+        return raw
 
     @staticmethod
     def stitch_block(start_tag, soup) -> str:
