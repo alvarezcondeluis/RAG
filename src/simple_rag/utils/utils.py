@@ -42,7 +42,7 @@ class XBRLUtils:
         """Reconstructs fragmented HTML blocks via 'continuedAt'."""
         if not start_tag: return ""
         
-        full_html = str(start_tag)
+        parts = [str(start_tag)]
         current_tag = start_tag
         
         # Limit 50 to prevent infinite loops
@@ -52,11 +52,11 @@ class XBRLUtils:
             
             next_tag = soup.find(id=next_id)
             if next_tag:
-                full_html += str(next_tag)
+                parts.append(str(next_tag))
                 current_tag = next_tag
             else:
                 break
-        return full_html
+        return "".join(parts)
 
 
     @staticmethod

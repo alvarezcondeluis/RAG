@@ -24,7 +24,9 @@ Usage::
 """
 
 import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -246,6 +248,136 @@ class FilingRetriever:
             enrich=enrich,
             verbose=verbose,
         )
+
+    def get_ncsr_by_cik_parallel(
+        self,
+        cik: str,
+        *,
+        year: Optional[str] = None,
+        max_filings: Optional[int] = None,
+        vanguard: bool = False,
+        enrich: bool = True,
+        max_workers: int = 4,
+        verbose: bool = False,
+    ) -> NCSRResult:
+        """Download N-CSR filings sequentially, then parse them in parallel.
+
+        Phase 1 (sequential): Downloads each filing's HTML on the main
+        process so that EDGAR rate-limiting and cookies are respected.
+
+        Phase 2 (parallel): Dispatches the already-downloaded HTML
+        strings to a :class:`ProcessPoolExecutor` so CPU-bound
+        BeautifulSoup / ``pd.read_html`` work runs concurrently.
+
+        Duplicate-ticker detection and enrichment are applied after all
+        workers finish, matching the behaviour of
+        :meth:`get_ncsr_by_cik`.
+
+        Args:
+            cik: SEC Central Index Key (e.g. ``"0000102909"`` for Vanguard).
+            year: Optional year filter (e.g. ``"2025"``).
+            max_filings: Cap the number of filings to download/parse.
+            vanguard: Prepend *"Vanguard "* to fund names.
+            enrich: Run the annual-returns + highlights enrichment pipeline.
+            max_workers: Number of parallel worker processes (default 4).
+            verbose: Print progress info to stdout.
+
+        Returns:
+            :class:`NCSRResult` containing all extracted funds and highlights.
+        """
+        entity = Entity(cik)
+        all_filings = entity.get_filings(form="N-CSR")
+
+        if not all_filings:
+            logger.warning(f"[CIK {cik}] No N-CSR filings found")
+            return NCSRResult()
+
+        if year:
+            filings_to_process = [
+                f for f in all_filings
+                if f.report_date and str(f.report_date).startswith(year)
+            ]
+        else:
+            filings_to_process = list(all_filings)
+
+        if max_filings:
+            filings_to_process = filings_to_process[:max_filings]
+
+        # ── Phase 1: sequential HTML download ────────────────────────────
+        filing_data_list: List[tuple] = []
+        for filing in filings_to_process:
+            if verbose:
+                print(f"Downloading: {filing.report_date}")
+            try:
+                html_content = filing.html()
+                if html_content:
+                    filing_data_list.append((
+                        html_content,
+                        filing.report_date,
+                        filing.accession_number,
+                        filing.filing_date,
+                        filing.form,
+                        filing.url,
+                    ))
+            except Exception as e:
+                logger.warning(f"[CIK {cik}] Failed to download {filing.report_date}: {e}")
+
+        if verbose:
+            print(f"Downloaded {len(filing_data_list)} filings — starting parallel parse with {max_workers} workers")
+
+        # ── Phase 2: parallel parse ───────────────────────────────────────
+        worker_fn = partial(NCSRExtractor.process_filing_data, vanguard=vanguard)
+
+        raw_results = []
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(worker_fn, fd): fd[1] for fd in filing_data_list}
+            for future in as_completed(futures):
+                report_date = futures[future]
+                try:
+                    res = future.result()
+                    if res is not None:
+                        raw_results.append(res)
+                except Exception as e:
+                    logger.warning(f"[CIK {cik}] Worker failed for {report_date}: {e}")
+
+        # Sort by report_date descending (newest first) to match sequential behaviour
+        raw_results.sort(key=lambda r: str(r["report_date"]), reverse=True)
+
+        # ── Duplicate-ticker detection (same logic as _process_ncsr_filings) ─
+        result = NCSRResult()
+        seen_tickers: set = set()
+
+        for res in raw_results:
+            funds_to_add = []
+            duplicate_found = False
+
+            for fund in res["funds"]:
+                if fund.ticker in seen_tickers:
+                    if verbose:
+                        print(f"Duplicate ticker '{fund.ticker}' — skipping filing {res['report_date']}")
+                    duplicate_found = True
+                    break
+                seen_tickers.add(fund.ticker)
+                funds_to_add.append(fund)
+
+            if not duplicate_found:
+                result.funds.extend(funds_to_add)
+                if res["df_performance"] is not None:
+                    result.financial_highlights.append(res["df_performance"])
+                result.filings_processed += 1
+
+        if verbose:
+            print(f"Extracted {len(result.funds)} unique funds from {result.filings_processed} filings")
+
+        if enrich and result.funds:
+            enrich_funds_with_annual_returns(
+                funds=result.funds,
+                financial_highlights_dfs=result.financial_highlights,
+                debug=False,
+            )
+            logger.info(f"[CIK {cik}] Enrichment complete")
+
+        return result
 
     def get_ncsr_by_accession(
         self,

@@ -503,9 +503,6 @@ class NCSRExtractor:
         # Convert to list format expected by _create_performance_dataframe
         results = list(fund_data.values())
         
-        print(f"Total funds extracted: {len(results)}")
-        for result in results:
-            print(f"  {result['fund_name']} - {result['share_class']}: {len(result['years'])} years")
         
         return self._create_performance_dataframe(results)
     
@@ -756,6 +753,77 @@ class NCSRExtractor:
                 logger.debug("Failed to extract tables from block: %s. Reason: %s", block_name, e)
 
         return found_tables
+
+    @staticmethod
+    def process_filing_data(filing_data: tuple, vanguard: bool = False) -> dict:
+        """Parse a single filing from a serializable tuple.
+
+        Designed to be called from a worker process via
+        ``ProcessPoolExecutor.map``.  All inputs and outputs are plain
+        Python / pickle-safe so they cross the process boundary without
+        issues.
+
+        Args:
+            filing_data: A tuple of
+                ``(html_content, report_date, accession_number,
+                   filing_date, form, url)``
+                as produced by the sequential download phase.
+            vanguard: Prepend *"Vanguard "* to fund names that don't
+                already contain it.
+
+        Returns:
+            A dict with keys:
+            ``funds``, ``all_tickers``, ``performance_tickers``,
+            ``df_performance``, ``report_date``.
+            Returns ``None`` if parsing fails.
+        """
+        try:
+            html_content, report_date, accession_number, filing_date, form, url = filing_data
+
+            parser = NCSRExtractor(html_content)
+            funds = parser.get_funds(vanguard=vanguard)
+
+            from ..models.fund import FilingMetadata as FundFilingMetadata
+            metadata = FundFilingMetadata(
+                accession_number=accession_number,
+                reporting_date=report_date,
+                filing_date=filing_date,
+                form=form,
+                url=url,
+            )
+
+            all_tickers = []
+            performance_tickers = []
+            processed_funds = []
+
+            for fund in funds:
+                fund.ncsr_metadata = metadata
+                processed_funds.append(fund)
+                all_tickers.append(fund.ticker)
+                if fund.performance_table is not None:
+                    if fund.ticker not in performance_tickers:
+                        performance_tickers.append(fund.ticker)
+
+            try:
+                df_performance = (
+                    parser.get_financial_highlights_vanguard()
+                    if vanguard
+                    else parser.get_financial_highlights_ishares()
+                )
+            except Exception:
+                df_performance = None
+
+            return {
+                "funds": processed_funds,
+                "all_tickers": all_tickers,
+                "performance_tickers": performance_tickers,
+                "df_performance": df_performance,
+                "report_date": report_date,
+            }
+
+        except Exception as e:
+            logger.error("process_filing_data failed for %s: %s", filing_data[1] if filing_data else "?", e)
+            return None
 
     def fund_summary(self, fund_list: List[FundData]) -> str:
         
