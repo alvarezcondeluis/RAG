@@ -37,11 +37,153 @@ from .nport import NPortProcessor, process_portfolio_holdings
 from .prospectus_parser import ProspectusExtractor
 from .tenk_parser import TenKParser
 from ..models.company import CompanyEntity
-from ..models.fund import FundData, PortfolioHolding
+from ..models.fund import FundData, PortfolioHolding, NonDerivatives, Derivatives
 from ..models.fund import FilingMetadata as FundFilingMetadata
 from ..utils.fund_mapper import enrich_funds_with_annual_returns
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Module-level worker (must be top-level for ProcessPoolExecutor pickling)
+# ---------------------------------------------------------------------------
+
+def _process_nport_filing_worker(filing, ticker: str, company_json_path: str, email_identity: str, min_similarity: float = 0.74) -> Optional[dict]:
+    """Parse a single NPORT-P filing in a worker process.
+
+    Args:
+        filing: EDGAR filing object.
+        ticker: Seed ticker symbol used to fetch filings.
+        company_json_path: Path to company_tickers.json for ticker enrichment.
+        email_identity: EDGAR identity string.
+        min_similarity: Minimum fuzzy-match similarity for ticker enrichment.
+
+    Returns:
+        Result dict or ``None`` on failure.
+    """
+    from edgar import set_identity
+    set_identity(email_identity)
+
+    try:
+        import gc
+        from .nport import NPortProcessor
+        from ..models.fund import FilingMetadata as FundFilingMetadata
+
+        xml_data = filing.obj()
+        fund_series = xml_data.get_fund_series()
+        fund_name = fund_series.name
+        series_id = fund_series.series_id
+        reporting_period = xml_data.reporting_period
+        investments = xml_data.investments
+        derivatives = getattr(xml_data, "derivatives", None)
+
+        proc = NPortProcessor(company_tickers_json_path=company_json_path, min_similarity=min_similarity)
+        holdings = proc.process_holdings(investments)
+        result_df = proc.enrich_tickers(holdings, verbose=False)
+        holdings_df = proc.to_df(holdings)
+
+        filing_metadata = FundFilingMetadata(
+            accession_number=filing.accession_number,
+            reporting_date=reporting_period,
+            filing_date=getattr(filing, "filing_date", None),
+            form=getattr(filing, "form", "NPORT-P"),
+            url=getattr(filing, "url", ""),
+        )
+
+        not_matches = result_df[result_df["matched_ticker"].isna() | (result_df["matched_ticker"] == "")]
+
+        del xml_data, proc
+        gc.collect()
+
+        return {
+            "fund_name": fund_name,
+            "series_id": series_id,
+            "reporting_period": reporting_period,
+            "holdings": holdings,
+            "holdings_df": holdings_df,
+            "result": result_df,
+            "derivatives": derivatives,
+            "not_matches": not_matches,
+            "ticker": ticker,
+            "report_date": reporting_period,
+            "nport_metadata": filing_metadata,
+        }
+    except Exception as e:
+        logger.error("_process_nport_filing_worker failed for %s / %s: %s", ticker, getattr(filing, "accession_number", "?"), e)
+        return None
+
+
+def _parse_prospectus_worker(filing_data: tuple, email_identity: str) -> tuple:
+    """Parse a single 497K filing in a worker process.
+
+    Args:
+        filing_data: ``(raw_text, accession_number, report_date,
+                        filing_date, form, url)``
+        email_identity: EDGAR identity string for rate-limit compliance.
+
+    Returns:
+        ``(ticker, ProspectusResult | None, status)`` where *status* is one
+        of ``"success"``, ``"aborted"``, ``"failed_no_ticker"``,
+        ``"failed_extraction"``, or ``"error"``.
+    """
+    try:
+        from edgar import set_identity
+        set_identity(email_identity)
+
+        raw_text, accession_number, report_date, filing_date, form, url = filing_data
+
+        from .prospectus_parser import ProspectusExtractor
+        from ..models.fund import FilingMetadata as FundFilingMetadata
+
+        parser = ProspectusExtractor.from_text(raw_text)
+        extracted_ticker = parser.get_ticker()
+
+        if not extracted_ticker:
+            return None, None, "failed_no_ticker"
+
+        extracted_ticker = str(extracted_ticker).strip().upper()
+
+        fund_data = parser.get_structured_data()
+        if not fund_data.get("objective") and not fund_data.get("strategies"):
+            return extracted_ticker, None, "failed_extraction"
+
+        try:
+            import pandas as pd
+            def _safe_date(v):
+                if v is None:
+                    return None
+                try:
+                    dt = pd.to_datetime(v)
+                    return dt.date() if not pd.isna(dt) else None
+                except Exception:
+                    return None
+
+            metadata = FundFilingMetadata(
+                accession_number=accession_number,
+                reporting_date=_safe_date(report_date),
+                filing_date=_safe_date(filing_date),
+                form=form,
+                url=url,
+            )
+        except Exception:
+            metadata = None
+
+        result = dict(
+            structured_data=fund_data,
+            markdown=parser.get_clean_markdown(),
+            ticker=extracted_ticker,
+            managers=fund_data.get("managers"),
+            strategies=fund_data.get("strategies"),
+            risks=fund_data.get("risks"),
+            objective=fund_data.get("objective"),
+            filing_metadata=metadata,
+        )
+
+        return extracted_ticker, result, "success"
+
+    except Exception as e:
+        logger.error("_parse_prospectus_worker failed for %s: %s", filing_data[1] if filing_data else "?", e)
+        return None, None, "error"
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +214,21 @@ class ProspectusResult:
         structured_data: Dictionary of extracted fund metrics.
         markdown: Clean markdown profile suitable for RAG context.
         ticker: Resolved ticker symbol.
+        managers: Fund manager information extracted from the prospectus.
+        strategies: Investment strategies extracted from the prospectus.
+        risks: Risk factors extracted from the prospectus.
+        objective: Fund objective extracted from the prospectus.
+        filing_metadata: Metadata about the source filing.
     """
 
     structured_data: Dict = field(default_factory=dict)
     markdown: str = ""
     ticker: str = "UNKNOWN"
+    managers: Optional[str] = None
+    strategies: Optional[str] = None
+    risks: Optional[str] = None
+    objective: Optional[str] = None
+    filing_metadata: Optional[object] = None
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +628,8 @@ class FilingRetriever:
                 print(f"Processing filing:  {filing.report_date}")
 
             html_content = filing.html()
+            with open(f"filing_{filing.accession_number}.html", "w") as f:
+                f.write(html_content)
             metadata = FundFilingMetadata(
                 accession_number=filing.accession_number,
                 reporting_date=filing.report_date,
@@ -569,6 +723,8 @@ class FilingRetriever:
                 fund_warnings.append("Missing context ID.")
             if not fund.share_class:
                 fund_warnings.append("Missing share class.")
+            if not fund.series_id:
+                fund_warnings.append("Missing series.")
 
             # 2. Check numeric fields for logical sense
             try:
@@ -611,6 +767,238 @@ class FilingRetriever:
     # ------------------------------------------------------------------
     # NPORT
     # ------------------------------------------------------------------
+
+    def get_nport_bulk(
+        self,
+        ciks: List[str],
+        company_tickers_json_path: str,
+        *,
+        max_workers: int = 6,
+        batch_size: int = 4,
+        min_similarity: float = 0.74,
+        verbose: bool = False,
+    ) -> List[dict]:
+        """Download and parse NPORT-P filings for multiple CIKs in parallel.
+
+        Mirrors the notebook pattern:
+
+        * Fetches filings for each CIK sorted newest-first.
+        * Processes filings in chunks of ``batch_size`` using
+          :class:`ProcessPoolExecutor`.
+        * Stops a CIK's processing as soon as a duplicate fund name is
+          encountered — older filings are not downloaded.
+
+        Args:
+            ciks: List of SEC CIK numbers
+                (e.g. ``["0000036405", "0000052848"]``).
+            company_tickers_json_path: Path to ``company_tickers.json`` used
+                for holding ticker enrichment.
+            max_workers: Number of parallel worker processes per batch
+                (default 6).
+            batch_size: Number of filings to process in parallel before
+                checking for duplicates (default 4).
+            min_similarity: Minimum fuzzy-match score for ticker enrichment
+                (default 0.74).
+            verbose: Print progress info to stdout.
+
+        Returns:
+            List of result dicts, one per unique (cik, reporting_period)
+            combination. Each dict contains ``fund_name``, ``series_id``,
+            ``reporting_period``, ``holdings``, ``holdings_df``, ``result``,
+            ``derivatives``, ``not_matches``, ``ticker``, ``report_date``,
+            and ``nport_metadata``.
+        """
+        from tqdm.auto import tqdm
+        from functools import partial
+
+        all_results: List[dict] = []
+
+        for cik_idx, cik in enumerate(ciks, 1):
+            if verbose:
+                tqdm.write(f"[{cik_idx}/{len(ciks)}] 📂 Fetching NPORT-P filings for CIK {cik}...")
+
+            entity = Entity(cik)
+            filings = sorted(
+                entity.get_filings(form="NPORT-P"),
+                key=lambda f: f.report_date,
+                reverse=True,
+            )
+
+            if not filings:
+                logger.warning(f"[CIK {cik}] No NPORT-P filings found")
+                continue
+
+            if verbose:
+                tqdm.write(f"   Found {len(filings)} filings — processing in batches of {batch_size}")
+
+            funds_seen: set = set()
+            duplicate_found = False
+            cik_results: List[dict] = []
+
+            worker_fn = partial(
+                _process_nport_filing_worker,
+                ticker=cik,
+                company_json_path=company_tickers_json_path,
+                email_identity=self._email_identity,
+                min_similarity=min_similarity,
+            )
+
+            batches = range(0, len(filings), batch_size)
+            for batch_start in tqdm(batches, desc=f"CIK {cik}", unit="batch", leave=False):
+                if duplicate_found:
+                    break
+
+                batch = filings[batch_start: batch_start + batch_size]
+
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [executor.submit(worker_fn, f) for f in batch]
+
+                    for future in as_completed(futures):
+                        try:
+                            res = future.result()
+                        except Exception as e:
+                            logger.warning(f"[CIK {cik}] Worker error: {e}")
+                            continue
+
+                        if res is None:
+                            continue
+
+                        fund_key = res["fund_name"].lower()
+                        if fund_key in funds_seen:
+                            if verbose:
+                                tqdm.write(f"   🚨 Duplicate fund '{res['fund_name']}' — stopping CIK {cik}")
+                            duplicate_found = True
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+
+                        funds_seen.add(fund_key)
+                        cik_results.append(res)
+
+                        if verbose:
+                            tqdm.write(
+                                f"   ✅ CIK {cik} — {res['fund_name']} "
+                                f"({res['reporting_period']}) | "
+                                f"Holdings: {len(res['holdings'])} | "
+                                f"Unmatched: {len(res['not_matches'])}"
+                            )
+
+            all_results.extend(cik_results)
+            if verbose:
+                tqdm.write(f"   Done CIK {cik}: {len(cik_results)} unique filings saved")
+
+        logger.info(f"[get_nport_bulk] Complete: {len(all_results)} total filings extracted")
+        return all_results
+
+    @staticmethod
+    def enrich_funds_with_nport(
+        funds: List[FundData],
+        nport_results: List[dict],
+        *,
+        verbose: bool = False,
+    ) -> None:
+        """Merge NPORT-P results into a list of :class:`FundData` objects in-place.
+
+        Matches each NPORT result to a fund by ``series_id`` and populates
+        ``non_derivatives``, ``derivatives``, ``series_id``, and
+        ``nport_metadata`` on the matched fund.
+
+        Args:
+            funds: List of :class:`FundData` objects to enrich (mutated in-place).
+            nport_results: Output of :meth:`get_nport_bulk` — list of result
+                dicts, each containing ``series_id``, ``holdings_df``,
+                ``derivatives``, ``reporting_period``, and ``nport_metadata``.
+            verbose: Print match/miss info to stdout.
+        """
+        proc = NPortProcessor()
+        matched = 0
+
+        if verbose:
+            nport_ids = [res.get("series_id") for res in nport_results]
+            fund_ids  = [(fund.ticker, fund.series_id) for fund in funds]
+            print(f"[enrich_nport] {len(nport_results)} nport result(s), {len(funds)} fund(s)")
+            print(f"[enrich_nport] nport series_ids : {nport_ids}")
+            print(f"[enrich_nport] fund  series_ids : {fund_ids}")
+
+        for res in nport_results:
+            print(res)
+            series_id = res.get("series_id")
+            if not series_id:
+                if verbose:
+                    print(f"[enrich_nport] ⚠  result missing series_id — skipping (keys: {list(res.keys())})")
+                continue
+
+            for fund in funds:
+                fund_name = getattr(fund, "name", None)
+                if fund_name != series_id:
+                    if verbose:
+                        print(f"[enrich_nport]    no match: nport={series_id!r}  fund={fund.ticker} series_id={fund_name!r}")
+                    continue
+
+                reporting_period = str(res["reporting_period"])
+
+                fund.non_derivatives = NonDerivatives(
+                    date=reporting_period,
+                    holdings_df=res["holdings_df"],
+                )
+
+                raw_derivatives = res.get("derivatives")
+                derivatives_df = proc.to_df(raw_derivatives) if raw_derivatives else None
+                fund.derivatives = Derivatives(
+                    date=reporting_period,
+                    derivatives_df=derivatives_df,
+                )
+
+                fund.nport_metadata = res["nport_metadata"]
+                matched += 1
+
+                if verbose:
+                    print(f"   ✅ Matched series {series_id} → {fund.name}")
+                break
+
+        if verbose:
+            unmatched = len(nport_results) - matched
+            print(f"\nEnrichment complete: {matched} matched, {unmatched} unmatched")
+
+    @staticmethod
+    def verify_nport_integrity(funds: List[FundData]) -> None:
+        """Print a data-integrity report for NPORT holdings on a fund list.
+
+        Checks each fund for a populated ``non_derivatives.holdings_df`` and
+        prints a summary of valid vs missing entries.
+
+        Args:
+            funds: List of :class:`FundData` objects to inspect.
+        """
+        print("\n" + "=" * 40)
+        print("DATA INTEGRITY VERIFICATION")
+        print("=" * 40)
+
+        valid_count = 0
+        none_count = 0
+
+        for fund in funds:
+            has_data = False
+            try:
+                if (
+                    hasattr(fund, "non_derivatives")
+                    and fund.non_derivatives is not None
+                    and fund.non_derivatives.holdings_df is not None
+                ):
+                    has_data = True
+            except Exception:
+                has_data = False
+
+            if has_data:
+                valid_count += 1
+            else:
+                none_count += 1
+                print(f"❌ {fund.name:<20} | Status: DATAFRAME IS NONE/MISSING")
+
+        print("-" * 40)
+        print(f"Total Funds Checked : {len(funds)}")
+        print(f"Valid DataFrames    : {valid_count}")
+        print(f"None/Missing Values : {none_count}")
+        print("=" * 40)
 
     def get_nport_holdings(
         self,
@@ -655,6 +1043,138 @@ class FilingRetriever:
     # 497K (Summary Prospectus)
     # ------------------------------------------------------------------
 
+    def get_prospectus_bulk(
+        self,
+        ciks: List[str],
+        *,
+        max_workers: int = 4,
+        batch_size: int = 5,
+        grace_batches: int = 5,
+        verbose: bool = False,
+    ) -> Dict[str, ProspectusResult]:
+        """Download and parse 497K prospectus filings for multiple CIKs.
+
+        Uses a streaming batch approach to avoid downloading all filings
+        upfront:
+
+        1. Fetch filing metadata for a CIK (no HTML yet).
+        2. Download + parse ``batch_size`` filings at a time in parallel.
+        3. On first duplicate ticker, continue for up to ``grace_batches``
+           more batches to catch any remaining unique funds, then stop.
+
+        Args:
+            ciks: List of SEC CIK numbers
+                (e.g. ``["0000102909", "0000895421"]``).
+            max_workers: Number of parallel worker processes (default 4).
+            batch_size: Number of filings to download and parse per batch
+                before checking for duplicates (default 5).
+            grace_batches: Number of additional batches to process after the
+                first duplicate is detected (default 5).
+            verbose: Print progress info to stdout.
+
+        Returns:
+            Dict mapping each extracted ticker to its
+            :class:`ProspectusResult`.
+        """
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from functools import partial
+        from tqdm.auto import tqdm
+
+        results: Dict[str, ProspectusResult] = {}
+        seen_tickers: set = set()
+        worker_fn = partial(_parse_prospectus_worker, email_identity=self._email_identity)
+
+        for cik_idx, cik in enumerate(ciks, 1):
+            if verbose:
+                tqdm.write(f"[{cik_idx}/{len(ciks)}] 📂 Fetching 497K filings for CIK {cik}...")
+
+            entity = Entity(cik)
+            filings = entity.get_filings(form="497K")
+
+            if not filings:
+                logger.warning(f"[CIK {cik}] No 497K filings found")
+                continue
+
+            # De-duplicate accession numbers (metadata only, no download yet)
+            unique_filings = []
+            seen_accessions: set = set()
+            for f in filings:
+                if f.accession_number not in seen_accessions:
+                    unique_filings.append(f)
+                    seen_accessions.add(f.accession_number)
+
+            if verbose:
+                tqdm.write(f"   Found {len(unique_filings)} unique filings — processing in batches of {batch_size}")
+
+            # ── Streaming batch loop ──────────────────────────────────────
+            # grace_remaining > 0 means we are in the grace period after the
+            # first duplicate was seen.  -1 means no duplicate yet.
+            grace_remaining: int = -1
+            batches = range(0, len(unique_filings), batch_size)
+
+            for batch_start in tqdm(batches, desc=f"CIK {cik}", unit="batch", leave=False):
+                # In grace period: decrement and stop when exhausted
+                if grace_remaining == 0:
+                    if verbose:
+                        tqdm.write(f"   ⏹ Grace period exhausted — stopping CIK {cik}")
+                    break
+                if grace_remaining > 0:
+                    grace_remaining -= 1
+
+                batch = unique_filings[batch_start: batch_start + batch_size]
+
+                # Phase 1: download this batch sequentially
+                batch_data: List[tuple] = []
+                for filing in batch:
+                    try:
+                        raw_text = filing.text() if hasattr(filing, "text") else str(filing.obj())
+                        if raw_text:
+                            batch_data.append((
+                                raw_text,
+                                filing.accession_number,
+                                getattr(filing, "report_date", None),
+                                getattr(filing, "filing_date", None),
+                                getattr(filing, "form", "497K"),
+                                getattr(filing, "url", ""),
+                            ))
+                    except Exception as e:
+                        logger.warning(f"[CIK {cik}] Failed to download {filing.accession_number}: {e}")
+
+                # Phase 2: parse this batch in parallel
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(worker_fn, fd): fd[1]
+                        for fd in batch_data
+                    }
+
+                    for future in as_completed(futures):
+                        accession = futures[future]
+                        try:
+                            extracted_ticker, res, status = future.result()
+                        except Exception as e:
+                            logger.warning(f"[CIK {cik}] Worker error on {accession}: {e}")
+                            continue
+
+                        if status == "aborted" or extracted_ticker in seen_tickers:
+                            if grace_remaining == -1:
+                                # First duplicate — start grace period
+                                grace_remaining = grace_batches
+                                if verbose and extracted_ticker:
+                                    tqdm.write(
+                                        f"   🚨 Duplicate '{extracted_ticker}' — "
+                                        f"entering grace period ({grace_batches} batches left)"
+                                    )
+                            continue
+
+                        if status == "success" and res is not None:
+                            seen_tickers.add(extracted_ticker)
+                            results[extracted_ticker] = ProspectusResult(**res)
+                            if verbose:
+                                tqdm.write(f"   ✅ Extracted: {extracted_ticker}")
+
+        logger.info(f"[get_prospectus_bulk] Complete: {len(results)} unique funds extracted")
+        return results
+
     def get_prospectus(
         self,
         ticker: str,
@@ -680,7 +1200,7 @@ class FilingRetriever:
         # 497K filings are plain text
         raw_text = latest.text() if hasattr(latest, "text") else str(latest.obj())
 
-        parser = ProspectusExtractor(raw_text, ticker=ticker)
+        parser = ProspectusExtractor.from_text(raw_text, ticker=ticker)
 
         return ProspectusResult(
             structured_data=parser.get_structured_data(),

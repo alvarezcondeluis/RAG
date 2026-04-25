@@ -16,6 +16,7 @@ def print_fund_info(fund_list: List[FundData]) -> None:
         print(f"🏷️ Share Class:     {fund.share_class}")
         print(f"📅 Report Date:     {fund.report_date}")
         print(f"🏛️ Sec Exchange:    {fund.security_exchange}")
+        print(f"📋 Registrant:     {fund.registrant}")
 
         # 3. FINANCIALS
         print("\n--- 💰 Costs & Financials ---")

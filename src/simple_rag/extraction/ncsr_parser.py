@@ -106,7 +106,9 @@ class NCSRExtractor:
         """Extracts all data for a specific Context ID."""
         
         logger.info("Extracting context: %s", c_id)
-        
+
+        series_id = self._get_series_id(c_id)
+
         # 1. Extract all values first
         ticker = self._get_value(XBRLTags.TRADING_SYMBOL, c_id)
         expense_ratio = self._get_value(XBRLTags.EXPENSE_RATIO_PCT, c_id)
@@ -183,12 +185,36 @@ class NCSRExtractor:
             issuer_allocation=issuer_allocation,
             credit_rating=credit_rating,
             performance_table=performance_table,
-            avg_annual_returns=avg_annual_returns
+            avg_annual_returns=avg_annual_returns,
+            series_id=series_id,
         )
             
         return fund
 
     
+    def _get_series_id(self, c_id: str) -> str:
+        """Extracts the SEC series identifier (e.g. S000004310) from the XBRL
+        context block matching c_id. Returns None if not found.
+
+        lxml flattens namespace prefixes so we search by attribute values only.
+        """
+        context = self.soup.find(lambda t: t.get("id") == c_id and "context" in (t.name or "").lower())
+        if context is None:
+            context = self.soup.find(attrs={"id": c_id})
+        if context is None:
+            return None
+        member = context.find(
+            lambda t: "explicitmember" in (t.name or "").lower()
+            and re.search(r"seriesidentifier", t.get("dimension", ""), re.IGNORECASE)
+        )
+        if member:
+            raw = member.get_text(strip=True)
+            series_id = raw.split(":")[-1] if ":" in raw else raw
+            logger.debug("_get_series_id c_id=%s -> %r", c_id, series_id)
+            return series_id
+        logger.debug("_get_series_id c_id=%s -> no member found (context tag: %s)", c_id, context.name if context else None)
+        return None
+
     def _get_block(self, tag_name:str, c_id: str) -> str:
         """Finds a simple tag restricted by context."""
         tag = self.soup.find(attrs={"name": tag_name, "contextref": c_id})
@@ -502,7 +528,6 @@ class NCSRExtractor:
         
         # Convert to list format expected by _create_performance_dataframe
         results = list(fund_data.values())
-        
         
         return self._create_performance_dataframe(results)
     
