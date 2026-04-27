@@ -37,6 +37,7 @@ dependencies = [
     "markdownify>=1.2.2",
     "faiss-cpu>=1.13.2",
     "langchain-openai>=1.1.10",
+    "ipykernel>=7.2.0",
 ]
 
 [dependency-groups]

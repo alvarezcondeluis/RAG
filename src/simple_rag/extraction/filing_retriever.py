@@ -43,11 +43,6 @@ from ..utils.fund_mapper import enrich_funds_with_annual_returns
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Module-level worker (must be top-level for ProcessPoolExecutor pickling)
-# ---------------------------------------------------------------------------
-
 def _process_nport_filing_worker(filing, ticker: str, company_json_path: str, email_identity: str, min_similarity: float = 0.74) -> Optional[dict]:
     """Parse a single NPORT-P filing in a worker process.
 
@@ -628,8 +623,7 @@ class FilingRetriever:
                 print(f"Processing filing:  {filing.report_date}")
 
             html_content = filing.html()
-            with open(f"filing_{filing.accession_number}.html", "w") as f:
-                f.write(html_content)
+           
             metadata = FundFilingMetadata(
                 accession_number=filing.accession_number,
                 reporting_date=filing.report_date,
@@ -723,8 +717,7 @@ class FilingRetriever:
                 fund_warnings.append("Missing context ID.")
             if not fund.share_class:
                 fund_warnings.append("Missing share class.")
-            if not fund.series_id:
-                fund_warnings.append("Missing series.")
+            
 
             # 2. Check numeric fields for logical sense
             try:
