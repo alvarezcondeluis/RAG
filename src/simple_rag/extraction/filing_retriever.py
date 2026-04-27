@@ -912,26 +912,19 @@ class FilingRetriever:
         proc = NPortProcessor()
         matched = 0
 
-        if verbose:
-            nport_ids = [res.get("series_id") for res in nport_results]
-            fund_ids  = [(fund.ticker, fund.series_id) for fund in funds]
-            print(f"[enrich_nport] {len(nport_results)} nport result(s), {len(funds)} fund(s)")
-            print(f"[enrich_nport] nport series_ids : {nport_ids}")
-            print(f"[enrich_nport] fund  series_ids : {fund_ids}")
-
+        
         for res in nport_results:
-            print(res)
-            series_id = res.get("series_id")
-            if not series_id:
+            fund_name = res.get("fund_name")
+            if not fund_name:
                 if verbose:
                     print(f"[enrich_nport] ⚠  result missing series_id — skipping (keys: {list(res.keys())})")
                 continue
 
             for fund in funds:
-                fund_name = getattr(fund, "name", None)
-                if fund_name != series_id:
+                name = getattr(fund, "name", None)
+                if fund_name.lower() != name.lower():
                     if verbose:
-                        print(f"[enrich_nport]    no match: nport={series_id!r}  fund={fund.ticker} series_id={fund_name!r}")
+                        print(f"[enrich_nport]    no match: nport={fund_name!r}  fund={fund.ticker} name={name!r}")
                     continue
 
                 reporting_period = str(res["reporting_period"])
@@ -951,8 +944,6 @@ class FilingRetriever:
                 fund.nport_metadata = res["nport_metadata"]
                 matched += 1
 
-                if verbose:
-                    print(f"   ✅ Matched series {series_id} → {fund.name}")
                 break
 
         if verbose:
