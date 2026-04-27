@@ -43,7 +43,7 @@ class Neo4jDatabaseBase:
         self.password = password or settings.NEO4J_PASSWORD
         self.container_name = settings.NEO4J_CONTAINER_NAME
         self.driver: Optional[Driver] = None
-
+        
         if auto_start:
             self._ensure_neo4j_running()
         
@@ -159,6 +159,7 @@ class Neo4jDatabaseBase:
     def _connect(self):
         """Establish connection to Neo4j using native driver."""
         try:
+            print(self.password)
             self.driver = GraphDatabase.driver(
                 self.uri,
                 auth=(self.username, self.password),
@@ -177,6 +178,7 @@ class Neo4jDatabaseBase:
             logger.error(f"Failed to connect to Neo4j: {e}")
             logger.error(f"Connection URI: {self.uri}")
             logger.error(f"Username: {self.username}")
+
             raise
     
     def close(self):

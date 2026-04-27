@@ -107,8 +107,9 @@ class NCSRExtractor:
         
         logger.info("Extracting context: %s", c_id)
 
-        series_id = self._get_series_id(c_id)
-
+        series_id = self._get_class_id(c_id) 
+        logger.info("Series ID: %s", series_id)
+        print("Series ID:", series_id)
         # 1. Extract all values first
         ticker = self._get_value(XBRLTags.TRADING_SYMBOL, c_id)
         expense_ratio = self._get_value(XBRLTags.EXPENSE_RATIO_PCT, c_id)
@@ -192,27 +193,28 @@ class NCSRExtractor:
         return fund
 
     
-    def _get_series_id(self, c_id: str) -> str:
-        """Extracts the SEC series identifier (e.g. S000004310) from the XBRL
-        context block matching c_id. Returns None if not found.
-
-        lxml flattens namespace prefixes so we search by attribute values only.
-        """
+    def _get_class_id(self, c_id: str) -> str:
+        """Extracts the SEC class contract identifier (e.g. C000204567) 
+        from the oef:ClassAxis dimension of the XBRL context."""
         context = self.soup.find(lambda t: t.get("id") == c_id and "context" in (t.name or "").lower())
         if context is None:
             context = self.soup.find(attrs={"id": c_id})
         if context is None:
             return None
+
         member = context.find(
             lambda t: "explicitmember" in (t.name or "").lower()
-            and re.search(r"seriesidentifier", t.get("dimension", ""), re.IGNORECASE)
+            and re.search(r"ClassAxis", t.get("dimension", ""), re.IGNORECASE)
         )
         if member:
             raw = member.get_text(strip=True)
-            series_id = raw.split(":")[-1] if ":" in raw else raw
-            logger.debug("_get_series_id c_id=%s -> %r", c_id, series_id)
-            return series_id
-        logger.debug("_get_series_id c_id=%s -> no member found (context tag: %s)", c_id, context.name if context else None)
+            # raw looks like: "world:C000204567Member" or just "C000204567Member"
+            # strip namespace prefix and "Member" suffix
+            class_id = raw.split(":")[-1].replace("Member", "")
+            logger.debug("_get_class_id c_id=%s -> %r", c_id, class_id)
+            return class_id
+
+        logger.debug("_get_class_id c_id=%s -> no ClassAxis member found", c_id)
         return None
 
     def _get_block(self, tag_name:str, c_id: str) -> str:

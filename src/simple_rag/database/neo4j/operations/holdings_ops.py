@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 from datetime import date
 import logging
 import numpy as np
+import re
 from ..base import Neo4jDatabaseBase
 
 logger = logging.getLogger(__name__)
@@ -29,28 +30,20 @@ class HoldingsOperations(Neo4jDatabaseBase):
 
         print(f"💰 Processing {len(holdings_df)} holdings for {series_id}...")
 
-        # 1. CLEANING & ID GENERATION (Python Side)
-        
         df = holdings_df.replace({np.nan: None})
         
-        # Ensure numerics
         for col in ['shares', 'market_value', 'weight_pct']:
             if col in df.columns:
                 df[col] = df[col].apply(lambda x: float(x) if x is not None else 0.0)
 
-        # ID Generation using ISIN only
         def generate_id(row):
             return str(row.get('isin', 'UNKNOWN')).strip()
 
         df['node_id'] = df.apply(generate_id, axis=1)
         
-        # Convert to list
         all_holdings = df.to_dict('records')
         total_count = len(all_holdings)
 
-        # 2. SETUP PARENT NODES (One-time setup for the Fund/Portfolio)
-        # We do this OUTSIDE the batch loop so we don't repeat it
-        
         portfolio_id = series_id
         
         setup_query = """
@@ -75,15 +68,12 @@ class HoldingsOperations(Neo4jDatabaseBase):
             "total_count": total_count
         })
 
-        # 3. BATCHED INSERTION (The Speed Fix)
-        # We process holdings in chunks of 1,000 to prevent memory overload
         BATCH_SIZE = 1000
         
         batch_query = """
         MATCH (port:Portfolio {id: $portfolio_id})
         UNWIND $batch as row
         
-        // A. Create/Update Holding Node
         MERGE (h:Holding {id: row.node_id})
         ON CREATE SET
             h.name = row.name,
@@ -99,7 +89,6 @@ class HoldingsOperations(Neo4jDatabaseBase):
             h.issuerDesc = row.issuer_category_desc,
             h.createdAt = timestamp()
 
-        // B. Link Portfolio to Holding
         MERGE (port)-[rel:HAS_HOLDING]->(h)
         ON CREATE SET
             rel.shares = row.shares,
@@ -110,8 +99,6 @@ class HoldingsOperations(Neo4jDatabaseBase):
             rel.isRestricted = row.is_restricted,
             rel.payoffProfile = row.payoff_profile
         
-        // C. Link Holding to Company (if ticker exists)
-        // This creates the bridge between Fund holdings and Company data
         FOREACH (_ IN CASE WHEN row.ticker IS NOT NULL AND row.ticker <> '' THEN [1] ELSE [] END |
             MERGE (c:Company {ticker: row.ticker})
             ON CREATE SET
@@ -135,7 +122,6 @@ class HoldingsOperations(Neo4jDatabaseBase):
 
         except Exception as e:
             print(f"❌ Error ingesting holdings for {ticker}: {e}")
-
     def add_chart_to_fund(
         self, 
         fund_ticker: str, 

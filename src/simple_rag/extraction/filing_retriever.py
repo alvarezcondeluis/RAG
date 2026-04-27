@@ -883,6 +883,52 @@ class FilingRetriever:
         return all_results
 
     @staticmethod
+    def enrich_funds_with_series_id(
+        funds: List[FundData],
+        nport_results: List[dict],
+        *,
+        verbose: bool = False,
+    ) -> None:
+        """Assign series_id to FundData objects by matching fund names from NPORT results.
+
+        Uses substring matching (nport name in fund name) to handle slight
+        naming differences. Mutates funds in-place.
+
+        Args:
+            funds: List of FundData objects to enrich.
+            nport_results: List of dicts, each containing 'fund_name' and 'series_id'.
+            verbose: Print match/miss info to stdout.
+        """
+        matched = 0
+        unmatched = 0
+
+        for res in nport_results:
+            filing_name = res.get("fund_name")
+            series_id = res.get("series_id")
+
+            if not filing_name or not series_id:
+                if verbose:
+                    print(f"⚠️  Skipping result missing fund_name or series_id: {list(res.keys())}")
+                continue
+
+            f_name = filing_name.lower().strip()
+            candidates = [f for f in funds if f_name in f.name.lower().strip()]
+
+            if not candidates:
+                unmatched += 1
+                if verbose:
+                    print(f"❌ No match for: '{filing_name}'")
+                continue
+
+            for fund in candidates:
+                fund.series_id = series_id
+                if verbose:
+                    print(f"✅ '{filing_name}' -> {fund.ticker} | {fund.name} | series_id={series_id}")
+            matched += 1
+
+        print(f"[enrich_series_id] matched={matched} unmatched={unmatched}")
+
+    @staticmethod
     def enrich_funds_with_nport(
         funds: List[FundData],
         nport_results: List[dict],
