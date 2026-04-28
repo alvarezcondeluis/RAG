@@ -15,8 +15,8 @@ Usage:
 
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +54,7 @@ ENRICHMENT_RULES: list[EnrichmentRule] = [
                    prov.name AS provider, t.name AS trust
         """,
     ),
-    EnrichmentRule(
-        name="fund_managers",
-        description="Fund manager(s) with date",
-        categories=["fund_basic", "fund_portfolio", "fund_profile"],
-        param_type="fund_ticker",
-        priority=5,
-        cypher_template="""
-            MATCH (f:Fund)-[r:MANAGED_BY]->(p:Person)
-            WHERE f.ticker = $ticker
-            RETURN p.name AS manager, r.date AS sinceDate
-            ORDER BY r.date DESC
-        """,
-    ),
+    
     EnrichmentRule(
         name="fund_returns",
         description="Average annual returns for the fund",
@@ -79,36 +67,6 @@ ENRICHMENT_RULES: list[EnrichmentRule] = [
             RETURN ar.return1y AS return1y, ar.return5y AS return5y,
                    ar.return10y AS return10y, ar.returnInception AS returnInception,
                    r.date AS asOfDate
-            ORDER BY r.date DESC
-            LIMIT 1
-        """,
-    ),
-    EnrichmentRule(
-        name="company_overview",
-        description="Basic company information",
-        categories=["company_filing", "company_people"],
-        param_type="company_ticker",
-        priority=10,
-        cypher_template="""
-            MATCH (c:Company)
-            WHERE c.ticker = $ticker
-            OPTIONAL MATCH (c)-[:HAS_CEO]->(ceo:Person)
-            RETURN c.ticker AS ticker, c.name AS companyName, c.cik AS cik,
-                   ceo.name AS ceo
-            LIMIT 1
-        """,
-    ),
-    EnrichmentRule(
-        name="company_latest_filing",
-        description="Most recent 10-K filing date and document",
-        categories=["company_filing"],
-        param_type="company_ticker",
-        priority=5,
-        cypher_template="""
-            MATCH (c:Company)-[r:HAS_FILING]->(f:Filing10K)-[:EXTRACTED_FROM]->(d:Document)
-            WHERE c.ticker = $ticker
-            RETURN c.ticker AS ticker, r.date AS filingDate,
-                   d.url AS documentUrl, d.accessionNumber AS accessionNumber
             ORDER BY r.date DESC
             LIMIT 1
         """,
@@ -295,3 +253,179 @@ def format_enrichment_context(supplementary: Dict[str, list[dict]]) -> str:
             sections.append(f"[{label}] ({len(rows)} records)\n" + "\n".join(items))
 
     return "\n\n".join(sections)
+
+
+# ── Document provenance resolver ──────────────────────────────────────────────
+#
+# Inspects the generated Cypher to detect which node labels are queried, then
+# builds and runs a supplementary query to fetch the source Document — but only
+# if the Cypher doesn't already include Document / EXTRACTED_FROM / DISCLOSED_IN.
+
+# Maps node labels to their path to the nearest Document node.
+# Key = label detected in the Cypher.
+# Value = (relationship_chain, identifier_type)
+#   - relationship_chain: Cypher fragment from an anchor node to Document
+#   - identifier_type: "fund_ticker" or "company_ticker" (determines the WHERE clause)
+_LABEL_TO_DOCUMENT: Dict[str, tuple[str, str]] = {
+    # ── Direct EXTRACTED_FROM ──
+    "Fund":        ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Portfolio":   ("(f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Profile":     ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Filing10K":   ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "InsiderTransaction": ("(c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "CompensationPackage": ("(c:Company)-[:HAS_CEO]->(:Person)-[:RECEIVED_COMPENSATION]->(cp:CompensationPackage)-[:DISCLOSED_IN]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    # ── Child nodes → go through their parent anchor ──
+    "FinancialHighlight": ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "AverageReturns":     ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "ShareClass":         ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Sector":             ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Region":             ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Holding":            ("(f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "Objective":          ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "RiskChunk":          ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "StrategyChunk":      ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    "PerformanceCommentary": ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+    # Company filing children
+    "RiskFactor":           ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "BusinessInformation":  ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "LegalProceeding":      ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "ManagemetDiscussion":  ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "Properties":           ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "Financials":           ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "FinancialMetric":      ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "Person":               ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
+}
+
+# Priority: more-specific labels should win over generic ones.
+_LABEL_PRIORITY = [
+    # Children first (most specific about what data was actually queried)
+    "Holding",
+    "Objective", "RiskChunk", "StrategyChunk", "PerformanceCommentary",
+    "RiskFactor", "BusinessInformation", "LegalProceeding", "ManagemetDiscussion",
+    "Properties", "Financials", "FinancialMetric",
+    "FinancialHighlight", "AverageReturns", "ShareClass", "Sector", "Region",
+    "InsiderTransaction", "CompensationPackage",
+    # Parent anchors
+    "Portfolio", "Profile", "Filing10K",
+    "Person",
+    "Fund", "Company",
+]
+
+# Regex to detect node labels in Cypher — matches :Label patterns
+_LABEL_RE = re.compile(r':([A-Z][a-zA-Z0-9]+)')
+# Regex to detect if the Cypher already fetches Document info
+_ALREADY_HAS_DOC_RE = re.compile(
+    r':Document|EXTRACTED_FROM|DISCLOSED_IN', re.IGNORECASE
+)
+# Regex to extract a ticker literal from the Cypher
+_TICKER_LITERAL_RE = re.compile(r"""ticker\s*[:=]\s*['"]([A-Za-z]+)['"]""")
+# Regex to extract a company name literal from the Cypher
+_NAME_LITERAL_RE = re.compile(r"""name\s*[:=]\s*['"]([^'"]+)['"]""")
+
+
+def _extract_identifier_from_cypher(cypher: str) -> Optional[str]:
+    """Try to pull a ticker or name literal from the generated Cypher."""
+    m = _TICKER_LITERAL_RE.search(cypher)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _extract_identifier_from_results(results: Optional[list[dict]]) -> Optional[str]:
+    """Pull a ticker from the first row of query results."""
+    if not results:
+        return None
+    for row in results[:3]:
+        for key in ("ticker", "f.ticker", "c.ticker", "fundTicker", "companyTicker"):
+            val = row.get(key)
+            if val and isinstance(val, str):
+                return val
+    return None
+
+
+def resolve_document_provenance(
+    cypher: str,
+    neo4j_driver,
+    main_results: Optional[list[dict]] = None,
+) -> str:
+    """
+    Inspect a generated Cypher query, detect which nodes it touches, and —
+    if it doesn't already include Document info — run a supplementary query
+    to fetch the source document.
+
+    Returns a formatted provenance string (empty if not applicable).
+    """
+    if not cypher:
+        return ""
+
+    # 1. Skip if the Cypher already references Document / EXTRACTED_FROM
+    if _ALREADY_HAS_DOC_RE.search(cypher):
+        logger.debug("Cypher already includes Document — skipping provenance")
+        return ""
+
+    # 2. Detect node labels in the Cypher
+    labels_in_cypher = set(_LABEL_RE.findall(cypher))
+    if not labels_in_cypher:
+        return ""
+
+    # 3. Pick the best label (most specific) that we have a mapping for
+    best_label = None
+    for label in _LABEL_PRIORITY:
+        if label in labels_in_cypher and label in _LABEL_TO_DOCUMENT:
+            best_label = label
+            break
+
+    if not best_label:
+        return ""
+
+    match_fragment, _id_type = _LABEL_TO_DOCUMENT[best_label]
+
+    # 4. Extract identifier (ticker) from the Cypher or from results
+    identifier = _extract_identifier_from_cypher(cypher)
+    if not identifier:
+        identifier = _extract_identifier_from_results(main_results)
+    if not identifier:
+        logger.debug("No identifier found for provenance query")
+        return ""
+
+    # 5. Build and execute the document query
+    doc_cypher = (
+        f"MATCH {match_fragment}\n"
+        f"RETURN d.accessionNumber AS accessionNumber, d.url AS documentUrl,\n"
+        f"       d.type AS documentType, d.filingDate AS filingDate,\n"
+        f"       d.reportingDate AS reportingDate\n"
+        f"ORDER BY d.filingDate DESC LIMIT 1"
+    )
+
+    try:
+        with neo4j_driver.session() as session:
+            records = session.run(doc_cypher, {"id": identifier})
+            rows = [dict(r) for r in records]
+    except Exception as e:
+        logger.warning(f"Provenance query failed: {e}")
+        return ""
+
+    if not rows:
+        return ""
+
+    # 6. Format
+    docs: list[str] = []
+    for row in rows:
+        parts: list[str] = []
+        if row.get("accessionNumber"):
+            parts.append(f"  Accession Number: {row['accessionNumber']}")
+        if row.get("documentUrl"):
+            parts.append(f"  URL: {row['documentUrl']}")
+        if row.get("documentType"):
+            parts.append(f"  Filing Type: {row['documentType']}")
+        if row.get("filingDate"):
+            parts.append(f"  Filing Date: {row['filingDate']}")
+        if row.get("reportingDate"):
+            parts.append(f"  Reporting Date: {row['reportingDate']}")
+        if parts:
+            docs.append("\n".join(parts))
+
+    if not docs:
+        return ""
+
+    return "[Source Documents]\n" + "\n---\n".join(docs)

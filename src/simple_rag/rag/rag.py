@@ -2,13 +2,9 @@ from llama_index.llms.ollama import Ollama
 import subprocess
 import time
 import requests
-import threading
-import os
 from typing import List
 from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.schema import QueryBundle, NodeWithScore, TextNode
-from google import genai
-from google.genai import types
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'evaluation'))

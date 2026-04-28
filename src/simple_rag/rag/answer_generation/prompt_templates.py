@@ -23,7 +23,8 @@ GUIDELINES:
 7. Use professional but accessible language suitable for retail investors.
 8. Structure your response clearly: lead with the direct answer, then provide context.
 9. When data includes multiple entities, present them in a clear comparison format.
-10. For numerical data, round appropriately (2 decimal places for percentages, whole numbers for large dollar amounts)."""
+10. For numerical data, round appropriately (2 decimal places for percentages, whole numbers for large dollar amounts).
+11. When source document information is provided, ALWAYS end your response with a "Sources" line citing the filing type, date, accession number, and URL. Never omit this attribution."""
 
 
 # ── Schema context descriptions ──────────────────────────────────────────────
@@ -93,6 +94,7 @@ def build_answer_prompt(
     result_type: ResultType,
     query_category: str = "",
     enrichment_context: str = "",
+    provenance_context: str = "",
 ) -> str:
     """Build the user prompt for answer generation.
 
@@ -133,6 +135,20 @@ Additional context about the entities mentioned (use this to provide a richer, m
 {enrichment_context}
 """
 
+    # Build provenance block if present
+    provenance_block = ""
+    if provenance_context:
+        provenance_block = f"""
+
+IMPORTANT — Source Attribution:
+The following source document(s) were used to retrieve this data. You MUST include a "Sources" section at the very end of your response citing these documents.
+{provenance_context}
+
+Format the sources section exactly like this:
+---
+*Sources: [Filing Type] filed [Filing Date], Accession No. [accessionNumber] ([URL])*
+"""
+
     prompt = f"""The investor asked: "{user_query}"
 
 Data source context: {schema_context}
@@ -140,6 +156,7 @@ Data source context: {schema_context}
 Retrieved data ({len(neo4j_results)} records):
 {results_text}
 {enrichment_block}
-{instructions}"""
+{instructions}
+{provenance_block}"""
 
     return prompt

@@ -42,7 +42,7 @@ class Neo4jDatabase:
             password: Neo4j password (default from config)
             auto_start: Auto-start Neo4j via Docker Compose if not running
         """
-        self.uri = uri or settings.NEO4J_URL
+        self.uri = uri or settings.NEO4J_URI
         self.username = username or settings.NEO4J_USERNAME
         self.password = password or settings.NEO4J_PASSWORD
         self.container_name = settings.NEO4J_CONTAINER_NAME

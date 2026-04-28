@@ -230,7 +230,7 @@ def run_loop(config: PipelineConfig):
         build_answer_prompt,
     )
     from simple_rag.rag.answer_generation.result_classifier import ResultClassifier, ResultType
-    from simple_rag.rag.context_enrichment import format_enrichment_context
+    from simple_rag.rag.context_enrichment import format_enrichment_context, resolve_document_provenance
 
     handler, answer_provider, driver = _init_pipeline(config)
     classifier = ResultClassifier()
@@ -282,12 +282,18 @@ def run_loop(config: PipelineConfig):
 
                 # Step 3: Build prompt and generate answer
                 enrichment_text = format_enrichment_context(result.enrichment)
+                provenance_text = resolve_document_provenance(
+                    cypher=result.cypher or "",
+                    neo4j_driver=driver,
+                    main_results=result.data,
+                )
                 user_prompt = build_answer_prompt(
                     user_query=query,
                     neo4j_results=result.data,
                     result_type=result_type,
                     query_category=result.category,
                     enrichment_context=enrichment_text,
+                    provenance_context=provenance_text,
                 )
 
                 messages = [
