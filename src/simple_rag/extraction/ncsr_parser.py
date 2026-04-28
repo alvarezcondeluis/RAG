@@ -32,157 +32,8 @@ class XBRLTags:
     AVG_ANNL_RTR_TABLE = "oef:AvgAnnlRtrTableTextBlock"
     PCT_OF_TOTAL_INV = "oef:PctOfTotalInv"
 
-def compute_annual_returns(df: pd.DataFrame):
-        """
-        Compute annual returns for the first fund column in the performance DataFrame.
-        Automatically detects format:
-        - Text Month Year (e.g., "Jan 23") -> Parses as Month 2023
-        - Quarterly/Monthly (MM/DD/YY format) -> uses year-end values
-        - Annual data (YYYY format) -> uses consecutive years
-        
-        Args:
-            df: DataFrame with columns [date/year column, fund values...]
-        
-        Returns:
-            Dictionary: {year: return_percentage}
-        """
-        annual_returns = {}
-        
-        # Get the date column name (first column)
-        date_col = df.columns[0]
-        
-        # Get the first fund column (second column in the dataframe)
-        if len(df.columns) < 2:
-            logger.debug("DataFrame doesn't have enough columns")
-            return annual_returns
-        
-        fund_column = df.columns[1]
-        
-        # Make a copy to avoid warnings
-        df = df.copy()
-        
-        # --- 1. DETECT FORMAT ---
-        first_value = str(df[date_col].iloc[0]).strip()
-        
-        # Check for "Jan 23" format: Starts with 3 letters + space + 2 digits
-        # Regex explanation: ^[A-Za-z]{3} (Month) \s+ (Space) \d{2}$ (2-digit Year)
-        is_text_month_year = bool(re.match(r'^[A-Za-z]{3}\s+\d{2}$', first_value))
-        
-        # Check for Standard Date format (MM/DD/YY)
-        is_standard_date = '/' in first_value or '-' in first_value
-        
-        is_month_hyphen_year = bool(re.match(r'^[A-Za-z]{3}-\d{2}$', first_value))
-        
 
-        # Group them as "Date Logic" vs "Year Integer Logic"
-        use_date_logic = is_text_month_year or is_standard_date
-        
-        logger.debug(f"Detected format: {'Text Month-Year' if is_text_month_year else ('Standard Date' if is_standard_date else 'Year (YYYY)')}")
-        
-        if use_date_logic:
-            # --- 2. HANDLE DATES ---
-            try:
-                # Explicitly handle "Jan 23" to ensure it parses as Year 2023, not Day 23
-                if is_text_month_year:
-                    # %b = Abbreviated month (Jan), %y = 2-digit year (23)
-                    df['parsed_date'] = pd.to_datetime(df[date_col], format='%b %y', errors='coerce')
-                elif is_month_hyphen_year:
-                    # %b = Abbreviated month (Jan), %y = 2-digit year (23)
-                    df['parsed_date'] = pd.to_datetime(df[date_col], format='%b-%y', errors='coerce')
-                else:
-                    # Let pandas guess for standard MM/DD/YYYY
-                    df['parsed_date'] = pd.to_datetime(df[date_col], format='mixed', errors='coerce')
-                
-                if df['parsed_date'].isna().all():
-                    logger.debug("Failed to parse dates")
-                    return annual_returns
-                
-                df['year'] = df['parsed_date'].dt.year
-                df['month'] = df['parsed_date'].dt.month
-                
-                # Drop rows where year couldn't be extracted
-                df = df.dropna(subset=['year'])
-                df['year'] = df['year'].astype(int)
-                
-                # Always use the last available data point for each year
-                # This handles both complete years (Dec data) and incomplete years (e.g., Nov-24)
-                year_end_df = df.groupby('year').last().reset_index()
-                
-                # Get unique years
-                years = sorted(year_end_df['year'].unique())
-                
-                if len(years) < 2:
-                    logger.debug(f"Not enough years to calculate returns. Found: {years}")
-                    return annual_returns
-                
-                logger.debug(f"Found year-end data for years: {years}")
-                
-                # Calculate returns using the last available data point for each year
-                # Formula: (Year T Value - Year T-1 Value) / Year T-1 Value
-                # Note: This now works for incomplete years (e.g., Jan-24 to Nov-24)
-                # Clean fund values and compute percentage change using vectorization
-                clean_vals = year_end_df[fund_column].astype(str).str.replace(r'[\$,]', '', regex=True)
-                year_end_df[fund_column] = pd.to_numeric(clean_vals, errors='coerce')
-                
-                # Calculate percent change automatically
-                year_end_df['return_pct'] = year_end_df[fund_column].pct_change() * 100
-                
-                valid_returns = year_end_df.dropna(subset=['return_pct'])
-                for _, row in valid_returns.iterrows():
-                    ret = row['return_pct']
-                    if pd.notna(ret) and ret not in (float('inf'), float('-inf')):
-                        annual_returns[str(int(row['year']))] = round(ret, 2)
-                        logger.debug(f"  {int(row['year'])} Return: {ret:.2f}%")
-                        
-            except Exception as e:
-                logger.debug(f"Error parsing date format: {e}")
-                return annual_returns
-        
-        else:
-            # --- 3. HANDLE YEAR INTEGERS (YYYY) ---
-            # (This block remains largely the same as your original logic)
-            try:
-                df['year_extracted'] = df[date_col].astype(str).str.extract(r'(\d{4})')[0]
-                df = df.dropna(subset=['year_extracted'])
-                
-                if len(df) == 0:
-                    logger.debug("No valid year data found")
-                    return annual_returns
-                
-                df['year_extracted'] = df['year_extracted'].astype(int)
-                
-                # Use the last available row for each year
-                # (Assumes data is sorted chronologically or the last entry is year-end)
-                year_end_df = df.groupby('year_extracted').last().reset_index()
-                years = sorted(year_end_df['year_extracted'].unique())
-                
-                if len(years) < 2:
-                    logger.debug(f"Not enough years to calculate returns. Found: {years}")
-                    return annual_returns
-                
-                logger.debug(f"Found years: {years}")
-                
-                # Clean fund values and compute percentage change using vectorization
-                clean_vals = year_end_df[fund_column].astype(str).str.replace(r'[\$,]', '', regex=True)
-                year_end_df[fund_column] = pd.to_numeric(clean_vals, errors='coerce')
-                
-                # Calculate percent change automatically
-                year_end_df['return_pct'] = year_end_df[fund_column].pct_change() * 100
-                
-                valid_returns = year_end_df.dropna(subset=['return_pct'])
-                for _, row in valid_returns.iterrows():
-                    ret = row['return_pct']
-                    if pd.notna(ret) and ret not in (float('inf'), float('-inf')):
-                        annual_returns[str(int(row['year_extracted']))] = round(ret, 2)
-                        logger.debug(f"  {int(row['year_extracted'])} Return: {ret:.2f}%")
-                        
-            except Exception as e:
-                logger.debug(f"Error parsing year format: {e}")
-                return annual_returns
-        
-        return annual_returns
-
-class FilingExtractor:
+class NCSRExtractor:
     def __init__(self, html_content: str):
         self.soup = BeautifulSoup(html_content, 'lxml')
         self._clean_soup()
@@ -214,7 +65,7 @@ class FilingExtractor:
             if c_id and c_id not in seen_contexts:
                 seen_contexts.add(c_id)
                 fund_name = tag.text.strip()
-                if vanguard and "Vanguard" not in fund_name: 
+                if vanguard and "Vanguard" not in fund_name and "ishares" not in fund_name.lower(): 
                     fund_name = "Vanguard " + fund_name
                 logger.info(f"Processing: {fund_name}")
                 
@@ -255,7 +106,10 @@ class FilingExtractor:
         """Extracts all data for a specific Context ID."""
         
         logger.info("Extracting context: %s", c_id)
-        
+
+        series_id = self._get_class_id(c_id) 
+        logger.info("Series ID: %s", series_id)
+        print("Series ID:", series_id)
         # 1. Extract all values first
         ticker = self._get_value(XBRLTags.TRADING_SYMBOL, c_id)
         expense_ratio = self._get_value(XBRLTags.EXPENSE_RATIO_PCT, c_id)
@@ -332,12 +186,37 @@ class FilingExtractor:
             issuer_allocation=issuer_allocation,
             credit_rating=credit_rating,
             performance_table=performance_table,
-            avg_annual_returns=avg_annual_returns
+            avg_annual_returns=avg_annual_returns,
+            series_id=series_id,
         )
             
         return fund
 
     
+    def _get_class_id(self, c_id: str) -> str:
+        """Extracts the SEC class contract identifier (e.g. C000204567) 
+        from the oef:ClassAxis dimension of the XBRL context."""
+        context = self.soup.find(lambda t: t.get("id") == c_id and "context" in (t.name or "").lower())
+        if context is None:
+            context = self.soup.find(attrs={"id": c_id})
+        if context is None:
+            return None
+
+        member = context.find(
+            lambda t: "explicitmember" in (t.name or "").lower()
+            and re.search(r"ClassAxis", t.get("dimension", ""), re.IGNORECASE)
+        )
+        if member:
+            raw = member.get_text(strip=True)
+            # raw looks like: "world:C000204567Member" or just "C000204567Member"
+            # strip namespace prefix and "Member" suffix
+            class_id = raw.split(":")[-1].replace("Member", "")
+            logger.debug("_get_class_id c_id=%s -> %r", c_id, class_id)
+            return class_id
+
+        logger.debug("_get_class_id c_id=%s -> no ClassAxis member found", c_id)
+        return None
+
     def _get_block(self, tag_name:str, c_id: str) -> str:
         """Finds a simple tag restricted by context."""
         tag = self.soup.find(attrs={"name": tag_name, "contextref": c_id})
@@ -351,7 +230,7 @@ class FilingExtractor:
         return XBRLUtils.clean_text(tag)
     
 
-    def get_financial_highlights(self) -> pd.DataFrame:
+    def get_financial_highlights_vanguard(self) -> pd.DataFrame:
         """
         Extract Financial Highlights tables from HTML filing.
         Returns a DataFrame with performance data for each fund and share class.
@@ -446,7 +325,7 @@ class FilingExtractor:
         # Convert to DataFrame
         return self._create_performance_dataframe(results)
 
-    def get_financial_highlights2(self) -> pd.DataFrame:
+    def get_financial_highlights_ishares(self) -> pd.DataFrame:
         """
         Extracts Financial Highlights, handling tables where years are in columns 
         and metrics are in rows (transposed format).
@@ -652,10 +531,6 @@ class FilingExtractor:
         # Convert to list format expected by _create_performance_dataframe
         results = list(fund_data.values())
         
-        print(f"Total funds extracted: {len(results)}")
-        for result in results:
-            print(f"  {result['fund_name']} - {result['share_class']}: {len(result['years'])} years")
-        
         return self._create_performance_dataframe(results)
     
      
@@ -710,7 +585,7 @@ class FilingExtractor:
     def _create_performance_dataframe(self, performance_data: List[Dict]) -> pd.DataFrame:
         """
         Convert extracted performance data into a structured DataFrame.
-        Helper method for get_financial_highlights.
+        Helper method for get_financial_highlights_vanguard and get_financial_highlights_ishares.
         """
         rows = []
         
@@ -769,8 +644,10 @@ class FilingExtractor:
         
         return df
 
-    def _get_embedded_value(self, block_name: str, target_name: str, c_id: str) -> str:
+    def _get_embedded_value(self, block_name: str, target_name: str, c_id: str, verbose: bool = False) -> str:
         """Finds a block, parses it, finds a tag inside."""
+        is_turnover = target_name == XBRLTags.PORTFOLIO_TURNOVER
+
         # Find outer block - try both nonnumeric and nonfraction
         block = self.soup.find(["ix:nonnumeric", "ix:nonfraction"], attrs={"name": block_name, "contextref": c_id})
         
@@ -785,13 +662,32 @@ class FilingExtractor:
                     block = tag
                     break
         
+        if verbose and is_turnover:
+            print(f"[_get_embedded_value] target={target_name} | c_id={c_id}")
+            print(f"  block found: {block is not None}")
+            if block:
+                print(f"  block attrs: {dict(block.attrs)}")
+                print(f"  block text (first 200): {block.text.strip()[:200]}")
+
         # Stitch if necessary (optimization: only stitch if continuedAt exists)
         html = XBRLUtils.stitch_block(block, self.soup)
         
         # Quick parse of just this snippet
         mini_soup = BeautifulSoup(html, 'lxml')
         target = mini_soup.find(attrs={"name": target_name})
-        return XBRLUtils.clean_text(target)
+
+        if verbose and is_turnover:
+            print(f"  target found: {target is not None}")
+            if target:
+                print(f"  target attrs: {dict(target.attrs)}")
+                print(f"  target text: {target.text.strip()}")
+
+        result = XBRLUtils.clean_numeric(target)
+
+        if verbose and is_turnover:
+            print(f"  => result: {result}")
+
+        return result
 
     def _extract_tables(self, c_id: str, block_name: str = XBRLTags.HOLDINGS_TABLE, table_name=None) -> Dict[str, pd.DataFrame]:
         """
@@ -885,6 +781,77 @@ class FilingExtractor:
 
         return found_tables
 
+    @staticmethod
+    def process_filing_data(filing_data: tuple, vanguard: bool = False) -> dict:
+        """Parse a single filing from a serializable tuple.
+
+        Designed to be called from a worker process via
+        ``ProcessPoolExecutor.map``.  All inputs and outputs are plain
+        Python / pickle-safe so they cross the process boundary without
+        issues.
+
+        Args:
+            filing_data: A tuple of
+                ``(html_content, report_date, accession_number,
+                   filing_date, form, url)``
+                as produced by the sequential download phase.
+            vanguard: Prepend *"Vanguard "* to fund names that don't
+                already contain it.
+
+        Returns:
+            A dict with keys:
+            ``funds``, ``all_tickers``, ``performance_tickers``,
+            ``df_performance``, ``report_date``.
+            Returns ``None`` if parsing fails.
+        """
+        try:
+            html_content, report_date, accession_number, filing_date, form, url = filing_data
+
+            parser = NCSRExtractor(html_content)
+            funds = parser.get_funds(vanguard=vanguard)
+
+            from ..models.fund import FilingMetadata as FundFilingMetadata
+            metadata = FundFilingMetadata(
+                accession_number=accession_number,
+                reporting_date=report_date,
+                filing_date=filing_date,
+                form=form,
+                url=url,
+            )
+
+            all_tickers = []
+            performance_tickers = []
+            processed_funds = []
+
+            for fund in funds:
+                fund.ncsr_metadata = metadata
+                processed_funds.append(fund)
+                all_tickers.append(fund.ticker)
+                if fund.performance_table is not None:
+                    if fund.ticker not in performance_tickers:
+                        performance_tickers.append(fund.ticker)
+
+            try:
+                df_performance = (
+                    parser.get_financial_highlights_vanguard()
+                    if vanguard
+                    else parser.get_financial_highlights_ishares()
+                )
+            except Exception:
+                df_performance = None
+
+            return {
+                "funds": processed_funds,
+                "all_tickers": all_tickers,
+                "performance_tickers": performance_tickers,
+                "df_performance": df_performance,
+                "report_date": report_date,
+            }
+
+        except Exception as e:
+            logger.error("process_filing_data failed for %s: %s", filing_data[1] if filing_data else "?", e)
+            return None
+
     def fund_summary(self, fund_list: List[FundData]) -> str:
         
 
@@ -936,80 +903,3 @@ class FilingExtractor:
             print(f"📊 Tables ({len(found_tables)}): {', '.join(found_tables) if found_tables else '⚠️ None'}")
             print("-" * 80)
         
-
-    def print_fund_info(self, fund_list: List[FundData]) -> None:
-        
-
-        print(f"Showing information of {len(fund_list)} funds")
-        # Assuming 'funds' is your list of FundData objects
-        for fund in fund_list:
-            # 1. HEADER: Use Markdown for a nice visual separation
-            display(Markdown(f"### 🏦 {fund.name}"))
-            
-            # 2. BASIC INFO GRID
-            print(f"🆔 Context ID:      {fund.context_id}")
-            print(f"🎫 Ticker:          {fund.ticker}")
-            print(f"🏷️ Share Class:     {fund.share_class}")
-            print(f"📅 Report Date:     {fund.report_date}")
-            print(f"🏛️ Sec Exchange:    {fund.security_exchange}")
-
-            # 3. FINANCIALS
-            print("\n--- 💰 Costs & Financials ---")
-            # Using f-string alignment (<20) to make columns line up perfectly
-            print(f"{'Net Assets':<20}: {fund.net_assets}")
-            print(f"{'Expense Ratio':<20}: {fund.expense_ratio}")
-            print(f"{'Turnover Rate':<20}: {fund.turnover_rate}")
-            print(f"{'Costs per $10k':<20}: {fund.costs_per_10k}")
-            print(f"{'Advisory Fees':<20}: {fund.advisory_fees}")
-            print(f"{'Number of Holdings':<20}: {fund.n_holdings}")
-
-            # 4. COMMENTARY (Truncated)
-            # We strip newlines and limit it to 200 chars so it doesn't clutter the screen
-            if fund.performance_commentary and fund.performance_commentary != "N/A":
-                clean_commentary = fund.performance_commentary.replace('\n', ' ').strip()
-                print(f"\n📝 Commentary: \"{clean_commentary[:250]}...\"")
-
-            # 5. DATA TABLES
-            # We check each dataframe to see if it exists before displaying
-            if fund.performance_table is not None:
-                display(Markdown("**📈 Performance History**"))
-                display(fund.performance_table)
-
-            if fund.industry_allocation is not None:
-                display(Markdown("**📊 Industry Allocation**"))
-                display(fund.industry_allocation)
-            
-            if fund.avg_annual_returns is not None:
-                display(Markdown("**📊 Average Annual Returns**"))
-                display(fund.avg_annual_returns)
-
-            if fund.top_holdings is not None:
-                display(Markdown("**🏆 Top Holdings**"))
-                display(fund.top_holdings)
-
-            if fund.sector_allocation is not None:
-                display(Markdown("**🏗️ Sector Allocation**"))
-                display(fund.sector_allocation)
-
-            if fund.portfolio_composition is not None:
-                display(Markdown("**🍰 Portfolio Composition**"))
-                display(fund.portfolio_composition)
-
-            if fund.geographic_allocation is not None:
-                display(Markdown("**🌍 Geographic Allocation**"))
-                display(fund.geographic_allocation)
-            if fund.maturity_allocation is not None:
-                display(Markdown("**📊 Maturity Allocation**"))
-                display(fund.maturity_allocation)
-
-            if fund.credit_rating is not None:
-                display(Markdown("**📊 Credit Rating**"))
-                display(fund.credit_rating)
-
-            if fund.issuer_allocation is not None:
-                display(Markdown("**📊 Issuer Allocation**"))
-                display(fund.issuer_allocation)
-
-            # 6. END OF FUND SEPARATOR
-            print("\n" + "="*80 + "\n")
-                

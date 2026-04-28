@@ -12,11 +12,8 @@ This test file validates:
 """
 
 import pytest
-from datetime import date, datetime
-from typing import Dict, List, Any
 from src.simple_rag.database.neo4j import Neo4jDatabase
-from src.simple_rag.models.fund import FundData, FilingMetadata
-from src.simple_rag.models.company import CompanyEntity
+
 
 
 class TestNeo4jConnection:

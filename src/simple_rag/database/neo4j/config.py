@@ -8,7 +8,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 
 # Load variables from .env file in project root
-load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
+env_path = PROJECT_ROOT / ".env"
+print(f"Loading environment from: {env_path}")
+load_dotenv(dotenv_path=env_path)
 
 class Config:
     # Neo4j Settings (matching docker-compose.yml credentials)
