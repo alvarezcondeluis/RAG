@@ -97,16 +97,17 @@ QUERY RULES:
 
     "company_filing": """
 Relevant schema:
-(:Company /* properties: ticker, name, cik */)-[:HAS_FILING /* properties: date */]->(filing:Filing10K /* properties: id */)
-(filing)-[:HAS_RISK_FACTOR_CHUNK]->(:Section:RiskFactor /* properties: id, text, embedding */)
-(filing)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(:Section:BusinessInformation /* properties: id, text, embedding */)
-(filing)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(:Section:ManagemetDiscussion /* properties: id, text, embedding */)
-(filing)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(:Section:LegalProceeding /* properties: id, text, embedding */)
-(filing)-[:HAS_PROPERTIES_CHUNK]->(:Section:Properties /* properties: id, fullText, embedding */)
+(:Company /* properties: ticker, name, cik */)-[:REPORTS_IN /* properties: year */]->(filing:Filing10K)
+(filing)-[:HAS_SECTION]->(:Section:RiskFactor /* properties: title, text, sectionType, secItem */)
+(filing)-[:HAS_SECTION]->(:Section:BusinessInformation /* properties: title, text, sectionType, secItem */)
+(filing)-[:HAS_SECTION]->(:Section:ManagementDiscussion /* properties: title, text, sectionType, secItem */)
+(filing)-[:HAS_SECTION]->(:Section:LegalProceeding /* properties: title, text, sectionType, secItem */)
+(filing)-[:HAS_SECTION]->(:Section:Properties /* properties: title, text, sectionType, secItem */)
+(:Section)-[:HAS_CHUNK]->(:Chunk:SectionChunk /* properties: title, text, embedding, chunkType */)
 (filing)-[:HAS_FINACIALS]->(fin:Section:Financials /* properties: incomeStatement, balanceSheet, cashFlow, fiscalYear */)
 (fin)-[:HAS_METRIC]->(:FinancialMetric /* properties: label, value */)
 (:FinancialMetric)-[:HAS_SEGMENT]->(:Segment /* properties: label, value, percentage */)
-(filing)-[:EXTRACTED_FROM]->(:Document /* properties: accessionNumber, url, filingDate */)
+(filing)-[:EXTRACTED_FROM]->(:Document /* properties: accession_number, url, filing_date */)
 
 QUERY RULES:
 - Company ticker is a stock ticker like 'AAPL', 'MSFT'.

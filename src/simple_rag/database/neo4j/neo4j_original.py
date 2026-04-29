@@ -2078,7 +2078,7 @@ class Neo4jDatabase:
                     ON CREATE SET f.createdAt = timestamp()
                     ON MATCH SET f.updatedAt = timestamp()
                     
-                    MERGE (c)-[r:HAS_FILING]->(f)
+                    MERGE (c)-[r:REPORTS_IN]->(f)
                     SET r.date = $filing_date
                     
                     MERGE (f)-[:EXTRACTED_FROM]->(doc)
@@ -2161,7 +2161,7 @@ class Neo4jDatabase:
                     if filing_10k.management_discussion_and_analysis:
                         mda_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION]->(md:Section:ManagemetDiscussion {id: $section_id})
+                        MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION]->(md:Section:ManagementDiscussion {id: $section_id})
                         SET md.fullText = $full_text
                         RETURN md
                         """
@@ -2521,7 +2521,7 @@ class Neo4jDatabase:
             ON CREATE SET f.createdAt = timestamp()
             ON MATCH SET f.updatedAt = timestamp()
             
-            MERGE (c)-[r:HAS_FILING]->(f)
+            MERGE (c)-[r:REPORTS_IN]->(f)
             SET r.date = $filing_date
             
             MERGE (f)-[:EXTRACTED_FROM]->(doc)
@@ -2675,7 +2675,7 @@ class Neo4jDatabase:
             
             query = """
             MATCH (f:`10KFiling` {id: $filing_id})
-            MERGE (md:Section:ManagemetDiscussion {id: $section_id})
+            MERGE (md:Section:ManagementDiscussion {id: $section_id})
             SET md.fullText = $full_text,
                 md.updatedAt = timestamp()
             MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION]->(md)

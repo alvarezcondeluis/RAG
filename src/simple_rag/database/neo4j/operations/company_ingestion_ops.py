@@ -230,7 +230,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     ON CREATE SET f.createdAt = timestamp()
                     ON MATCH SET f.updatedAt = timestamp()
                     
-                    MERGE (c)-[r:HAS_FILING]->(f)
+                    MERGE (c)-[r:REPORTS_IN]->(f)
                     SET r.date = $filing_date
                     
                     MERGE (f)-[:EXTRACTED_FROM]->(doc)
@@ -313,7 +313,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     if filing_10k.management_discussion_and_analysis:
                         mda_section_query = """
                         MATCH (f:`10KFiling` {id: $filing_id})
-                        MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md:Section:ManagemetDiscussion {id: $section_id})
+                        MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md:Section:ManagementDiscussion {id: $section_id})
                         SET md.fullText = $full_text
                         RETURN md
                         """
@@ -560,7 +560,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
     def ingest_companies_batch(
         self,
         companies: List['CompanyEntity'],
-        verbose: bool = True
+        verbose: bool = False
     ) -> Dict[str, int]:
         """
         Batch ingest a list of CompanyEntity objects into Neo4j.

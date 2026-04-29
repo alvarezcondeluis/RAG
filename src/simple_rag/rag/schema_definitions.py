@@ -16,13 +16,8 @@ DETAILED_SCHEMA = """
 (:Fund {
     ticker,              # Symbol like 'VTI' (use for matching symbols)
     name,                # Full name like 'Vanguard Total Stock Market Index Fund'
-    securityExchange,    # Exchange like 'NASDAQ', 'NYSE'
-    costsPer10k,         # Costs per $10,000 invested (numeric)
-    advisoryFees,        # Advisory fees (numeric)
-    numberHoldings,      # Total number of holdings (integer) - USE THIS, not count(h)!
-    expenseRatio,        # Expense ratio (numeric)
-    netAssets,           # Net assets value (numeric) - DIRECTLY ON FUND NODE
-    turnoverRate        # Portfolio Turnover Rate in ABSOLUTE terms (e.g., 2 means 2%, NOT 0.02)
+    cik,                 # Central Index Key (SEC identifier)
+    securityExchange     # Exchange like 'NASDAQ', 'NYSE'
 })
 # FULL-TEXT INDEXES (use for fuzzy/partial name matching):
 # - Provider.name -> use CALL db.index.fulltext.queryNodes('providerNameIndex', 'search_term')
@@ -34,27 +29,32 @@ DETAILED_SCHEMA = """
 # === FUND RELATIONSHIPS ===
 # Share Classes
 (:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name, description})
-# Document node — NOTE: property names use exact DB casing (accessionNumber, filingDate)
-(:Fund)-[:EXTRACTED_FROM]->(:Document {accessionNumber, url, type, filingDate, reportingDate})
-# Profile (versioned by date)
-(:Fund)-[:DEFINED_BY {date}]->(:Profile {summaryProspectus})
-(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(:Objective {id, text, embedding})
-(:Profile)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(:PerformanceCommentary {id, text, embedding})
-(:Profile)-[:HAS_RISK_CHUNK]->(:RiskChunk {id, title, text, embedding})
-(:Profile)-[:HAS_STRATEGY_CHUNK]->(:StrategyChunk {id, title, text, embedding})
+# Document node — MERGE key is accession_number
+(:Fund)-[:EXTRACTED_FROM]->(:Document {accession_number, url, form, filing_date, reporting_date})
+# Profile (versioned by year)
+(:Fund)-[:DEFINED_BY {year}]->(:Profile {summaryProspectus})
+# Profile sections use multi-labeled Section nodes (filter by label, not property)
+(:Profile)-[:HAS_SECTION]->(:Section:Objective {text, title, embedding})
+(:Profile)-[:HAS_SECTION]->(:Section:PerformanceCommentary {text, title, embedding})
+(:Profile)-[:HAS_SECTION]->(:Section:RiskFactor {text, title})
+(:Profile)-[:HAS_SECTION]->(:Section:Strategy {text, title})
+# Risk/Strategy sections have child chunks:
+(:Section)-[:HAS_CHUNK]->(:Chunk {text, embedding})
 (:Profile)-[:EXTRACTED_FROM]->(:Document)
 # Charts/Images
-(:Fund)-[:HAS_CHART]->(:Image {category, svg, title})
+(:Fund)-[:HAS_CHART {year}]->(:Image {category, svg, title})
+# Tables
+(:Fund)-[:HAS_TABLE {year}]->(:Table {content, title})
 
-# Management Team (date on the relationship)
-(:Fund)-[:MANAGED_BY {date}]->(:Person {name})
+# Management Team (year on the relationship)
+(:Fund)-[:MANAGED_BY {year}]->(:Person {name})
 
-# Average Returns (versioned by date)
-(:Fund)-[:HAS_AVERAGE_RETURNS {date}]->(:AverageReturns {return1y, return5y, return10y, returnInception})
+# Average Returns (versioned by year)
+(:Fund)-[:HAS_AVERAGE_RETURNS {year}]->(:AverageReturns {return1y, return5y, return10y, returnInception})
 
-# Allocations (by report date)
-(:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, date}]->(:Sector {name})
-(:Fund)-[h:HAS_REGION_ALLOCATION {weight, date}]->(:Region {name})
+# Allocations (by year)
+(:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, year}]->(:Sector {name})
+(:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
 
 # Holdings Structure
 (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId})
@@ -72,7 +72,10 @@ DETAILED_SCHEMA = """
     netAssets,                   # Total net assets under management 
     netAssetsValueBeginning,     # Price of one share at period start
     netAssetsValueEnd,           # Price of one share at period end
-    netIncomeRatio               # Net investment income ratio (percentage)
+    netIncomeRatio,              # Net investment income ratio (percentage)
+    numberHoldings,              # Total number of holdings (integer) - USE THIS, not count(h)!
+    advisoryFees,                # Advisory fees (numeric)
+    costsPer10k                  # Costs per $10,000 invested (numeric)
 })
 # Example: MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN r.year, fh.totalReturn
 
@@ -90,16 +93,20 @@ DETAILED_SCHEMA = """
 # Funds can hold Company stocks
 (:Holding {ticker})-[:REPRESENTS]->(:Company {ticker})
 
-(:Company)-[:HAS_FILING {date}]->(:Filing10K)
+(:Company)-[:REPORTS_IN {year}]->(:Filing10K)
 (:Filing10K)-[:EXTRACTED_FROM]->(:Document)
 
-# 10-K Section Types (all inherit from :Section base label)
-(:Filing10K)-[:HAS_RISK_FACTOR_CHUNK]->(:Section:RiskFactor {id, text, embedding})
-(:Filing10K)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(:Section:BusinessInformation {id, text, embedding})
-(:Filing10K)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(:Section:LegalProceeding {id, text, embedding})
-(:Filing10K)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(:Section:ManagemetDiscussion {id, text, embedding})
-# NOTE: Properties node uses 'fullText', not 'text'
-(:Filing10K)-[:HAS_PROPERTIES_CHUNK]->(:Section:Properties {id, fullText, embedding})
+# 10-K Section Types (TWO-LEVEL ARCHITECTURE)
+# Level 1: Section nodes store FULL TEXT — unified HAS_SECTION relationship
+# Level 2: Chunk:SectionChunk nodes store CHUNKED TEXT for fine-grained retrieval
+# Each section has: id, title, text (full), sectionType, secItem
+(:Filing10K)-[:HAS_SECTION]->(:Section {id, title, text, sectionType, secItem})
+# Section additional labels: RiskFactor, BusinessInformation, LegalProceeding, ManagementDiscussion, Properties
+# sectionType values: 'risk_factors', 'business_info', 'legal_proceedings', 'mda', 'properties'
+# secItem values: 'Item 1A', 'Item 1', 'Item 3', 'Item 7', 'Item 2'
+
+# Section chunks for fine-grained retrieval (linked to parent Section)
+(:Section)-[:HAS_CHUNK]->(:Chunk:SectionChunk {title, text, embedding, chunkType, chunkIndex, subsection})
 
 (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
 
@@ -119,7 +126,7 @@ DETAILED_SCHEMA = """
 (:FinancialMetric)-[:HAS_SEGMENT]->(:Segment {label, value, percentage})
 
 # === IMPORTANT NOTES ===
-# 1. netAssets is DIRECTLY on Fund node, not in a separate FinancialHighlight node
+# 1. netAssets, numberHoldings, expenseRatio, advisoryFees, costsPer10k are on FinancialHighlight, NOT on Fund
 # 2. numberHoldings property already contains the count but you can recalculate
 # 3. turnoverRate is absolute (2 = 2%, not 0.02)
 # 4. Use 'ticker' for symbols (VTI), 'name' for full names

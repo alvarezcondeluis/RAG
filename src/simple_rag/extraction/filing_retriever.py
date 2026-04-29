@@ -641,7 +641,7 @@ class FilingRetriever:
 
                 if verbose:
                     print(f"Processing: {fund.name} {fund.share_class.value}")
-                    print(f"Extracting context: {fund.context_id}")
+                    
 
                 if fund.performance_table is not None:
                     filing_perf_count += 1

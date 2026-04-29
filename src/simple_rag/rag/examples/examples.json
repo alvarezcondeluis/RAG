@@ -201,7 +201,7 @@
   },
   {
     "question": "What are the risk factors from the 10-K filing for Apple?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_RISK_FACTOR_CHUNK]->(rf:Section:RiskFactor) RETURN rf.text AS riskFactor LIMIT 10"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_SECTION]->(rf:Section:RiskFactor) RETURN rf.text AS riskFactor LIMIT 10"
   },
   {
     "question": "What are the funds that have more than 10% invested in the United States?",
@@ -209,7 +209,7 @@
   },
   {
     "question": "Show me the business description from the 10-K for Google.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5"
   },
   {
     "question": "What are the insider transactions for Microsoft?",
@@ -217,7 +217,7 @@
   },
   {
     "question": "Show me the financial metrics from the 10-K filing for Tesla.",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.year DESC"
   },
   {
     "question": "Return both the expense ratio and the turnover rate for VTI.",
@@ -233,7 +233,7 @@
   },
   {
     "question": "Show me the revenue segments from the 10-K of Amazon.",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage"
   },
   {
     "question": "Which companies have a CEO who is also a fund manager?",
@@ -297,11 +297,11 @@
   },
   {
     "question": "What is the management discussion from the 10-K filing for Amazon?",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md:Section:ManagemetDiscussion) RETURN md.text AS managementDiscussion LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(md:Section:ManagementDiscussion) RETURN md.text AS managementDiscussion LIMIT 5"
   },
   {
     "question": "Show me the legal proceedings from the 10-K for Microsoft.",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceeding LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceeding LIMIT 5"
   },
   {
     "question": "Show me the evolution of the turnover ratio for VIEIX along the years.",
@@ -365,7 +365,7 @@
   },
   {
     "question": "Show me legal proceedings from the 10-K for Apple.",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceedings LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceedings LIMIT 5"
   },
   {
     "question": "What was the fund with the highest total return in any single year?",
@@ -385,7 +385,7 @@
   },
   {
     "question": "Show me the properties that Apple holds.",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(f:Filing10K)-[:HAS_PROPERTIES_CHUNK]->(p:Section:Properties) RETURN p.text AS properties"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(p:Section:Properties) RETURN p.text AS properties"
   },
   {
     "question": "CORRECTION EXAMPLE - NEVER use math operators inside curly braces. Use a WHERE clause instead.",
@@ -490,11 +490,11 @@
   },
   {
     "question": "List all revenue and cost segments from Apple's 10-K filings.",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.date DESC"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.year DESC"
   },
   {
     "question": "Which funds hold companies that have disclosed legal proceedings in their 10-K?",
-    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:HAS_FILING]->(filing:Filing10K)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(:Section:LegalProceeding) RETURN DISTINCT f.name AS fundName, c.name AS companyName"
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(:Section:LegalProceeding) RETURN DISTINCT f.name AS fundName, c.name AS companyName"
   },
   {
     "question": "How much has the VIEIX fund increased its net asset value since 2 years ago?",
@@ -514,19 +514,19 @@
   },
   {
     "question": "What is the net profit margin for Tesla based on its latest income statement?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mNet.value / mRev.value) * 100 AS NetProfitMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mNet.value / mRev.value) * 100 AS NetProfitMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "What is the total revenue reported by Apple in its most recent fiscal year?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS Revenue ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS Revenue ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "What is the operating income for Microsoft from its latest 10-K filing?",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'OperatingIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS OperatingIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'OperatingIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS OperatingIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "What is the gross profit margin for NVIDIA?",
-    "cypher": "MATCH (c:Company {ticker: 'NVDA'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mGP:FinancialMetric {label: 'GrossProfit'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mGP.value / mRev.value) * 100 AS GrossProfitMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'NVDA'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mGP:FinancialMetric {label: 'GrossProfit'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mGP.value / mRev.value) * 100 AS GrossProfitMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "Which company has the highest shareholder return in their compensation package?",
@@ -558,19 +558,19 @@
   },
   {
     "question": "Show me the operating margin for Amazon from the latest filing.",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mOI:FinancialMetric {label: 'OperatingIncome'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mOI.value / mRev.value) * 100 AS OperatingMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mOI:FinancialMetric {label: 'OperatingIncome'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mOI.value / mRev.value) * 100 AS OperatingMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "What was the net income for Apple in each fiscal year?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS NetIncome ORDER BY fin.fiscalYear DESC"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS NetIncome ORDER BY fin.fiscalYear DESC"
   },
   {
     "question": "Which company reported the highest revenue in their most recent fiscal year?",
-    "cypher": "MATCH (c:Company)-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS Revenue ORDER BY m.value DESC LIMIT 1"
+    "cypher": "MATCH (c:Company)-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(m:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS Revenue ORDER BY m.value DESC LIMIT 1"
   },
   {
     "question": "Compare the revenue and net income for Google in its latest annual report.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, mRev.value AS Revenue, mNet.value AS NetIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, mRev.value AS Revenue, mNet.value AS NetIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "Get the total return and expense ratio for each year for the VFIAX fund",

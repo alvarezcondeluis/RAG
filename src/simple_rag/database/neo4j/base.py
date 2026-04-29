@@ -159,7 +159,7 @@ class Neo4jDatabaseBase:
     def _connect(self):
         """Establish connection to Neo4j using native driver."""
         try:
-            print(self.password)
+            
             self.driver = GraphDatabase.driver(
                 self.uri,
                 auth=(self.username, self.password),

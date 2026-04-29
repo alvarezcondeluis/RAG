@@ -105,11 +105,6 @@ class NCSRExtractor:
     def _extract_single_fund(self, c_id: str, name: str) -> FundData:
         """Extracts all data for a specific Context ID."""
         
-        logger.info("Extracting context: %s", c_id)
-
-        series_id = self._get_class_id(c_id) 
-        logger.info("Series ID: %s", series_id)
-        print("Series ID:", series_id)
         # 1. Extract all values first
         ticker = self._get_value(XBRLTags.TRADING_SYMBOL, c_id)
         expense_ratio = self._get_value(XBRLTags.EXPENSE_RATIO_PCT, c_id)
@@ -186,8 +181,7 @@ class NCSRExtractor:
             issuer_allocation=issuer_allocation,
             credit_rating=credit_rating,
             performance_table=performance_table,
-            avg_annual_returns=avg_annual_returns,
-            series_id=series_id,
+            avg_annual_returns=avg_annual_returns
         )
             
         return fund

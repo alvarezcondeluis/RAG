@@ -558,7 +558,7 @@
   },
   {
     "question": "What are the risk factors mentioned in the 10-K filing for Apple?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_RISK_FACTOR_CHUNK]->(rf:Section:RiskFactor) RETURN rf.text AS riskFactor LIMIT 10",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(rf:Section:RiskFactor) RETURN rf.text AS riskFactor LIMIT 10",
     "complexity": "medium"
   },
   {
@@ -568,7 +568,7 @@
   },
   {
     "question": "What is the business description from the 10-K filing for the company with ticker GOOG?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'GOOG'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5",
+    "expected_cypher": "MATCH (c:Company {ticker: 'GOOG'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5",
     "complexity": "medium"
   },
   {
@@ -593,7 +593,7 @@
   },
   {
     "question": "Show me the financial metrics from the latest 10-K filing for Tesla",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.year DESC",
     "complexity": "hard"
   },
   {
@@ -613,7 +613,7 @@
   },
   {
     "question": "Show me the revenue segments from the 10-K financials of Amazon",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage",
     "complexity": "hard"
   },
   {
@@ -688,12 +688,12 @@
   },
   {
     "question": "Which company reported the highest total Revenue in their most recent fiscal year?",
-    "expected_cypher": "MATCH (c:Company)-[:HAS_FILING]->(f10k:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS Revenue ORDER BY m.value DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company)-[:REPORTS_IN]->(f10k:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, m.value AS Revenue ORDER BY m.value DESC LIMIT 1",
     "complexity": "hard"
   },
   {
     "question": "What is the Net Profit Margin for Tesla (TSLA) based on its latest income statement?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_FILING]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mNet.value / mRev.value) * 100 AS NetProfitMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, (mNet.value / mRev.value) * 100 AS NetProfitMarginPercent ORDER BY fin.fiscalYear DESC LIMIT 1",
     "complexity": "hard"
   },
   {
@@ -778,17 +778,17 @@
   },
   {
     "question": "What does the management discussion say about Tesla's outlook in its latest 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_FILING]->(f:Filing10K)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md:Section:ManagemetDiscussion) RETURN md.text AS managementDiscussion LIMIT 5",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(md:Section:ManagementDiscussion) RETURN md.text AS managementDiscussion LIMIT 5",
     "complexity": "medium"
   },
   {
     "question": "Are there any legal proceedings mentioned in Apple's 10-K filing?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(f:Filing10K)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceedings",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceedings",
     "complexity": "medium"
   },
   {
     "question": "What properties does Microsoft own according to its 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_FILING]->(filing:Filing10K)-[:HAS_PROPERTIES_CHUNK]->(props:Section:Properties) RETURN props.fullText AS properties",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(props:Section:Properties) RETURN props.fullText AS properties",
     "complexity": "medium"
   },
   {
@@ -858,7 +858,7 @@
   },
   {
     "question": "Show me funds that hold companies which have had legal proceedings in their 10-K",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:HAS_FILING]->(f10k:Filing10K)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp:Section:LegalProceeding) RETURN DISTINCT f.name AS fundName, c.name AS companyName",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:REPORTS_IN]->(f10k:Filing10K)-[:HAS_SECTION]->(lp:Section:LegalProceeding) RETURN DISTINCT f.name AS fundName, c.name AS companyName",
     "complexity": "hard"
   },
   {
@@ -968,27 +968,27 @@
   },
   {
     "question": "What are the financial metrics from Apple's 10-K filing?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.date DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) RETURN m.label AS metric, m.value AS value ORDER BY rel.year DESC",
     "complexity": "medium"
   },
   {
     "question": "What are the revenue segments from Tesla's latest 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.date DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric)-[:HAS_SEGMENT]->(s:Segment) RETURN m.label AS metric, s.label AS segment, s.value AS value, s.percentage AS percentage ORDER BY rel.year DESC",
     "complexity": "hard"
   },
   {
     "question": "Show the income statement text from Microsoft's most recent 10-K filing.",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.incomeStatement AS incomeStatement, fin.fiscalYeat AS fiscalYear ORDER BY rel.date DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.incomeStatement AS incomeStatement, fin.fiscalYeat AS fiscalYear ORDER BY rel.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the balance sheet and cash flow data for Amazon from its 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[rel:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.balanceSheet AS balanceSheet, fin.cashFlow AS cashFlow, fin.fiscalYeat AS fiscalYear ORDER BY rel.date DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.balanceSheet AS balanceSheet, fin.cashFlow AS cashFlow, fin.fiscalYeat AS fiscalYear ORDER BY rel.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Which company has the highest single revenue metric value across all 10-K filings?",
-    "expected_cypher": "MATCH (c:Company)-[:HAS_FILING]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) WHERE m.label CONTAINS 'Revenue' RETURN c.name AS companyName, m.label AS metric, m.value AS value ORDER BY m.value DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company)-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials)-[:HAS_METRIC]->(m:FinancialMetric) WHERE m.label CONTAINS 'Revenue' RETURN c.name AS companyName, m.label AS metric, m.value AS value ORDER BY m.value DESC LIMIT 1",
     "complexity": "hard"
   },
   {
@@ -1008,7 +1008,7 @@
   },
   {
     "question": "What SEC filing document backs the 10-K data for Apple?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_FILING]->(filing:Filing10K)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate ORDER BY d.filingDate DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(filing:Filing10K)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate ORDER BY d.filingDate DESC LIMIT 1",
     "complexity": "medium"
   },
   {

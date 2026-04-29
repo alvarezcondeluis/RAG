@@ -72,80 +72,31 @@ class FundNodeOperations(Neo4jDatabaseBase):
         if hasattr(performance_data, 'return_inception') and performance_data.return_inception is not None:
             perf_props["returnInception"] = float(performance_data.return_inception)
 
-        # Convert date to string for ID and properties
-        date_str = date.isoformat() if date else "LATEST"
-        perf_id = f"{fund_ticker}_{date_str}_perf"
-        
         query = """
         MATCH (f:Fund {ticker: $fund_ticker})
-        MERGE (ar:AverageReturns {id: $perf_id})
+        MERGE (f)-[rel:HAS_AVERAGE_RETURNS {year: $year}]->(ar:AverageReturns)
         SET ar.return1y = $return1y,
             ar.return5y = $return5y,
             ar.return10y = $return10y,
-            ar.returnInception = $returnInception,
-            ar.year = $year,
-            ar.updatedAt = timestamp()
-        
-        MERGE (f)-[rel:HAS_AVERAGE_RETURNS]->(ar)
-        SET rel.date = $date
+            ar.returnInception = $returnInception
         RETURN ar
         """
         
         params = {
             "fund_ticker": fund_ticker,
-            "perf_id": perf_id,
             "return1y": perf_props.get("return1y"),
             "return5y": perf_props.get("return5y"),
             "return10y": perf_props.get("return10y"),
             "returnInception": perf_props.get("returnInception"),
-            "year": date.year if date else None,
-            "date": date.isoformat() if date else None,
-            "accession_number": accession_number
+            "year": date.year if date else None
         }
         
         result = self._execute_write(query, params)
         if result:
-            logger.info(f"Created AverageReturns node for {fund_ticker} date {date_str}")
+            logger.info(f"Created AverageReturns node for {fund_ticker} year {date.year if date else 'N/A'}")
             return result[0]["ar"]
         return None
     
-    def create_strategy_node(
-        self,
-        fund_ticker: str,
-        full_text_md: str,
-        objective: Optional[str] = None,
-        strategies: Optional[str] = None,
-        date: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create InvestmentStrategy node and link to Fund."""
-        properties = {"full_text_md": full_text_md}
-        if objective:
-            properties["objective"] = objective
-        if strategies:
-            properties["strategies"] = strategies
-        
-        set_clauses = ", ".join([f"s.{k} = ${k}" for k in properties.keys()])
-        rel_set = "SET r.date = $date" if date else ""
-        
-        query = f"""
-        MATCH (f:Fund {{ticker: $fund_ticker}})
-        CREATE (s:InvestmentStrategy)
-        SET {set_clauses}
-        CREATE (f)-[r:WITH_SUMMARY_PROSPECTUS]->(s)
-        {rel_set}
-        RETURN s
-        """
-        
-        params = {"fund_ticker": fund_ticker}
-        params.update(properties)
-        if date:
-            params["date"] = date
-        
-        result = self._execute_write(query, params)
-        if result:
-            logger.info(f"Created strategy node for fund {fund_ticker}")
-            return result[0]["s"]
-        return None
     
     def create_profile_node(
         self,

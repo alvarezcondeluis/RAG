@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class HoldingsOperations(Neo4jDatabaseBase):
     """Fund holdings, charts, and general query operations."""
 
-    def create_fund_holdings(self, ticker: str, series_id: str, report_date: Optional[date], holdings_df, nport_metadata: Optional[Dict[str, Any]] = None):
+    def create_fund_holdings(self, ticker: str, series_id: str, report_date: Optional[date], holdings_df, nport_metadata: Optional[Dict[str, Any]] = None, verbose: bool = True):
         """
         High-Performance Ingestion for Large Funds (>4k holdings).
         Uses Batching + CREATE logic for maximum speed.
@@ -26,16 +26,16 @@ class HoldingsOperations(Neo4jDatabaseBase):
             report_date: Reporting date for the portfolio
             holdings_df: DataFrame containing holdings data
             nport_metadata: Optional metadata dict with keys: accession_number, filing_date, reporting_date, url, form
+            verbose: If True, print progress messages during ingestion (default: True)
         """
-        if series_id is None:
-            print(f"⚠️ No series_id provided for {ticker}, skipping portfolio and holdings creation")
-            return
         
         if holdings_df is None or holdings_df.empty:
-            print(f"⚠️ No holdings found for {series_id}")
+            if verbose:
+                print(f"⚠️ No holdings found for {series_id}")
             return
 
-        print(f"💰 Processing {len(holdings_df)} holdings for {series_id}...")
+        if verbose:
+            print(f"💰 Processing {len(holdings_df)} holdings for {series_id}...")
 
         df = holdings_df.replace({np.nan: None})
         
@@ -55,19 +55,13 @@ class HoldingsOperations(Neo4jDatabaseBase):
         
         setup_query = """
         MATCH (fund:Fund {ticker: $fund_ticker})
-        MERGE (port:Portfolio {id: $portfolio_id})
+        MERGE (port:Portfolio {seriesId: $portfolio_id})
         ON CREATE SET
-            port.ticker = $fund_ticker,
             port.count = $total_count,
+            port.date = $report_date,
             port.createdAt = timestamp()
         MERGE (fund)-[r:HAS_PORTFOLIO]->(port)
-        ON CREATE SET
-            r.date = $report_date,
-            r.createdAt = timestamp()
-        ON MATCH SET
-            r.date = $report_date,
-            r.updatedAt = timestamp()
-        
+       
         // Create Document node and EXTRACTED_FROM relationship if metadata provided
         WITH port
         FOREACH (_ IN CASE WHEN $has_metadata THEN [1] ELSE [] END |
@@ -102,10 +96,10 @@ class HoldingsOperations(Neo4jDatabaseBase):
         BATCH_SIZE = 1000
         
         batch_query = """
-        MATCH (port:Portfolio {id: $portfolio_id})
+        MATCH (port:Portfolio {seriesId: $portfolio_id})
         UNWIND $batch as row
         
-        MERGE (h:Holding {id: row.node_id})
+        MERGE (h:Holding)
         ON CREATE SET
             h.name = row.name,
             h.ticker = row.ticker,
@@ -147,19 +141,23 @@ class HoldingsOperations(Neo4jDatabaseBase):
                         "portfolio_id": portfolio_id,
                         "batch": batch
                     })
-                    print(f"   ⏳ {ticker}: Ingested batch {i} to {i + len(batch)}...")
+                    if verbose:
+                        print(f"   ⏳ {ticker}: Ingested batch {i} to {i + len(batch)}...")
             
-            print(f"✅ Successfully ingested {total_count} holdings for {ticker}")
+            if verbose:
+                print(f"✅ Successfully ingested {total_count} holdings for {ticker}")
 
         except Exception as e:
-            print(f"❌ Error ingesting holdings for {ticker}: {e}")
+            if verbose:
+                print(f"❌ Error ingesting holdings for {ticker}: {e}")
+            raise
     def add_chart_to_fund(
         self, 
         fund_ticker: str, 
         title: str, 
         category: str, 
         svg_content: str, 
-        date: str
+        year: int
     ) -> Optional[Dict[str, Any]]:
         """
         Add a chart (Image node) to a fund with HAS_CHART relationship.
@@ -169,7 +167,7 @@ class HoldingsOperations(Neo4jDatabaseBase):
             title: Title of the chart
             category: Category/type of the chart (e.g., 'performance', 'allocation', 'sector')
             svg_content: The SVG content as a string
-            date: Date associated with the chart (e.g., report date)
+            year: Year associated with the chart (e.g., report year)
             
         Returns:
             Dictionary with created Image node or None if fund not found
@@ -194,6 +192,12 @@ class HoldingsOperations(Neo4jDatabaseBase):
                 img.svg = $svg_content,
                 img.updatedAt = timestamp()
             MERGE (f)-[r:HAS_CHART]->(img)
+            ON CREATE SET
+                r.year = $year,
+                r.createdAt = timestamp()
+            ON MATCH SET
+                r.year = $year,
+                r.updatedAt = timestamp()
             RETURN img, f
             """
             
@@ -202,7 +206,8 @@ class HoldingsOperations(Neo4jDatabaseBase):
                 "image_id": image_id,
                 "title": title,
                 "category": category,
-                "svg_content": svg_content
+                "svg_content": svg_content,
+                "year": year
             }
             
             result = self._execute_write(query, params)
@@ -235,7 +240,8 @@ class HoldingsOperations(Neo4jDatabaseBase):
                img.title as title,
                img.category as category,
                img.svg as svg_content,
-               img.createdAt as created_at
+               img.createdAt as created_at,
+               r.year as year
         """
         
         result = self._execute_query(query, {"fund_ticker": fund_ticker})

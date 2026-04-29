@@ -271,7 +271,7 @@ _LABEL_TO_DOCUMENT: Dict[str, tuple[str, str]] = {
     "Fund":        ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
     "Portfolio":   ("(f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
     "Profile":     ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
-    "Filing10K":   ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "Filing10K":   ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
     "InsiderTransaction": ("(c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
     "CompensationPackage": ("(c:Company)-[:HAS_CEO]->(:Person)-[:RECEIVED_COMPENSATION]->(cp:CompensationPackage)-[:DISCLOSED_IN]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
     # ── Child nodes → go through their parent anchor ──
@@ -286,13 +286,13 @@ _LABEL_TO_DOCUMENT: Dict[str, tuple[str, str]] = {
     "StrategyChunk":      ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
     "PerformanceCommentary": ("(f:Fund)-[:DEFINED_BY]->(pr:Profile)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
     # Company filing children
-    "RiskFactor":           ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
-    "BusinessInformation":  ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
-    "LegalProceeding":      ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
-    "ManagemetDiscussion":  ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
-    "Properties":           ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
-    "Financials":           ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
-    "FinancialMetric":      ("(c:Company)-[:HAS_FILING]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "RiskFactor":           ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "BusinessInformation":  ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "LegalProceeding":      ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "ManagementDiscussion":  ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "Properties":           ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "Financials":           ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
+    "FinancialMetric":      ("(c:Company)-[:REPORTS_IN]->(fk:Filing10K)-[:EXTRACTED_FROM]->(d:Document) WHERE c.ticker = $id", "company_ticker"),
     "Person":               ("(f:Fund)-[:EXTRACTED_FROM]->(d:Document) WHERE f.ticker = $id", "fund_ticker"),
 }
 
@@ -301,7 +301,7 @@ _LABEL_PRIORITY = [
     # Children first (most specific about what data was actually queried)
     "Holding",
     "Objective", "RiskChunk", "StrategyChunk", "PerformanceCommentary",
-    "RiskFactor", "BusinessInformation", "LegalProceeding", "ManagemetDiscussion",
+    "RiskFactor", "BusinessInformation", "LegalProceeding", "ManagementDiscussion",
     "Properties", "Financials", "FinancialMetric",
     "FinancialHighlight", "AverageReturns", "ShareClass", "Sector", "Region",
     "InsiderTransaction", "CompensationPackage",

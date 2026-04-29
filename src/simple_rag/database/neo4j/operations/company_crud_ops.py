@@ -88,13 +88,12 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             Created 10KFiling node or None if failed
         """
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
+            year = (report_period_end or filing_date).year
             
             # Create Document node
             doc_query = """
-            MERGE (doc:Document {id: $accession_number})
+            MERGE (doc:Document {accession_number: $accession_number})
             ON CREATE SET
-                doc.accession_number = $accession_number,
                 doc.url = $filing_url,
                 doc.form = $filing_type,
                 doc.filing_date = $filing_date,
@@ -116,14 +115,11 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             # Create 10KFiling node and relationships
             filing_query = """
             MATCH (c:Company {ticker: $ticker})
-            MATCH (doc:Document {id: $accession_number})
+            MATCH (doc:Document {accession_number: $accession_number})
             
-            MERGE (f:`Filing10K` {id: $filing_id})
+            MERGE (c)-[r:REPORTS_IN {year: $year}]->(f:`Filing10K`)
             ON CREATE SET f.createdAt = timestamp()
             ON MATCH SET f.updatedAt = timestamp()
-            
-            MERGE (c)-[r:HAS_FILING]->(f)
-            SET r.date = $report_period_end
             
             MERGE (f)-[:EXTRACTED_FROM]->(doc)
             RETURN f
@@ -132,8 +128,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             result = self._execute_write(filing_query, {
                 "ticker": company_ticker,
                 "accession_number": accession_number,
-                "filing_id": filing_id,
-                "report_period_end": report_period_end
+                "year": year
             })
             
             if result:
@@ -164,27 +159,28 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             Created RiskFactor section node or None if failed
         """
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            section_id = f"{filing_id}_risk_factors"
+            year = filing_date.year
             
             query = """
-            MATCH (f:`Filing10K` {id: $filing_id})
-            MERGE (rf:Section:RiskFactor {id: $section_id})
-            SET rf.fullText = $full_text,
-                rf.updatedAt = timestamp()
-            MERGE (f)-[:HAS_RISK_FACTOR_CHUNK]->(rf)
-            RETURN rf
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+            MERGE (f)-[:HAS_SECTION]->(s:Section:RiskFactor)
+            SET s.title = $title,
+                s.text = $text,
+                s.sectionType = 'risk_factors',
+                s.secItem = 'Item 1A'
+            RETURN s
             """
             
             result = self._execute_write(query, {
-                "filing_id": filing_id,
-                "section_id": section_id,
-                "full_text": risk_factors_text
+                "ticker": company_ticker,
+                "year": year,
+                "title": "Item 1A - Risk Factors",
+                "text": risk_factors_text
             })
             
             if result:
                 print(f"✅ Added Risk Factors section for {company_ticker}")
-                return result[0]["rf"]
+                return result[0]["s"]
             return None
             
         except Exception as e:
@@ -199,27 +195,28 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
     ) -> Optional[Dict[str, Any]]:
         """Add Business Information section to a 10-K filing."""
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            section_id = f"{filing_id}_business_info"
+            year = filing_date.year
             
             query = """
-            MATCH (f:`Filing10K` {id: $filing_id})
-            MERGE (bi:Section:BusinessInformation {id: $section_id})
-            SET bi.fullText = $full_text,
-                bi.updatedAt = timestamp()
-            MERGE (f)-[:HAS_BUSINESS_INFORMATION_CHUNK]->(bi)
-            RETURN bi
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+            MERGE (f)-[:HAS_SECTION]->(s:Section:BusinessInformation)
+            SET s.title = $title,
+                s.text = $text,
+                s.sectionType = 'business_info',
+                s.secItem = 'Item 1'
+            RETURN s
             """
             
             result = self._execute_write(query, {
-                "filing_id": filing_id,
-                "section_id": section_id,
-                "full_text": business_info_text
+                "ticker": company_ticker,
+                "year": year,
+                "title": "Item 1 - Business",
+                "text": business_info_text
             })
             
             if result:
                 print(f"✅ Added Business Information section for {company_ticker}")
-                return result[0]["bi"]
+                return result[0]["s"]
             return None
             
         except Exception as e:
@@ -234,29 +231,28 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
     ) -> Optional[Dict[str, Any]]:
         """Add Legal Proceedings section to a 10-K filing."""
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            section_id = f"{filing_id}_legal_proceedings"
+            year = filing_date.year
             
             query = """
-            MATCH (f:`Filing10K` {id: $filing_id})
-            MERGE (lp:Section:LegalProceeding {id: $section_id})
-            SET lp.fullTitleSection = $title,
-                lp.fullText = $full_text,
-                lp.updatedAt = timestamp()
-            MERGE (f)-[:HAS_LEGAL_PROCEEDING_CHUNK]->(lp)
-            RETURN lp
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+            MERGE (f)-[:HAS_SECTION]->(s:Section:LegalProceeding)
+            SET s.title = $title,
+                s.text = $text,
+                s.sectionType = 'legal_proceedings',
+                s.secItem = 'Item 3'
+            RETURN s
             """
             
             result = self._execute_write(query, {
-                "filing_id": filing_id,
-                "section_id": section_id,
+                "ticker": company_ticker,
+                "year": year,
                 "title": "Item 3 - Legal Proceedings",
-                "full_text": legal_proceedings_text
+                "text": legal_proceedings_text
             })
             
             if result:
                 print(f"✅ Added Legal Proceedings section for {company_ticker}")
-                return result[0]["lp"]
+                return result[0]["s"]
             return None
             
         except Exception as e:
@@ -271,27 +267,28 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
     ) -> Optional[Dict[str, Any]]:
         """Add Management Discussion & Analysis section to a 10-K filing."""
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            section_id = f"{filing_id}_mda"
+            year = filing_date.year
             
             query = """
-            MATCH (f:`Filing10K` {id: $filing_id})
-            MERGE (md:Section:ManagemetDiscussion {id: $section_id})
-            SET md.fullText = $full_text,
-                md.updatedAt = timestamp()
-            MERGE (f)-[:HAS_MANAGEMENT_DISCUSSION_CHUNK]->(md)
-            RETURN md
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+            MERGE (f)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)
+            SET s.title = $title,
+                s.text = $text,
+                s.sectionType = 'mda',
+                s.secItem = 'Item 7'
+            RETURN s
             """
             
             result = self._execute_write(query, {
-                "filing_id": filing_id,
-                "section_id": section_id,
-                "full_text": mda_text
+                "ticker": company_ticker,
+                "year": year,
+                "title": "Item 7 - Management Discussion & Analysis",
+                "text": mda_text
             })
             
             if result:
                 print(f"✅ Added MD&A section for {company_ticker}")
-                return result[0]["md"]
+                return result[0]["s"]
             return None
             
         except Exception as e:
@@ -306,27 +303,28 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
     ) -> Optional[Dict[str, Any]]:
         """Add Properties section to a 10-K filing."""
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            section_id = f"{filing_id}_properties"
+            year = filing_date.year
             
             query = """
-            MATCH (f:Filing10K {id: $filing_id})
-            MERGE (prop:Section:Properties {id: $section_id})
-            SET prop.fullText = $full_text,
-                prop.updatedAt = timestamp()
-            MERGE (f)-[:HAS_PROPERTIES_CHUNK]->(prop)
-            RETURN prop
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+            MERGE (f)-[:HAS_SECTION]->(s:Section:Properties)
+            SET s.title = $title,
+                s.text = $text,
+                s.sectionType = 'properties',
+                s.secItem = 'Item 2'
+            RETURN s
             """
             
             result = self._execute_write(query, {
-                "filing_id": filing_id,
-                "section_id": section_id,
-                "full_text": properties_text
+                "ticker": company_ticker,
+                "year": year,
+                "title": "Item 2 - Properties",
+                "text": properties_text
             })
             
             if result:
                 print(f"✅ Added Properties section for {company_ticker}")
-                return result[0]["prop"]
+                return result[0]["s"]
             return None
             
         except Exception as e:
@@ -357,24 +355,21 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             Created Financials section node or None if failed
         """
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            financials_id = f"{filing_id}_financials_{fiscal_year}"
+            year = filing_date.year
             
             query = """
-            MATCH (f:Filing10K {id: $filing_id})
-            MERGE (fin:Section:Financials {id: $financials_id})
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+            MERGE (f)-[:HAS_FINACIALS]->(fin:Section:Financials)
             SET fin.incomeStatement = $income_statement,
                 fin.balanceSheet = $balance_sheet,
                 fin.cashFlow = $cash_flow,
-                fin.fiscalYear = $fiscal_year,
-                fin.updatedAt = timestamp()
-            MERGE (f)-[:HAS_FINANCIALS]->(fin)
+                fin.fiscalYear = $fiscal_year
             RETURN fin
             """
             
             result = self._execute_write(query, {
-                "filing_id": filing_id,
-                "financials_id": financials_id,
+                "ticker": company_ticker,
+                "year": year,
                 "income_statement": income_statement_text,
                 "balance_sheet": balance_sheet_text,
                 "cash_flow": cash_flow_text,
@@ -430,24 +425,20 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             )
         """
         try:
-            filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-            financials_id = f"{filing_id}_financials_{fiscal_year}"
-            metric_id = f"{financials_id}_{metric_label}"
+            year = filing_date.year
             
             # Create FinancialMetric node
             metric_query = """
-            MATCH (fin:Section:Financials {id: $financials_id})
-            MERGE (fm:FinancialMetric {id: $metric_id})
-            SET fm.value = $value,
-                fm.label = $label,
-                fm.updatedAt = timestamp()
-            MERGE (fin)-[:HAS_METRIC]->(fm)
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+                  -[:HAS_FINACIALS]->(fin:Section:Financials)
+            MERGE (fin)-[:HAS_METRIC]->(fm:FinancialMetric {label: $label})
+            SET fm.value = $value
             RETURN fm
             """
             
             result = self._execute_write(metric_query, {
-                "financials_id": financials_id,
-                "metric_id": metric_id,
+                "ticker": company_ticker,
+                "year": year,
                 "value": metric_value,
                 "label": metric_label
             })
@@ -458,22 +449,20 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             # Create Segment nodes if provided
             if segments:
                 for seg in segments:
-                    segment_id = f"{metric_id}_{seg['label'].replace(' ', '_')}"
-                    
                     segment_query = """
-                    MATCH (fm:FinancialMetric {id: $metric_id})
-                    MERGE (seg:Segment {id: $segment_id})
-                    SET seg.label = $label,
-                        seg.value = $value,
-                        seg.percentage = $percentage,
-                        seg.updatedAt = timestamp()
-                    MERGE (fm)-[:HAS_SEGMENT]->(seg)
+                    MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+                          -[:HAS_FINACIALS]->(fin:Section:Financials)
+                          -[:HAS_METRIC]->(fm:FinancialMetric {label: $metric_label})
+                    MERGE (fm)-[:HAS_SEGMENT]->(seg:Segment {label: $label})
+                    SET seg.value = $value,
+                        seg.percentage = $percentage
                     RETURN seg
                     """
                     
                     self._execute_write(segment_query, {
-                        "metric_id": metric_id,
-                        "segment_id": segment_id,
+                        "ticker": company_ticker,
+                        "year": year,
+                        "metric_label": metric_label,
                         "label": seg["label"],
                         "value": seg.get("value"),
                         "percentage": seg.get("percentage")
@@ -546,9 +535,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             # Create Document node if filing info provided
             if accession_number and filing_url:
                 doc_query = """
-                MERGE (doc:Document {id: $accession_number})
+                MERGE (doc:Document {accession_number: $accession_number})
                 ON CREATE SET
-                    doc.accession_number = $accession_number,
                     doc.url = $url,
                     doc.form = $form,
                     doc.filing_date = $filing_date,
@@ -566,20 +554,16 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 })
                 
                 # Create CompensationPackage node
-                comp_package_id = f"{company_ticker}_comp_{(filing_date or date.today()).isoformat()}"
-                
                 comp_query = """
                 MATCH (c:Company {ticker: $ticker})
                 MATCH (p:Person {name: $ceo_name})
-                MATCH (doc:Document {id: $accession_number})
+                MATCH (doc:Document {accession_number: $accession_number})
                 
-                MERGE (cp:CompensationPackage {id: $comp_package_id})
+                MERGE (p)-[:RECEIVED_COMPENSATION]->(cp:CompensationPackage)
                 SET cp.totalCompensation = $total_compensation,
                     cp.shareholderReturn = $shareholder_return,
-                    cp.date = $date,
-                    cp.updatedAt = timestamp()
+                    cp.date = $date
                 
-                MERGE (p)-[:RECEIVED_COMPENSATION]->(cp)
                 MERGE (c)<-[:AWARDED_BY]-(cp)
                 MERGE (cp)-[:DISCLOSED_IN]->(doc)
                 RETURN cp
@@ -589,7 +573,6 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                     "ticker": company_ticker,
                     "ceo_name": ceo_name,
                     "accession_number": accession_number,
-                    "comp_package_id": comp_package_id,
                     "total_compensation": ceo_compensation,
                     "shareholder_return": shareholder_return,
                     "date": filing_date or date.today()
@@ -656,9 +639,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             form4_accession = f"{company_ticker}_{insider_name}_{transaction_date}_Form4".replace(" ", "_")
             
             doc_query = """
-            MERGE (doc:Document {id: $accession_number})
+            MERGE (doc:Document {accession_number: $accession_number})
             ON CREATE SET
-                doc.accession_number = $accession_number,
                 doc.url = $url,
                 doc.form = $form,
                 doc.filing_date = $filing_date,
@@ -676,25 +658,19 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             })
             
             # Create InsiderTransaction node
-            trade_id = f"{company_ticker}_{insider_name}_{transaction_date}_{transaction_type}".replace(" ", "_")
-            
             transaction_query = """
             MATCH (c:Company {ticker: $ticker})
             MATCH (p:Person {name: $insider_name})
-            MATCH (doc:Document {id: $accession_number})
+            MATCH (doc:Document {accession_number: $accession_number})
             
-            MERGE (it:InsiderTransaction {id: $trade_id})
-            SET it.transactionDate = $transaction_date,
-                it.position = $position,
-                it.transactionType = $transaction_type,
+            MERGE (c)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction {transactionDate: $transaction_date, transactionType: $transaction_type})
+            SET it.position = $position,
                 it.shares = $shares,
                 it.price = $price,
                 it.value = $value,
-                it.remainingShares = $remaining_shares,
-                it.updatedAt = timestamp()
+                it.remainingShares = $remaining_shares
             
-            MERGE (p)<-[:MADE_BY]-(it)
-            MERGE (c)-[:HAS_INSIDER_TRANSACTION]->(it)
+            MERGE (it)-[:MADE_BY]->(p)
             MERGE (it)-[:EXTRACTED_FROM]->(doc)
             RETURN it
             """
@@ -703,7 +679,6 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 "ticker": company_ticker,
                 "insider_name": insider_name,
                 "accession_number": form4_accession,
-                "trade_id": trade_id,
                 "transaction_date": transaction_date,
                 "position": position,
                 "transaction_type": transaction_type,
@@ -731,7 +706,10 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
     ) -> int:
         """
         Batch-create SectionChunk nodes linked to their parent Section node.
-
+        Architecture:
+            Filing10K → Section (full text) → [:HAS_CHUNK] → SectionChunk (chunk 0)
+                                                           → SectionChunk (chunk 1)
+                                                           → SectionChunk (chunk 2)
         Each chunk stores text, metadata, and an embedding vector for
         similarity search via the ``section_chunk_vector_index``.
 
@@ -746,81 +724,61 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
 
         Returns:
             Number of SectionChunk nodes created/updated
+            
+        Example Usage:
+            # Step 1: Create parent section with full text
+            self.add_risk_factors_section(ticker, date, full_text)
+            
+            # Step 2: Add chunks linked to that section
+            self.add_section_chunks(ticker, date, "risk_factors", chunked_data)
         """
         if not chunks:
             return 0
 
-        filing_id = f"{company_ticker}_{filing_date.isoformat()}"
-        section_id = f"{filing_id}_{section_name}"
-
-        # Map section_name → relationship type on the Filing10K
-        section_rel_map = {
-            "risk_factors": "HAS_RISK_FACTOR_CHUNK",
-            "business_info": "HAS_BUSINESS_INFORMATION_CHUNK",
-            "business_information": "HAS_BUSINESS_INFORMATION_CHUNK",
-            "mda": "HAS_MANAGEMENT_DISCUSSION_CHUNK",
-            "management_discussion_and_analysis": "HAS_MANAGEMENT_DISCUSSION_CHUNK",
-            "legal_proceedings": "HAS_LEGAL_PROCEEDING_CHUNK",
-            "properties": "HAS_PROPERTIES_CHUNK",
-        }
-
-        rel_type = section_rel_map.get(section_name)
-        if not rel_type:
-            logger.warning(f"Unknown section_name '{section_name}', skipping chunks")
-            return 0
+        year = filing_date.year
 
         try:
             # Prepare chunk data list for UNWIND
             chunk_list = []
             for c in chunks:
                 chunk_list.append({
-                    "id": c["id"],
                     "title": c["title"],
                     "text": c["text"],
-                    "embedding": c["embedding"],
+                    "embedding": c.get("embedding"),
                     "sectionType": c.get("section_type"),
                     "subsection": c.get("subsection"),
                     "chunkIndex": c.get("chunk_index"),
-                    "filingCik": c.get("filing_cik"),
-                    "filingDate": c.get("filing_date"),
                     "sectionName": c.get("section_name"),
                 })
 
-            query = f"""
-            MATCH (sec:Section {{id: $section_id}})
+            query = """
+            MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+                  -[:HAS_SECTION]->(sec:Section {sectionType: $section_type})
             WITH sec
             UNWIND $chunks AS chunk
-            MERGE (sc:SectionChunk {{id: chunk.id}})
+            MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk:SectionChunk {text: chunk.text})
             SET sc.title        = chunk.title,
-                sc.text         = chunk.text,
                 sc.embedding    = chunk.embedding,
-                sc.sectionType  = chunk.sectionType,
+                sc.chunkType    = chunk.sectionType,
                 sc.subsection   = chunk.subsection,
                 sc.chunkIndex   = chunk.chunkIndex,
-                sc.filingCik    = chunk.filingCik,
-                sc.filingDate   = chunk.filingDate,
-                sc.sectionName  = chunk.sectionName,
-                sc.updatedAt    = timestamp()
-            MERGE (sec)-[:HAS_CHUNK]->(sc)
+                sc.sectionName  = chunk.sectionName
             RETURN count(sc) AS created
             """
 
             result = self._execute_write(query, {
-                "section_id": section_id,
+                "ticker": company_ticker,
+                "year": year,
+                "section_type": section_name,
                 "chunks": chunk_list,
             })
 
             created = result[0]["created"] if result else 0
             if created:
-                logger.info(
-                    f"✅ Added {created} SectionChunk nodes for "
-                    f"{company_ticker}/{section_name}"
-                )
+                print(f"✅ Added {created} SectionChunk nodes for {company_ticker}/{section_name}")
             return created
 
         except Exception as e:
-            logger.error(
-                f"❌ Error adding section chunks for "
-                f"{company_ticker}/{section_name}: {e}"
-            )
+            print(f"❌ Error adding section chunks for {company_ticker}/{section_name}: {e}")
+            logger.error(f"Failed to add section chunks: {e}", exc_info=True)
             return 0

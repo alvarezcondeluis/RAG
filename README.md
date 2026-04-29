@@ -1,7 +1,6 @@
-# SEC Filings Intelligence — RAG System
+# SEC Filings Analysis — Hybrid RAG System
 
 Final Master's Thesis (TFM) project: A RAG system that combines a **Neo4j knowledge graph** with **LLM-powered natural language querying** for SEC financial data — mutual funds, ETFs, and company 10-K filings.
-
 Users ask questions in plain English and the system translates them into Cypher queries, executes them against the knowledge graph, and generates analyst-grade answers with source citations.
 
 ## Pipeline
@@ -115,6 +114,99 @@ docker-compose up -d
 
 - **Browser UI**: [http://localhost:7474](http://localhost:7474) (user: `neo4j`)
 - **Bolt**: `bolt://localhost:7687`
+
+## Data Extraction Workflow
+
+Before running queries, you need to extract and ingest SEC filing data into Neo4j. This is done via Jupyter notebooks in the `notebooks/` directory.
+
+### Extraction Order (Important!)
+
+**Execute notebooks in this specific order:**
+
+#### 1. **Vanguard Extraction** (`notebooks/vanguard.ipynb`)
+   - Extracts N-CSR, 497K (Summary Prospectus), and N-PORT filings for **Vanguard funds**
+   - Uses provider-specific parsers optimized for Vanguard's document structure
+   - Outputs: Fund metadata, holdings, financial highlights, profiles (objectives, strategies, risks)
+
+#### 2. **Multi-Provider Extraction** (`notebooks/edgar.ipynb`)
+   - Extracts filings for **iShares (BlackRock)** and **Fidelity** funds
+   - Supports the same filing types: N-CSR, 497K, N-PORT
+   - Uses `edgartools` library for SEC EDGAR API access
+   - Leverages provider-specific extractors:
+     - `VanguardProspectusExtractor` (Vanguard format)
+     - `iSharesProspectusExtractor` (BlackRock/iShares format)
+     - `FidelityProspectusExtractor` (Fidelity format)
+   - Auto-detects provider via keyword matching in filing text
+
+### Filing Types Extracted
+
+#### Fund Filings (Vanguard, iShares, Fidelity)
+
+| Filing Type | Description | Data Extracted |
+|---|---|---|
+| **N-CSR** | Certified Shareholder Report | Financial highlights (expense ratio, turnover, total return, net assets by year) |
+| **497K** | Summary Prospectus | Fund name, ticker, objective, strategies, risks, managers, performance |
+| **N-PORT** | Portfolio Holdings Report | Complete portfolio holdings with shares, market value, fair value levels, issuer details |
+
+#### Company Filings (10-K Analysis)
+
+| Filing Type | Description | Data Extracted |
+|---|---|---|
+| **10-K** | Annual Report | Income statement, balance sheet, cash flow, business sections, risk factors, MD&A, legal proceedings, properties |
+| **DEF 14A** | Proxy Statement | Executive compensation (Pay-vs-Performance table), CEO compensation, shareholder return |
+| **Form 4** | Insider Trading Report | Insider transactions (buys/sells), transaction dates, shares, prices, remaining holdings |
+
+### Extraction Process
+
+**Phase 1: Fund Data Extraction** (`vanguard.ipynb`, `edgar.ipynb`)
+1. **Retrieves filings** from SEC EDGAR using `edgartools`
+2. **Parses documents** using provider-specific extractors (`ProspectusExtractor.from_text()`)
+3. **Structures data** into Pydantic models (`FundData`, `HoldingData`, etc.)
+4. **Caches results** to `.pkl` files for reuse
+
+**Phase 2: Company Data Extraction** (`neo4j.ipynb` - Part 1)
+1. **Identifies companies** from fund holdings (extracts unique tickers from Portfolio → Holding relationships)
+2. **Retrieves 10-K filings** using `TenKParser` for each company
+3. **Parses financial statements** via XBRL concept mapping
+4. **Extracts compensation data** from DEF 14A filings using `Def14AParser`
+5. **Collects insider transactions** from Form 4 filings using `Form4Parser`
+6. **Structures company data** into `CompanyEntity` Pydantic models
+
+**Phase 3: Neo4j Ingestion** (`neo4j.ipynb` - Part 2)
+1. **Initializes Neo4j database** (reset, create constraints & indexes)
+2. **Creates provider hierarchy** (Provider → Trust nodes)
+3. **Ingests fund data**:
+   - Fund nodes with metadata (ticker, name, expense ratio, net assets, etc.)
+   - Share classes, profiles (objectives, strategies, risks with embeddings)
+   - Financial highlights (year-by-year performance metrics)
+   - Sector/region allocations, average returns
+4. **Ingests portfolio holdings**:
+   - Portfolio nodes with reporting dates
+   - Holding nodes with detailed security information
+   - HAS_HOLDING relationships with shares, market value, fair value levels
+   - REPRESENTS relationships linking holdings to companies
+5. **Ingests company filings**:
+   - Company nodes (ticker, name, CIK)
+   - Filing10K nodes with document metadata
+   - Section chunks (risk factors, business info, MD&A, etc.) with embeddings
+   - Financial metrics and segment breakdowns
+   - CEO compensation and insider transaction data
+6. **Creates document provenance** via `EXTRACTED_FROM` relationships
+
+### Running the Complete Pipeline
+
+```bash
+# Start Jupyter
+uv run jupyter notebook
+
+# Execute in order:
+# 1. notebooks/vanguard.ipynb      (Extract Vanguard fund data)
+# 2. notebooks/edgar.ipynb          (Extract iShares & Fidelity fund data)
+# 3. notebooks/neo4j.ipynb          (Extract company filings + Ingest all data into Neo4j)
+```
+
+After the pipeline completes, the Neo4j database will contain the full knowledge graph ready for querying.
+
 
 ## Running
 
