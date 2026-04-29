@@ -149,55 +149,38 @@ class SchemaManager(Neo4jDatabaseBase):
     
     def create_constraints(self):
         """
-        Creates uniqueness constraints and indexes based on the Pydantic schema.
-        Run this ONCE before ingesting data.
+        Creates uniqueness constraints aligned with the canonical knowledge-graph schema.
+        Run this ONCE before ingesting data. Idempotent (IF NOT EXISTS).
         """
         queries = [
-            # --- 1. CORE FUND ENTITIES ---
-            
+            # --- 1. CORE FUND DOMAIN ---
             "CREATE CONSTRAINT fund_ticker_unique IF NOT EXISTS FOR (f:Fund) REQUIRE f.ticker IS UNIQUE",
-            
-            # Fast lookup by Name (since ticker might be "N/A")
-            "CREATE INDEX fund_name_index IF NOT EXISTS FOR (f:Fund) ON (f.name)",
-
-            # --- 2. ORGANIZATIONS & PEOPLE ---
-            # Providers (Registrants) should not be duplicated
             "CREATE CONSTRAINT trust_name_unique IF NOT EXISTS FOR (t:Trust) REQUIRE t.name IS UNIQUE",
             "CREATE CONSTRAINT provider_name_unique IF NOT EXISTS FOR (p:Provider) REQUIRE p.name IS UNIQUE",
-            
+            "CREATE CONSTRAINT share_class_name_unique IF NOT EXISTS FOR (s:ShareClass) REQUIRE s.name IS UNIQUE",
+            "CREATE CONSTRAINT portfolio_series_unique IF NOT EXISTS FOR (p:Portfolio) REQUIRE p.seriesId IS UNIQUE",
+
+            # --- 2. ALLOCATIONS / GROUPING ---
             "CREATE CONSTRAINT sector_name_unique IF NOT EXISTS FOR (s:Sector) REQUIRE s.name IS UNIQUE",
             "CREATE CONSTRAINT region_name_unique IF NOT EXISTS FOR (r:Region) REQUIRE r.name IS UNIQUE",
-            # Managers should be unique nodes
-            "CREATE CONSTRAINT manager_name_unique IF NOT EXISTS FOR (m:Manager) REQUIRE m.name IS UNIQUE",
-            
-            # --- 3. COMPANY DATA ENTITIES ---
-            
-            # Company nodes - unique by ticker
+
+            # --- 3. ORGANIZATIONS & PEOPLE ---
             "CREATE CONSTRAINT company_ticker_unique IF NOT EXISTS FOR (c:Company) REQUIRE c.ticker IS UNIQUE",
-            
-            # Document nodes - unique by accession number
-            "CREATE CONSTRAINT document_accession_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.accesionNumber IS UNIQUE",
-            
-            # 10KFiling nodes - unique by id
-            "CREATE CONSTRAINT filing_10k_id_unique IF NOT EXISTS FOR (f:`10KFiling`) REQUIRE f.id IS UNIQUE",
-            
-            # Person nodes - unique by name
             "CREATE CONSTRAINT person_name_unique IF NOT EXISTS FOR (p:Person) REQUIRE p.name IS UNIQUE",
-            
-            # CompensationPackage nodes - unique by id
-            "CREATE CONSTRAINT compensation_package_id_unique IF NOT EXISTS FOR (cp:CompensationPackage) REQUIRE cp.id IS UNIQUE",
-            
-            # InsiderTransaction nodes - unique by id
-            "CREATE CONSTRAINT insider_transaction_id_unique IF NOT EXISTS FOR (it:InsiderTransaction) REQUIRE it.id IS UNIQUE",
-            
-            # FinancialMetric nodes - unique by id
-            "CREATE CONSTRAINT financial_metric_id_unique IF NOT EXISTS FOR (fm:FinancialMetric) REQUIRE fm.id IS UNIQUE",
-            
-            # Segment nodes - unique by id
-            "CREATE CONSTRAINT segment_id_unique IF NOT EXISTS FOR (seg:Segment) REQUIRE seg.id IS UNIQUE",
-            
-            # Section nodes - unique by id (for all section types)
-            "CREATE CONSTRAINT section_id_unique IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
+
+            # --- 4. SOURCE DOCUMENTS ---
+            # Single source of truth — every SEC filing dedupes here.
+            "CREATE CONSTRAINT document_accession_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.accessionNumber IS UNIQUE",
+
+            # --- 5. SECURITIES ---
+            # Holdings are global per ISIN (the same security held by multiple
+            # portfolios shares one node). Neo4j unique constraints ignore NULL,
+            # so holdings without an ISIN are still allowed.
+            "CREATE CONSTRAINT holding_isin_unique IF NOT EXISTS FOR (h:Holding) REQUIRE h.isin IS UNIQUE",
+
+            # --- 6. CHARTS ---
+            # holdings_ops.add_chart_to_fund builds id = "{ticker}_{category}_{md5(svg)}".
+            "CREATE CONSTRAINT image_id_unique IF NOT EXISTS FOR (i:Image) REQUIRE i.id IS UNIQUE",
         ]
 
         with self.driver.session() as session:
@@ -207,43 +190,23 @@ class SchemaManager(Neo4jDatabaseBase):
                     session.run(q)
                 except Exception as e:
                     print(f"⚠️ Warning: {e}")
-            print("✅ Constraints and Indexes configured.")
+            print("✅ Constraints configured.")
     
     def create_indexes(self, dimensions=768):
         """
-        Creates Indexes and Constraints, then VERIFIES they are online.
+        Creates indexes (vector, range, fulltext, relationship) aligned with the
+        canonical schema. Run after create_constraints(). Idempotent.
         """
         print("⚙️  Initializing Graph Schema & Indexes...")
 
-        # 1. VECTOR INDEXES (For Similarity Search)
+        # 1. VECTOR INDEXES (Similarity Search)
+        # Profile/Filing10K chunks live on (:Chunk {embedding}).
+        # Section:Objective and Section:BusinessInformation store embedding
+        # directly on the Section node per the schema.
         vector_queries = [
             f"""
-            CREATE VECTOR INDEX risk_vector_index IF NOT EXISTS
-            FOR (n:RiskChunk) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """,
-            f"""
-            CREATE VECTOR INDEX strategy_vector_index IF NOT EXISTS
-            FOR (n:StrategyChunk) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """,
-            f"""
-            CREATE VECTOR INDEX objective_vector_index IF NOT EXISTS
-            FOR (n:Objective) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """,
-            f"""
-            CREATE VECTOR INDEX commentary_vector_index IF NOT EXISTS
-            FOR (n:PerformanceCommentary) ON (n.embedding)
+            CREATE VECTOR INDEX chunk_vector_index IF NOT EXISTS
+            FOR (n:Chunk) ON (n.embedding)
             OPTIONS {{ indexConfig: {{
                 `vector.dimensions`: {dimensions},
                 `vector.similarity_function`: 'cosine'
@@ -257,82 +220,94 @@ class SchemaManager(Neo4jDatabaseBase):
                 `vector.similarity_function`: 'cosine'
             }}}}
             """,
-            f"""
-            CREATE VECTOR INDEX section_chunk_vector_index IF NOT EXISTS
-            FOR (n:SectionChunk) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """
-        ]
-        
-        # 2. CONSTRAINTS (Crucial for Ingestion Speed & Data Integrity)
-        constraint_queries = [
-            # Core Entities
-            "CREATE CONSTRAINT fund_ticker_unique IF NOT EXISTS FOR (f:Fund) REQUIRE f.ticker IS UNIQUE",
-            "CREATE CONSTRAINT share_class_unique IF NOT EXISTS FOR (s:ShareClass) REQUIRE s.ticker IS UNIQUE",
-            
-            # Temporal / Structure
-            "CREATE CONSTRAINT profile_id_unique IF NOT EXISTS FOR (p:Profile) REQUIRE p.id IS UNIQUE",
-            "CREATE CONSTRAINT portfolio_id_unique IF NOT EXISTS FOR (p:Portfolio) REQUIRE p.id IS UNIQUE",
-            
-            # The "Performance Saver" for your 14k holdings
-            "CREATE CONSTRAINT holding_id_unique IF NOT EXISTS FOR (h:Holding) REQUIRE h.id IS UNIQUE",
-            
-            # Text Chunks
-            "CREATE CONSTRAINT risk_chunk_unique IF NOT EXISTS FOR (r:RiskChunk) REQUIRE r.id IS UNIQUE",
-            "CREATE CONSTRAINT strategy_chunk_unique IF NOT EXISTS FOR (s:StrategyChunk) REQUIRE s.id IS UNIQUE",
-            "CREATE CONSTRAINT objective_unique IF NOT EXISTS FOR (o:Objective) REQUIRE o.id IS UNIQUE",
-            "CREATE CONSTRAINT commentary_unique IF NOT EXISTS FOR (c:PerformanceCommentary) REQUIRE c.id IS UNIQUE",
-            "CREATE CONSTRAINT perf_id_unique IF NOT EXISTS FOR (tp:TrailingPerformance) REQUIRE tp.id IS UNIQUE",
-            "CREATE CONSTRAINT section_chunk_id_unique IF NOT EXISTS FOR (sc:SectionChunk) REQUIRE sc.id IS UNIQUE"
         ]
 
-        # 3. FULLTEXT INDEXES (For Keyword Search)
+        # 2. RANGE / LOOKUP INDEXES (Property filters & equality)
+        range_queries = [
+            # Funds — name fallback when ticker is N/A
+            "CREATE INDEX fund_name_index IF NOT EXISTS FOR (f:Fund) ON (f.name)",
+
+            # Documents — temporal queries
+            "CREATE INDEX document_filing_date_index IF NOT EXISTS FOR (d:Document) ON (d.filingDate)",
+            "CREATE INDEX document_reporting_date_index IF NOT EXISTS FOR (d:Document) ON (d.reportingDate)",
+            "CREATE INDEX document_type_index IF NOT EXISTS FOR (d:Document) ON (d.type)",
+
+            # Holdings — lookup by security identifier
+            "CREATE INDEX holding_ticker_index IF NOT EXISTS FOR (h:Holding) ON (h.ticker)",
+            "CREATE INDEX holding_lei_index IF NOT EXISTS FOR (h:Holding) ON (h.lei)",
+
+            # Sections — sectionType is used to MATCH the right Section subtype
+            "CREATE INDEX section_section_type_index IF NOT EXISTS FOR (s:Section) ON (s.sectionType)",
+            "CREATE INDEX section_title_index IF NOT EXISTS FOR (s:Section) ON (s.title)",
+
+            # Companies — CIK is the SEC identifier
+            "CREATE INDEX company_cik_index IF NOT EXISTS FOR (c:Company) ON (c.cik)",
+
+            # Portfolios — temporal queries
+            "CREATE INDEX portfolio_date_index IF NOT EXISTS FOR (p:Portfolio) ON (p.date)",
+        ]
+
+        # 3. RELATIONSHIP-PROPERTY INDEXES (Year-keyed traversal performance)
+        # Most fund-side queries filter by year on these relationships.
+        relationship_queries = [
+            "CREATE INDEX rel_reports_in_year IF NOT EXISTS FOR ()-[r:REPORTS_IN]-() ON (r.year)",
+            "CREATE INDEX rel_defined_by_year IF NOT EXISTS FOR ()-[r:DEFINED_BY]-() ON (r.year)",
+            "CREATE INDEX rel_managed_by_year IF NOT EXISTS FOR ()-[r:MANAGED_BY]-() ON (r.year)",
+            "CREATE INDEX rel_has_financial_highlight_year IF NOT EXISTS FOR ()-[r:HAS_FINANCIAL_HIGHLIGHT]-() ON (r.year)",
+            "CREATE INDEX rel_has_sector_allocation_year IF NOT EXISTS FOR ()-[r:HAS_SECTOR_ALLOCATION]-() ON (r.year)",
+            "CREATE INDEX rel_has_region_allocation_year IF NOT EXISTS FOR ()-[r:HAS_REGION_ALLOCATION]-() ON (r.year)",
+            "CREATE INDEX rel_has_average_returns_year IF NOT EXISTS FOR ()-[r:HAS_AVERAGE_RETURNS]-() ON (r.year)",
+            "CREATE INDEX rel_has_chart_year IF NOT EXISTS FOR ()-[r:HAS_CHART]-() ON (r.year)",
+            "CREATE INDEX rel_has_table_year IF NOT EXISTS FOR ()-[r:HAS_TABLE]-() ON (r.year)",
+        ]
+
+        # 4. FULLTEXT INDEXES (Keyword Search)
         fulltext_queries = [
             """
-            // 1. Index for Providers (e.g., "The Vanguard Group")
             CREATE FULLTEXT INDEX providerNameIndex IF NOT EXISTS
             FOR (p:Provider) ON EACH [p.name]
             """,
             """
-            // 2. Index for Trusts (e.g., "Vanguard Index Funds")
             CREATE FULLTEXT INDEX trustNameIndex IF NOT EXISTS
             FOR (t:Trust) ON EACH [t.name]
             """,
             """
-            // 3. Index for Funds (Name AND Ticker)
-            // We include ticker here so 'VTI' and 'Total Stock' both work
             CREATE FULLTEXT INDEX fundNameIndex IF NOT EXISTS
             FOR (f:Fund) ON EACH [f.name, f.ticker]
             """,
             """
-            // 4. Index for Managers (Person nodes)
             CREATE FULLTEXT INDEX personNameIndex IF NOT EXISTS
             FOR (p:Person) ON EACH [p.name]
             """,
             """
-            // 5. Index for Companies (Name AND Ticker)
             CREATE FULLTEXT INDEX companyNameIndex IF NOT EXISTS
             FOR (c:Company) ON EACH [c.name, c.ticker]
             """,
             """
-            // 6. Index for Sections (Keyword Search)
-            CREATE FULLTEXT INDEX section_keyword_index IF NOT EXISTS
-            FOR (n:Section) ON EACH [n.text]
+            CREATE FULLTEXT INDEX holdingNameIndex IF NOT EXISTS
+            FOR (h:Holding) ON EACH [h.name, h.ticker]
+            """,
             """
+            CREATE FULLTEXT INDEX section_keyword_index IF NOT EXISTS
+            FOR (n:Section) ON EACH [n.text, n.title]
+            """,
+            """
+            CREATE FULLTEXT INDEX chunk_keyword_index IF NOT EXISTS
+            FOR (c:Chunk) ON EACH [c.text, c.title]
+            """,
         ]
 
         try:
             with self.driver.session() as session:
-                # A. Run Creations
                 print("   ... Applying Vector Indexes")
                 for q in vector_queries: session.run(q)
-                
-                print("   ... Applying Unique Constraints")
-                for q in constraint_queries: session.run(q)
-                
+
+                print("   ... Applying Range/Lookup Indexes")
+                for q in range_queries: session.run(q)
+
+                print("   ... Applying Relationship-Property Indexes")
+                for q in relationship_queries: session.run(q)
+
                 print("   ... Applying Fulltext Indexes")
                 for q in fulltext_queries: session.run(q)
 

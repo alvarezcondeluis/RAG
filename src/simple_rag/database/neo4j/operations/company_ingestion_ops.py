@@ -139,11 +139,11 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             exec_comp_accession = f"{company.ticker}_DEF14A_{date.today().isoformat()}"
                             
                             doc_query = """
-                            MERGE (doc:Document {accesionNumber: $accession_number})
+                            MERGE (doc:Document {accessionNumber: $accession_number})
                             ON CREATE SET
                                 doc.url = $url,
                                 doc.type = $doc_type,
-                                doc.filingdate = $filing_date,
+                                doc.filingDate = $filing_date,
                                 doc.createdAt = timestamp()
                             ON MATCH SET
                                 doc.updatedAt = timestamp()
@@ -166,7 +166,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             comp_package_query = """
                             MATCH (c:Company {ticker: $ticker})
                             MATCH (p:Person {name: $ceo_name})
-                            MATCH (doc:Document {accesionNumber: $accession_number})
+                            MATCH (doc:Document {accessionNumber: $accession_number})
                             
                             MERGE (cp:CompensationPackage {id: $comp_package_id})
                             SET cp.totalCompensation = $total_compensation,
@@ -198,11 +198,11 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     
                     # Create Document node for 10-K
                     doc_query = """
-                    MERGE (doc:Document {accesionNumber: $accession_number})
+                    MERGE (doc:Document {accessionNumber: $accession_number})
                     ON CREATE SET
                         doc.url = $filing_url,
                         doc.type = $filing_type,
-                        doc.filingdate = $filing_date,
+                        doc.filingDate = $filing_date,
                         doc.reportingDate = $report_period_end,
                         doc.createdAt = timestamp()
                     ON MATCH SET
@@ -224,7 +224,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     # Create 10KFiling node (note the label change from Filing10K to 10KFiling)
                     filing_query = """
                     MATCH (c:Company {ticker: $ticker})
-                    MATCH (doc:Document {accesionNumber: $accession_number})
+                    MATCH (doc:Document {accessionNumber: $accession_number})
                     
                     MERGE (f:Filing10K {id: $filing_id})
                     ON CREATE SET f.createdAt = timestamp()
@@ -471,11 +471,11 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             form4_accession = f"{company.ticker}_{trade.insider_name}_{trade.date}_Form4".replace(" ", "_")
                             
                             doc_query = """
-                            MERGE (doc:Document {accesionNumber: $accession_number})
+                            MERGE (doc:Document {accessionNumber: $accession_number})
                             ON CREATE SET
                                 doc.url = $url,
                                 doc.type = $doc_type,
-                                doc.filingdate = $filing_date,
+                                doc.filingDate = $filing_date,
                                 doc.createdAt = timestamp()
                             ON MATCH SET
                                 doc.updatedAt = timestamp()
@@ -498,7 +498,7 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                             transaction_query = """
                             MATCH (c:Company {ticker: $ticker})
                             MATCH (p:Person {name: $insider_name})
-                            MATCH (doc:Document {accesionNumber: $accession_number})
+                            MATCH (doc:Document {accessionNumber: $accession_number})
                             
                             MERGE (it:InsiderTransaction {id: $trade_id})
                             SET it.transactionDate = $transaction_date,

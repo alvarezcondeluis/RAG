@@ -108,8 +108,8 @@ class HoldingsOperations(Neo4jDatabaseBase):
             h.lei = row.lei,
             h.country = row.country,
             h.sector = row.sector,
-            h.assetCategory = row.asset_category,
-            h.assetDesc = row.asset_category_desc,
+            h.category = row.asset_category,
+            h.categoryDesc = row.asset_category_desc,
             h.issuerCategory = row.issuer_category,
             h.issuerDesc = row.issuer_category_desc,
             h.createdAt = timestamp()

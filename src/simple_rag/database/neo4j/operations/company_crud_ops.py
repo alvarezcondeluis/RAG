@@ -92,12 +92,12 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             
             # Create Document node
             doc_query = """
-            MERGE (doc:Document {accession_number: $accession_number})
+            MERGE (doc:Document {accessionNumber: $accession_number})
             ON CREATE SET
                 doc.url = $filing_url,
-                doc.form = $filing_type,
-                doc.filing_date = $filing_date,
-                doc.reporting_date = $report_period_end,
+                doc.type = $filing_type,
+                doc.filingDate = $filing_date,
+                doc.reportingDate = $report_period_end,
                 doc.createdAt = timestamp()
             ON MATCH SET
                 doc.updatedAt = timestamp()
@@ -115,8 +115,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             # Create 10KFiling node and relationships
             filing_query = """
             MATCH (c:Company {ticker: $ticker})
-            MATCH (doc:Document {accession_number: $accession_number})
-            
+            MATCH (doc:Document {accessionNumber: $accession_number})
+
             MERGE (c)-[r:REPORTS_IN {year: $year}]->(f:`Filing10K`)
             ON CREATE SET f.createdAt = timestamp()
             ON MATCH SET f.updatedAt = timestamp()
@@ -359,7 +359,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
-            MERGE (f)-[:HAS_FINACIALS]->(fin:Section:Financials)
+            MERGE (f)-[:HAS_FINANCIALS]->(fin:Section:Financials)
             SET fin.incomeStatement = $income_statement,
                 fin.balanceSheet = $balance_sheet,
                 fin.cashFlow = $cash_flow,
@@ -430,7 +430,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             # Create FinancialMetric node
             metric_query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
-                  -[:HAS_FINACIALS]->(fin:Section:Financials)
+                  -[:HAS_FINANCIALS]->(fin:Section:Financials)
             MERGE (fin)-[:HAS_METRIC]->(fm:FinancialMetric {label: $label})
             SET fm.value = $value
             RETURN fm
@@ -451,7 +451,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 for seg in segments:
                     segment_query = """
                     MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
-                          -[:HAS_FINACIALS]->(fin:Section:Financials)
+                          -[:HAS_FINANCIALS]->(fin:Section:Financials)
                           -[:HAS_METRIC]->(fm:FinancialMetric {label: $metric_label})
                     MERGE (fm)-[:HAS_SEGMENT]->(seg:Segment {label: $label})
                     SET seg.value = $value,
@@ -535,29 +535,29 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             # Create Document node if filing info provided
             if accession_number and filing_url:
                 doc_query = """
-                MERGE (doc:Document {accession_number: $accession_number})
+                MERGE (doc:Document {accessionNumber: $accession_number})
                 ON CREATE SET
                     doc.url = $url,
-                    doc.form = $form,
-                    doc.filing_date = $filing_date,
+                    doc.type = $form,
+                    doc.filingDate = $filing_date,
                     doc.createdAt = timestamp()
                 ON MATCH SET
                     doc.updatedAt = timestamp()
                 RETURN doc
                 """
-                
+
                 self._execute_write(doc_query, {
                     "accession_number": accession_number,
                     "url": filing_url,
                     "form": "DEF 14A",
                     "filing_date": filing_date or date.today()
                 })
-                
+
                 # Create CompensationPackage node
                 comp_query = """
                 MATCH (c:Company {ticker: $ticker})
                 MATCH (p:Person {name: $ceo_name})
-                MATCH (doc:Document {accession_number: $accession_number})
+                MATCH (doc:Document {accessionNumber: $accession_number})
                 
                 MERGE (p)-[:RECEIVED_COMPENSATION]->(cp:CompensationPackage)
                 SET cp.totalCompensation = $total_compensation,
@@ -639,29 +639,29 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             form4_accession = f"{company_ticker}_{insider_name}_{transaction_date}_Form4".replace(" ", "_")
             
             doc_query = """
-            MERGE (doc:Document {accession_number: $accession_number})
+            MERGE (doc:Document {accessionNumber: $accession_number})
             ON CREATE SET
                 doc.url = $url,
-                doc.form = $form,
-                doc.filing_date = $filing_date,
+                doc.type = $form,
+                doc.filingDate = $filing_date,
                 doc.createdAt = timestamp()
             ON MATCH SET
                 doc.updatedAt = timestamp()
             RETURN doc
             """
-            
+
             self._execute_write(doc_query, {
                 "accession_number": form4_accession,
                 "url": filing_url,
                 "form": form,
                 "filing_date": transaction_date
             })
-            
+
             # Create InsiderTransaction node
             transaction_query = """
             MATCH (c:Company {ticker: $ticker})
             MATCH (p:Person {name: $insider_name})
-            MATCH (doc:Document {accession_number: $accession_number})
+            MATCH (doc:Document {accessionNumber: $accession_number})
             
             MERGE (c)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction {transactionDate: $transaction_date, transactionType: $transaction_type})
             SET it.position = $position,

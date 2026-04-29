@@ -73,10 +73,10 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 f.updatedAt = timestamp()
 
             // Metadata of the ncsr filing
-            MERGE (d:Document {accession_number: $accession_number})
+            MERGE (d:Document {accessionNumber: $accession_number})
             ON CREATE SET
-                d.filing_date = $filing_date,
-                d.form = $form,
+                d.filingDate = $filing_date,
+                d.type = $form,
                 d.url = $url
             
             // Link Document to Fund
@@ -84,15 +84,15 @@ class FundCreationOperations(Neo4jDatabaseBase):
 
             // --- B. PROFILE NODE (one per Fund, upserted) ---
             MERGE (f)-[rel:DEFINED_BY]->(prof:Profile)
-            SET rel.year = datetime($report_date).year,
+            SET rel.year =  date($report_date).year,
                 prof.summaryProspectus = $summary_prospectus
             
             // Link Profile to Summary Prospectus Document (if available)
             FOREACH (_ IN CASE WHEN $sp_accession_number IS NOT NULL THEN [1] ELSE [] END |
-                MERGE (sp_doc:Document {accession_number: $sp_accession_number})
+                MERGE (sp_doc:Document {accessionNumber: $sp_accession_number})
                 ON CREATE SET
-                    sp_doc.filing_date = $sp_filing_date,
-                    sp_doc.form = $sp_form,
+                    sp_doc.filingDate = $sp_filing_date,
+                    sp_doc.type = $sp_form,
                     sp_doc.url = $sp_url
                 MERGE (prof)-[:EXTRACTED_FROM]->(sp_doc)
             )
@@ -130,8 +130,8 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 MERGE (prof)-[:HAS_SECTION]->(strat_sec:Section:Strategy)
                 SET strat_sec.title = 'Strategy'
                 FOREACH (s_item IN $strat_list |
-                    MERGE (strat_sec)-[:HAS_CHUNK]->(sc:Chunk {text: s_item.text})
-                    SET sc.embedding = s_item.vector
+                    MERGE (strat_sec)-[:HAS_CHUNK]->(strat_chunk:Chunk {text: s_item.text})
+                    SET strat_chunk.embedding = s_item.vector
                 )
             )
             
