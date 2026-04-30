@@ -302,7 +302,7 @@ class QueryHandler:
             print(f"📐 Schema: slice ({selected_schema_name})")
         else:
             effective_schema = DETAILED_SCHEMA
-            print("📐 Schema: full DETAILED_SCHEMA (injection disabled)")
+            
         start_translation = time.time()
         cypher = self._translate_with_schema(
             user_query, effective_schema, temperature=temperature

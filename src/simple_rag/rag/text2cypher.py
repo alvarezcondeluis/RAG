@@ -694,11 +694,7 @@ class CypherTranslator:
                 )
 
                 token_est = len(retry_prompt_text) // 4
-                print(f"🔄 Retrying with full schema + error feedback (attempt {attempt + 1}) — {token_est:,} tokens (est.):")
-                print(f"{'─'*76}")
-                for line in retry_prompt_text.splitlines():
-                    print(f"  {line}")
-                print(f"{'─'*76}")
+                
                 retry_response = self._invoke_llm(retry_prompt_text)
                 cypher_query = self._clean_cypher(retry_response)
                 

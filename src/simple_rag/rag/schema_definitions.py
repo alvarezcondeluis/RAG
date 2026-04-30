@@ -12,10 +12,10 @@ DETAILED_SCHEMA = """
 # === FUND MANAGEMENT STRUCTURE ===
 # ============================================================
 (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund)
-# === FUND NODE PROPERTIES (Use these directly!) ===
+# === FUND NODE PROPERTIES ===
 (:Fund {
     ticker,              # Symbol like 'VTI' (use for matching symbols)
-    name,                # Full name like 'Vanguard Total Stock Market Index Fund'
+    name,                
     cik,                 # Central Index Key (SEC identifier)
     securityExchange     # Exchange like 'NASDAQ', 'NYSE'
 })
@@ -32,13 +32,13 @@ DETAILED_SCHEMA = """
 # Document node — MERGE key is accession_number
 (:Fund)-[:EXTRACTED_FROM]->(:Document {accession_number, url, form, filing_date, reporting_date})
 # Profile (versioned by year)
-(:Fund)-[:DEFINED_BY {year}]->(:Profile {summaryProspectus})
+(:Fund)-[:DEFINED_BY {year}]->(:Profile {summaryProspectus}) # Contains the whole text content of the prospectus
 # Profile sections use multi-labeled Section nodes (filter by label, not property)
 (:Profile)-[:HAS_SECTION]->(:Section:Objective {text, title, embedding})
 (:Profile)-[:HAS_SECTION]->(:Section:PerformanceCommentary {text, title, embedding})
 (:Profile)-[:HAS_SECTION]->(:Section:RiskFactor {text, title})
 (:Profile)-[:HAS_SECTION]->(:Section:Strategy {text, title})
-# Risk/Strategy sections have child chunks:
+# RiskFactor and Strategy sections have child chunks:
 (:Section)-[:HAS_CHUNK]->(:Chunk {text, embedding})
 (:Profile)-[:EXTRACTED_FROM]->(:Document)
 # Charts/Images
@@ -59,7 +59,7 @@ DETAILED_SCHEMA = """
 # Holdings Structure
 (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId})
 (:Portfolio)-[:HAS_HOLDING {shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile}]->(:Holding {
-    name, ticker, isin, lei, category, category_desc, issuer_category, businessAddress})
+    name, ticker, isin, lei, country, category, categoryDesc, issuerCategory, businessAddress})
 (:Portfolio)-[:EXTRACTED_FROM]->(:Document)
 # Financial Highlights — IMPORTANT: 'year' is on the RELATIONSHIP, not the node!
 # ALWAYS use: (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) and access r.year
@@ -74,10 +74,8 @@ DETAILED_SCHEMA = """
     netAssetsValueEnd,           # Price of one share at period end
     netIncomeRatio,              # Net investment income ratio (percentage)
     numberHoldings,              # Total number of holdings (integer) - USE THIS, not count(h)!
-    advisoryFees,                # Advisory fees (numeric)
-    costsPer10k                  # Costs per $10,000 invested (numeric)
+    advisoryFees                # Advisory fees (numeric)
 })
-# Example: MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN r.year, fh.totalReturn
 
 # ============================================================
 # === COMPANY STRUCTURE (10-K Filings) ===
@@ -96,19 +94,16 @@ DETAILED_SCHEMA = """
 (:Company)-[:REPORTS_IN {year}]->(:Filing10K)
 (:Filing10K)-[:EXTRACTED_FROM]->(:Document)
 
-# 10-K Section Types (TWO-LEVEL ARCHITECTURE)
-# Level 1: Section nodes store FULL TEXT — unified HAS_SECTION relationship
-# Level 2: Chunk:SectionChunk nodes store CHUNKED TEXT for fine-grained retrieval
-# Each section has: id, title, text (full), sectionType, secItem
-(:Filing10K)-[:HAS_SECTION]->(:Section {id, title, text, sectionType, secItem})
+# 10-K Section Types
+(:Filing10K)-[:HAS_SECTION]->(:Section {id, title, text})
 # Section additional labels: RiskFactor, BusinessInformation, LegalProceeding, ManagementDiscussion, Properties
-# sectionType values: 'risk_factors', 'business_info', 'legal_proceedings', 'mda', 'properties'
-# secItem values: 'Item 1A', 'Item 1', 'Item 3', 'Item 7', 'Item 2'
 
 # Section chunks for fine-grained retrieval (linked to parent Section)
-(:Section)-[:HAS_CHUNK]->(:Chunk:SectionChunk {title, text, embedding, chunkType, chunkIndex, subsection})
-
+(:Section)-[:HAS_CHUNK]->(:Chunk:SectionChunk {title, text, embedding})
+# === FINANCIAL METRICS & SEGMENTS ===
 (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
+(:Section:Financials)-[:HAS_METRIC]->(:FinancialMetric {label, value})
+(:FinancialMetric)-[:HAS_SEGMENT]->(:Segment {label, value, percentage})
 
 # === COMPANY PEOPLE & COMPENSATION ===
 (:Company)-[:HAS_CEO {ceoCompensation, ceoActuallyPaid, date}]->(:Person {name})
@@ -121,20 +116,16 @@ DETAILED_SCHEMA = """
 (:InsiderTransaction)-[:MADE_BY]->(:Person {name})
 (:InsiderTransaction)-[:EXTRACTED_FROM]->(:Document)
 
-# === FINANCIAL METRICS & SEGMENTS ===
-(:Section:Financials)-[:HAS_METRIC]->(:FinancialMetric {label, value})
-(:FinancialMetric)-[:HAS_SEGMENT]->(:Segment {label, value, percentage})
 
 # === IMPORTANT NOTES ===
-# 1. netAssets, numberHoldings, expenseRatio, advisoryFees, costsPer10k are on FinancialHighlight, NOT on Fund
+# 1. netAssets, numberHoldings, expenseRatio, advisoryFees are on FinancialHighlight, NOT on Fund
 # 2. numberHoldings property already contains the count but you can recalculate
-# 3. turnoverRate is absolute (2 = 2%, not 0.02)
+# 3. turnover is absolute (2 = 2%, not 0.02)
 # 4. Use 'ticker' for symbols (VTI), 'name' for full names
 # 5. Vector indexes exist on embedding properties for semantic search
 # 6. Fulltext indexes exist on name properties for fuzzy/partial name matchings USE THEM before the MATCH
 # 7. NEVER generate incomplete property filters like (n:Label {name}). Only use property filters with values like (n:Label {name: 'Value'}).
 # 8. If you do not know the value of a property, DO NOT include it in the curly braces {}.
-# 9. Whenever it exists, return the document information from which it has been extracted.
+# 9. ⚠️ CRITICAL: Whenever it exists, return the document information from which it has been extracted.
 # 10. Do not forget the r in the relationship name like (n:Label)-[r:RELATIONSHIP]->(m:Label) and use it in the return statement.
-# 11. ⚠️ CRITICAL: For HAS_FINANCIAL_HIGHLIGHT, 'year' is on the RELATIONSHIP (r.year), NOT on the FinancialHighlight node (fh.year does NOT exist)!
 """

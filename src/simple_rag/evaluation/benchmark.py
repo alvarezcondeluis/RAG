@@ -431,10 +431,7 @@ class Text2CypherBenchmark:
                         print(f"   {'─'*76}")
                         print(f"   LLM PROMPT — {r.prompt_token_estimate:,} tokens (est.) — initial request sent to model:")
                         print(f"   {'─'*76}")
-                        for line in r.llm_prompt.splitlines():
-                            print(f"   {line}")
-                        print(f"   {'─'*76}")
-
+                        
         # --- NULL EXPECTED RESULTS ---
         # Questions where the expected Cypher itself returned 0 records.
         # These are untestable and must be fixed in test_set.json.

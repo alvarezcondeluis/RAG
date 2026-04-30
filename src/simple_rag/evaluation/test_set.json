@@ -1,146 +1,122 @@
 [
   {
     "question": "What is the full name of the fund with ticker VTI?",
-    "ground_truth_answer": "Vanguard Total Stock Market ETF",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name AS name",
     "complexity": "simple"
-  },
+  }, 
   {
     "question": "Which is the security exchange that VTI is listed on?",
-    "ground_truth_answer": "NASDAQ",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.securityExchange AS exchange",
     "complexity": "simple"
   },
   {
-    "question": "What is the expense ratio for VTI?",
-    "ground_truth_answer": "0.03%",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.expenseRatio AS expenseRatio",
+    "question": "Which provider manages the trust that issues the VTI fund?",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN p.name AS providerName",
+    "complexity": "simple"
+  },
+  {
+    "question": "What is the expense ratio for VFINX?",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VFINX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio ORDER BY r.year DESC LIMIT 1",
+    "complexity": "simple"
+  },
+  {
+    "question": "What is the expense ratio for the 500 index fund of vanguard?",
+    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard 500 Index Fund'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "How many holdings does the fund VTI have in total?",
-    "ground_truth_answer": "3560",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName",
     "complexity": "simple"
   },
   {
     "question": "What is the turnover rate for VTI?",
-    "ground_truth_answer": "0.04",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.turnoverRate AS turnoverRate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "What are the advisory fees for VTI?",
-    "ground_truth_answer": "0.01%",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.advisoryFees AS advisoryFees",
-    "complexity": "simple"
-  },
-  {
-    "question": "Calculate the cost per 10k investment for VTI.",
-    "ground_truth_answer": "3",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.costsPer10k AS cost",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.advisoryFees AS advisoryFees ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "Find the ticker symbol for the fund named 'Vanguard Total Stock Market Index Fund'.",
-    "ground_truth_answer": "VTI",
     "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Total Stock Market Index Fund'}) RETURN f.ticker AS ticker",
     "complexity": "simple"
   },
   {
     "question": "Which Trust issues the fund VTI?",
-    "ground_truth_answer": "Vanguard Index Funds",
     "expected_cypher": "MATCH (t:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN t.name AS trustName",
     "complexity": "medium"
   },
   {
-    "question": "Who is the provider that manages the VTI fund?",
-    "ground_truth_answer": "Vanguard",
-    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) RETURN p.name AS providerName",
-    "complexity": "medium"
-  },
-  {
     "question": "What share class does VTI belong to?",
-    "ground_truth_answer": "ETF",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.name AS shareClass",
     "complexity": "medium"
   },
   {
     "question": "Get the description of the share class for VTI.",
-    "ground_truth_answer": "Exchange Traded Fund",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.description AS description",
     "complexity": "medium"
   },
   {
     "question": "Return both the expense ratio and the turnover rate for VTI.",
-    "ground_truth_answer": "Expense Ratio: 0.03%, Turnover: 4%",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.expenseRatio AS expenseRatio, f.turnoverRate AS turnoverRate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1",
+    "complexity": "medium"
+  },
+  {
+    "question": "Explain me the differences of all the share classes for the Vanguard 500 Index fund?",
+    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard 500 Index Fund'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.name AS name, sc.description AS description",
     "complexity": "medium"
   },
   {
     "question": "What is the net assets value recorded for the fund VTI?",
-    "ground_truth_answer": "1300000000",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.netAssets",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssets ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "List the tickers of all funds managed by the provider 'Vanguard'.",
-    "ground_truth_answer": "['VTI', 'VOO', 'BND']",
     "expected_cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker",
     "complexity": "hard"
   },
   {
     "question": "Find all funds with an expense ratio less than 0.05.",
-    "ground_truth_answer": "['VTI', 'VOO']",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.expenseRatio < 0.05 RETURN f.name AS name",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio < 0.05 RETURN f.name AS name ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the security exchange and the number of holdings for VTI?",
-    "ground_truth_answer": "NASDAQ, 3750",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.securityExchange AS exchange, f.numberHoldings AS holdings",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.securityExchange AS exchange, fh.numberHoldings AS holdings ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Does VTI have a turnover rate higher than 10%?",
-    "ground_truth_answer": "False",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.turnoverRate > 10 AS isHighTurnover",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.turnover > 10 AS isHighTurnover ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Which funds are issued by 'Vanguard Index Funds' trust?",
-    "ground_truth_answer": "['VTI', 'VTV']",
     "expected_cypher": "MATCH (t:Trust {name: 'Vanguard Index Funds'})-[:ISSUES]->(f:Fund) RETURN f.name AS fundName",
     "complexity": "medium"
   },
   {
     "question": "Retrieve the full metadata (name, exchange, expense ratio) for VTI.",
-    "ground_truth_answer": "{object}",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name AS name, f.securityExchange AS exchange, f.expenseRatio AS expenseRatio",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.name AS name, f.securityExchange AS exchange, fh.expenseRatio AS expenseRatio ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "What is the total number of holdings for the Vanguard Small Cap Fund?",
-    "ground_truth_answer": "3499",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.ticker = 'VSCPX' AND f.numberHoldings IS NOT NULL RETURN DISTINCT f.numberHoldings AS totalHoldings, f.name, f.ticker",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker = 'VSCPX' AND fh.numberHoldings IS NOT NULL RETURN DISTINCT fh.numberHoldings AS totalHoldings, f.name, f.ticker ORDER BY r.year DESC LIMIT 1",
     "complexity": "hard"
   },
   {
-    "question": "Show me the costs per 10k for all funds listed on NASDAQ.",
-    "ground_truth_answer": "[{'ticker': 'VTI', 'cost': 3}]",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.securityExchange = 'NASDAQ' RETURN f.ticker AS ticker, f.costsPer10k AS cost",
-    "complexity": "medium"
-  },
-  {
     "question": "Who manages the trust for the fund with turnover rate 4%?",
-    "ground_truth_answer": "Vanguard",
-    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE f.turnoverRate = 4 RETURN p.name AS providerName",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) -[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover = 4 RETURN p.name AS providerName ORDER BY rel.year DESC LIMIT 1",
     "complexity": "hard"
   },
   {
     "question": "Are there any funds with more than 5000 holdings?",
-    "ground_truth_answer": "['VT']",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.numberHoldings > 5000 RETURN f.name AS fundName",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.numberHoldings > 5000 RETURN f.name AS fundName ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -155,22 +131,22 @@
   },
   {
     "question": "What is the investment objective text for Vanguard S&P 500 fund?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VFFSX'})-[:DEFINED_BY]->(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(o:Objective) RETURN o.text AS objective",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VFFSX'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective",
     "complexity": "simple"
   },
   {
     "question": "What is the investment objective text for VOO?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:DEFINED_BY]->(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(o:Objective) RETURN o.text AS objective",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective",
     "complexity": "simple"
   },
   {
     "question": "What are the main risks described for VTI?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK_CHUNK]->(r:RiskChunk) RETURN r.title AS riskTitle, r.text AS riskDescription",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(r:Section:RiskFactor) RETURN r.title AS riskTitle, r.text AS riskDescription",
     "complexity": "simple"
   },
   {
     "question": "Get the performance commentary for VTI.",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(pc:PerformanceCommentary) RETURN pc.text AS performance",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(pc:Section:PerformanceCommentary) RETURN pc.text AS performance",
     "complexity": "simple"
   },
   {
@@ -189,28 +165,18 @@
     "complexity": "simple"
   },
   {
-    "question": "What is the name of the fund that has the greatest annual returns since inception?",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) RETURN f.name AS fundName, ar.returnInception AS inceptionReturn ORDER BY inceptionReturn DESC LIMIT 1",
-    "complexity": "simple"
-  },
-  {
-    "question": "Find the provider managing funds with the lowest average turnover rate.",
-    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WITH p, avg(f.turnoverRate) AS avgTurnover RETURN p.name AS provider, avgTurnover ORDER BY avgTurnover ASC LIMIT 1",
-    "complexity": "hard"
-  },
-  {
-    "question": "Which holding has the highest weight across all portfolios?",
-    "expected_cypher": "MATCH (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN h.name AS holdingName, h.ticker AS ticker, max(r.weight) AS maxWeight ORDER BY maxWeight DESC LIMIT 1",
-    "complexity": "hard"
-  },
-  {
     "question": "List all funds that share at least one manager with VTI.",
     "expected_cypher": "MATCH (f1:Fund {ticker: 'VTI'})-[:MANAGED_BY]->(p:Person)<-[:MANAGED_BY]-(f2:Fund) WHERE f1 <> f2 RETURN DISTINCT f2.ticker AS ticker, f2.name AS name, p.name AS sharedManager",
     "complexity": "hard"
   },
   {
+    "question": "Show me the annual return evolution of the Vanguard 500 Index",
+    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard 500 Index Fund'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, fh.annualReturn as AnualReturn, fh.advisoryFees AS fee, fh.numberHoldings AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1",
+    "complexity": "hard"
+  },
+  {
     "question": "Show me the tickers of the Vanguard Total Stock Market and the main information about each one of them",
-    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Total Stock Market Index Fund'}) RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover",
+    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Total Stock Market Index Fund'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, fh.advisoryFees AS fee, fh.numberHoldings AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1",
     "complexity": "hard"
   },
   {
@@ -229,13 +195,8 @@
     "complexity": "medium"
   },
   {
-    "question": "What are the risks of the fund VTI?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK_CHUNK]->(r:RiskChunk) RETURN r.text AS risk",
-    "complexity": "medium"
-  },
-  {
     "question": "What are the strategies of the fund VTI?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_STRATEGY_CHUNK]->(s:StrategyChunk) RETURN s.text AS strategy",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(s:Section:Strategy) RETURN s.text AS strategy",
     "complexity": "medium"
   },
   {
@@ -250,150 +211,108 @@
   },
   {
     "question": "Show me the most relevant information about the VTI fund",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name AS fundName, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover",
-    "complexity": "medium"
-  },
-  {
-    "question": "Does the VTI have any image attached to it?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_CHART]->(img:Image) RETURN img.title AS chartTitle, img.category AS category",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.name AS fundName, f.securityExchange AS exchange, fh.advisoryFees AS fee, fh.numberHoldings AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the full name of the fund with ticker VOO?",
-    "ground_truth_answer": "Vanguard S&P 500 ETF",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'}) RETURN f.name AS name",
     "complexity": "simple"
   },
   {
     "question": "Which is the security exchange that VUG is listed on?",
-    "ground_truth_answer": "NASDAQ",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VUG'}) RETURN f.securityExchange AS exchange",
     "complexity": "simple"
   },
   {
     "question": "What is the expense ratio for VYM?",
-    "ground_truth_answer": "0.06%",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VYM'}) RETURN f.expenseRatio AS expenseRatio",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VYM'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "How many holdings does the Total International Stock fund have in total?",
-    "ground_truth_answer": "7900",
     "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) WHERE f.name CONTAINS 'Total International Stock' RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName",
     "complexity": "simple"
   },
   {
     "question": "What is the turnover rate for ILTB?",
-    "ground_truth_answer": "0.66",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'ILTB'}) RETURN f.turnoverRate AS turnoverRate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'ILTB'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "What are the advisory fees for ILTB?",
-    "ground_truth_answer": "0.05%",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'ILTB'}) RETURN f.advisoryFees AS advisoryFees",
-    "complexity": "simple"
-  },
-  {
-    "question": "Calculate the cost per 10k investment for the 'Growth Index' fund.",
-    "ground_truth_answer": "4",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Growth Index' RETURN f.costsPer10k AS cost",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'ILTB'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.advisoryFees AS advisoryFees ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "Find the ticker symbol for the fund named '500 Index Fund'.",
-    "ground_truth_answer": "VOO",
     "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS '500 Index Fund' RETURN f.ticker AS ticker",
     "complexity": "simple"
   },
   {
     "question": "Which Trust issues the fund VIG?",
-    "ground_truth_answer": "Vanguard Specialized Funds",
     "expected_cypher": "MATCH (t:Trust)-[:ISSUES]->(f:Fund {ticker: 'VIG'}) RETURN t.name AS trustName",
     "complexity": "medium"
   },
   {
     "question": "Who is the provider that manages the AGZ fund?",
-    "ground_truth_answer": "Vanguard",
     "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'AGZ'}) RETURN p.name AS providerName",
     "complexity": "medium"
   },
   {
     "question": "What share class does VTV belong to?",
-    "ground_truth_answer": "ETF",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTV'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.name AS shareClass",
     "complexity": "medium"
   },
   {
     "question": "Get the description of the share class for VO.",
-    "ground_truth_answer": "Exchange Traded Fund",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VO'})-[:HAS_SHARE_CLASS]->(sc:ShareClass) RETURN sc.description AS description",
     "complexity": "medium"
   },
   {
     "question": "Return both the expense ratio and the turnover rate for the High Dividend Yield fund.",
-    "ground_truth_answer": "Expense Ratio: 0.06%, Turnover: 5%",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'High Dividend Yield' RETURN f.expenseRatio AS expenseRatio, f.turnoverRate AS turnoverRate",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'High Dividend Yield' RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the net assets value recorded for the fund IMTB?",
-    "ground_truth_answer": "4500000000",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'IMTB'}) RETURN f.netAssets",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'IMTB'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssets ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
-    "question": "List the tickers of all funds managed by the provider 'Vanguard'.",
-    "ground_truth_answer": "['VTI', 'VOO', 'BND']",
-    "expected_cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN f.ticker AS ticker",
-    "complexity": "hard"
-  },
-  {
     "question": "Find all funds with an expense ratio less than 0.04.",
-    "ground_truth_answer": "['VTI', 'VOO']",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.expenseRatio < 0.04 RETURN f.name AS name",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio < 0.04 RETURN f.name AS name ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the security exchange and the number of holdings for the VITAX?",
-    "ground_truth_answer": "NYSE Arca, 320",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.ticker = 'VITAX' RETURN f.securityExchange AS exchange, f.numberHoldings AS holdings",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker = 'VITAX' RETURN f.securityExchange AS exchange, fh.numberHoldings AS holdings ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Does the Wellington fund have a turnover rate higher than 20%?",
-    "ground_truth_answer": "True",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VGWAX'}) RETURN f.name AS fundName, f.turnoverRate AS turnoverRate, f.securityExchange AS securityExchange, f.ticker AS ticker",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VGWAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.name AS fundName, fh.turnover AS turnoverRate, f.securityExchange AS securityExchange, f.ticker AS ticker ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Retrieve the full metadata (name, exchange, expense ratio) for VOO.",
-    "ground_truth_answer": "{object}",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'}) RETURN f.name AS name, f.securityExchange AS exchange, f.expenseRatio AS expenseRatio",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.name AS name, f.securityExchange AS exchange, fh.expenseRatio AS expenseRatio ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "What is the total number of holdings for the Vanguard Small Cap Fund?",
-    "ground_truth_answer": "1400",
     "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Small-Cap Index Fund'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) WITH f, count(h) AS holdingCount WHERE holdingCount > 100 RETURN f.ticker, holdingCount",
     "complexity": "hard"
   },
-  {
-    "question": "Show me the costs per 10k for all funds listed on NYSE Arca.",
-    "ground_truth_answer": "[{'ticker': 'VOO', 'cost': 3}]",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.securityExchange = 'NYSE Arca' RETURN f.ticker AS ticker, f.costsPer10k AS cost",
-    "complexity": "medium"
-  },
+  
   {
     "question": "Who manages the trust for the fund with turnover rate 5%?",
-    "ground_truth_answer": "Vanguard",
-    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE f.turnoverRate = 5 RETURN p.name AS providerName",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) -[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover = 5 RETURN p.name AS providerName ORDER BY rel.year DESC LIMIT 1",
     "complexity": "hard"
   },
   {
     "question": "Are there any funds with more than 8000 holdings?",
-    "ground_truth_answer": "['VXUS']",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.numberHoldings > 8000 RETURN f.name AS fundName",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.numberHoldings > 8000 RETURN f.name AS fundName ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -403,22 +322,22 @@
   },
   {
     "question": "What is the investment objective text for the Health Care fund?",
-    "expected_cypher": "MATCH (f:Fund) WHERE toLower(f.name) CONTAINS toLower('Health Care') MATCH (f)-[d:DEFINED_BY]->(p:Profile)-[:HAS_OBJECTIVE_CHUNK]->(o:Objective) RETURN f.name AS FundName, f.ticker AS Ticker, o.text AS InvestmentObjectiveText ORDER BY d.date DESC LIMIT 5",
+    "expected_cypher": "MATCH (f:Fund) WHERE toLower(f.name) CONTAINS toLower('Health Care') MATCH (f)-[d:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN f.name AS FundName, f.ticker AS Ticker, o.text AS InvestmentObjectiveText ORDER BY d.date DESC LIMIT 5",
     "complexity": "simple"
   },
   {
     "question": "What is the investment objective text for VTI?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(o:Objective) RETURN o.text AS objective",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective",
     "complexity": "simple"
   },
   {
     "question": "What are the main risks described for VBR?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VBR'})-[:DEFINED_BY]->(:Profile)-[:HAS_RISK_CHUNK]->(r:RiskChunk) RETURN r.title AS riskTitle, r.text AS riskDescription",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VBR'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(r:Section:RiskFactor) RETURN r.title AS riskTitle, r.text AS riskDescription",
     "complexity": "simple"
   },
   {
     "question": "Get the performance commentary for VUG.",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VUG'})-[:DEFINED_BY]->(:Profile)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(pc:PerformanceCommentary) RETURN pc.text AS performance",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VUG'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(pc:Section:PerformanceCommentary) RETURN pc.text AS performance",
     "complexity": "simple"
   },
   {
@@ -443,7 +362,7 @@
   },
   {
     "question": "Find the provider managing funds with the lowest average turnover rate.",
-    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WITH p, avg(f.turnoverRate) AS avgTurnover RETURN p.name AS provider, avgTurnover ORDER BY avgTurnover ASC LIMIT 1",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund)-[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WITH p, avg(fh.turnover) AS avgTurnover RETURN p.name AS provider, avgTurnover ORDER BY avgTurnover ASC LIMIT 1",
     "complexity": "hard"
   },
   {
@@ -463,7 +382,7 @@
   },
   {
     "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'S&P 500' RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'S&P 500' RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, fh.advisoryFees AS fee, fh.numberHoldings AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1",
     "complexity": "hard"
   },
   {
@@ -478,12 +397,12 @@
   },
   {
     "question": "What are the risks for the Real Estate ETF?",
-    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_RISK_CHUNK]->(r:RiskChunk) WHERE f.name CONTAINS 'Real Estate' RETURN r.text AS risk",
+    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(r:Section:RiskFactor) WHERE f.name CONTAINS 'Real Estate' RETURN r.text AS risk",
     "complexity": "medium"
   },
   {
     "question": "What are the strategies of the fund utilities index fund?",
-    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_STRATEGY_CHUNK]->(s:StrategyChunk) WHERE f.name CONTAINS 'Utilities Index Fund' RETURN s.text AS strategy",
+    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(s:Section:Strategy) WHERE f.name CONTAINS 'Utilities Index Fund' RETURN s.text AS strategy",
     "complexity": "medium"
   },
   {
@@ -498,7 +417,7 @@
   },
   {
     "question": "Show me the most relevant information about the VIG fund",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VIG'}) RETURN f.name AS fundName, f.securityExchange AS exchange, f.costsPer10k AS cost, f.advisoryFees AS fee, f.numberHoldings AS holdings, f.expenseRatio AS ratio, f.netAssets AS assets, f.turnoverRate AS turnover",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VIG'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.name AS fundName, f.securityExchange AS exchange, fh.advisoryFees AS fee, fh.numberHoldings AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -553,7 +472,7 @@
   },
   {
     "question": "What is the fund that has the highest turnover rate?",
-    "expected_cypher": "MATCH (f:Fund) RETURN f.name AS fundName, f.turnoverRate AS turnoverRate ORDER BY turnoverRate DESC LIMIT 1",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.name AS fundName, fh.turnover AS turnoverRate ORDER BY turnoverRate DESC LIMIT 1",
     "complexity": "hard"
   },
   {
@@ -598,17 +517,17 @@
   },
   {
     "question": "Which documents were used as sources for the VTI fund data?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.accessionNumber AS accession, d.url AS url, d.type AS type, d.filingDate AS filingDate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.accession_number AS accession, d.url AS url, d.form AS type, d.filing_date AS filingDate",
     "complexity": "medium"
   },
   {
     "question": "Compare the expense ratios of all ETF share class funds",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'ETF Shares'}) RETURN f.ticker AS ticker, f.name AS fundName, f.expenseRatio AS expenseRatio ORDER BY f.expenseRatio ASC",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'ETF Shares'}) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS fundName, fh.expenseRatio AS expenseRatio ORDER BY fh.expenseRatio ASC",
     "complexity": "medium"
   },
   {
     "question": "What is the average expense ratio across all funds managed by Vanguard?",
-    "expected_cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN avg(f.expenseRatio) AS avgExpenseRatio",
+    "expected_cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN avg(fh.expenseRatio) AS avgExpenseRatio",
     "complexity": "hard"
   },
   {
@@ -657,33 +576,23 @@
     "complexity": "hard"
   },
   {
-    "question": "How much does it cost me to invest 10k in VYM?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VYM'}) RETURN f.costsPer10k AS costPer10k",
-    "complexity": "simple"
-  },
-  {
-    "question": "Compare the 10-year average returns of the Vanguard Growth Index Fund versus the Vanguard Value Index Fund.",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE f.name IN ['Vanguard Growth Index Fund', 'Vanguard Value Index Fund'] AND ar.return10y IS NOT NULL RETURN f.name AS FundName, ar.return10y AS Return10Year ORDER BY FundName",
-    "complexity": "medium"
-  },
-  {
     "question": "Which fund has the highest concentration (largest weight) in a single holding?",
     "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN f.name AS FundName, h.name AS HoldingName, r.weight AS Weight ORDER BY r.weight DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Are there any funds in the database that hold Level 3 (highly illiquid / hard-to-value) fair value assets?",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3', 'Level 3'] RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, f.netAssets AS netAssets, h.name AS holdingName, r.fairValueLevel AS fairValueLevel",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3', 'Level 3'] OPTIONAL MATCH (f)-[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, fh.netAssets AS netAssets, h.name AS holdingName, r.fairValueLevel AS fairValueLevel ORDER BY rel.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the stated investment objective of the iShares Energy Storage & Materials ETF?",
-    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(o:Objective) WHERE toLower(f.name) CONTAINS 'energy storage & materials' RETURN f.name AS FundName, o.text AS Objective",
+    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) WHERE toLower(f.name) CONTAINS 'energy storage & materials' RETURN f.name AS FundName, o.text AS Objective",
     "complexity": "simple"
   },
   {
     "question": "Summarize the principal investment strategy for the Vanguard Dividend Appreciation Fund.",
-    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_STRATEGY_CHUNK]->(s:StrategyChunk) WHERE toLower(f.name) CONTAINS 'dividend appreciation' RETURN f.name AS FundName, s.text AS Strategy",
+    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(s:Section:Strategy) WHERE toLower(f.name) CONTAINS 'dividend appreciation' RETURN f.name AS FundName, s.text AS Strategy",
     "complexity": "simple"
   },
   {
@@ -702,20 +611,10 @@
     "complexity": "hard"
   },
   {
-    "question": "Which companies had the highest number of insider 'SELL' transactions?",
-    "expected_cypher": "MATCH (c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction) WHERE toUpper(it.transactionType) = 'SELL' RETURN c.name AS CompanyName, count(it) AS BuyCount ORDER BY BuyCount DESC LIMIT 5",
-    "complexity": "medium"
-  },
-  {
     "question": "Show me all insider transactions (buys, sells, and tax withholding) made by Mark Zuckerberg.",
     "expected_cypher": "MATCH (p:Person)-[:MADE_BY]-(it:InsiderTransaction)<-[:HAS_INSIDER_TRANSACTION]-(c:Company) WHERE toLower(p.name) CONTAINS 'zuckerberg' RETURN c.name AS CompanyName, it.transactionType AS TransactionType, it.shares AS Shares, it.price AS Price, it.transactionDate AS TransactionDate ORDER BY it.transactionDate DESC",
     "complexity": "medium"
   },
-  {
-    "question": "Which holding appears in the most fund portfolios across the entire database?",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN h.ticker AS ticker, h.name AS holdingName, count(DISTINCT f) AS fundCount ORDER BY fundCount DESC LIMIT 1",
-    "complexity": "medium"
-},
   {
     "question": "Compare the 10-year average returns of the Vanguard Growth Index Fund versus the Vanguard Value Index Fund.",
     "expected_cypher": "MATCH (f1:Fund {name: 'Vanguard Growth Index Fund'})-[r1:HAS_AVERAGE_RETURNS]->(ar1:AverageReturns) MATCH (f2:Fund {name: 'Vanguard Value Index Fund'})-[r2:HAS_AVERAGE_RETURNS]->(ar2:AverageReturns) RETURN f1.name, ar1.return10y, f2.name, ar2.return10y",
@@ -723,18 +622,16 @@
   },
   {
     "question": "I want to invest safely, which fund has the lowest turnover?",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.turnoverRate IS NOT NULL RETURN f.name, f.turnoverRate ORDER BY f.turnoverRate ASC LIMIT 1",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover IS NOT NULL RETURN f.name, fh.turnover ORDER BY fh.turnover ASC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What are the top 5 common holdings between VTI and VOO by combined weight?",
-    "ground_truth_answer": "['AAPL', 'MSFT', 'AMZN', 'NVDA', 'GOOG']",
     "expected_cypher": "MATCH (f1:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[w1:HAS_HOLDING]->(h:Holding)<-[w2:HAS_HOLDING]-(:Portfolio)<-[:HAS_PORTFOLIO]-(f2:Fund {ticker: 'VOO'}) RETURN h.ticker AS holdingTicker, h.name AS holdingName, (w1.weight + w2.weight) AS combinedWeight ORDER BY combinedWeight DESC LIMIT 5",
     "complexity": "hard"
   },
   {
     "question": "Which fund is managed by the highest number of people?",
-    "ground_truth_answer": "Vanguard Wellington Fund",
     "expected_cypher": "MATCH (f:Fund)-[:MANAGED_BY]->(p:Person) RETURN f.name AS fundName, count(DISTINCT p) AS managerCount ORDER BY managerCount DESC LIMIT 1",
     "complexity": "medium"
   },
@@ -750,19 +647,17 @@
   },
   {
     "question": "Find all funds that have a higher 1-year return than VOO.",
-    "ground_truth_answer": "['VGT', 'MGK']",
     "expected_cypher": "MATCH (voo:Fund {ticker: 'VOO'})-[:HAS_AVERAGE_RETURNS]->(pVOO:AverageReturns), (f:Fund)-[:HAS_AVERAGE_RETURNS]->(p:AverageReturns) WHERE f.ticker <> 'VOO' AND p.return1y > pVOO.return1y RETURN f.ticker AS ticker, f.name AS fundName, p.return1y AS fundReturn, pVOO.return1y AS vooReturn ORDER BY fundReturn DESC",
     "complexity": "hard"
   },
   {
     "question": "Show me funds with an expense ratio under 0.05 that have a 5-year return greater than 10%.",
-    "ground_truth_answer": "['VTI', 'VOO', 'VV']",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(p:AverageReturns) WHERE f.expenseRatio < 0.05 AND p.return5y > 10.0 RETURN f.ticker AS ticker, f.expenseRatio AS expenseRatio, p.return5y AS return5y ORDER BY return5y DESC",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(p:AverageReturns), (f)-[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio < 0.05 AND p.return5y > 10.0 RETURN f.ticker AS ticker, fh.expenseRatio AS expenseRatio, p.return5y AS return5y ORDER BY return5y DESC",
     "complexity": "medium"
   },
   {
     "question": "Return the net assets and total number of holdings for the Vanguard Dividend Appreciation fund.",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Dividend Appreciation' RETURN f.name AS Name, f.netAssets AS netAssets, f.numberHoldings AS totalHoldings",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Dividend Appreciation' RETURN f.name AS Name, fh.netAssets AS netAssets, fh.numberHoldings AS totalHoldings ORDER BY r.year DESC LIMIT 1",
     "complexity": "simple"
   },
   {
@@ -772,7 +667,6 @@
   },
   {
     "question": "Find the years where VTI had a negative total return.",
-    "ground_truth_answer": "[2022, 2018]",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn < 0 RETURN r.year AS year, fh.totalReturn AS totalReturn ORDER BY year DESC",
     "complexity": "medium"
   },
@@ -788,7 +682,7 @@
   },
   {
     "question": "What properties does Microsoft own according to its 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(props:Section:Properties) RETURN props.fullText AS properties",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(props:Section:Properties) RETURN props.text AS properties",
     "complexity": "medium"
   },
   {
@@ -833,7 +727,7 @@
   },
   {
     "question": "Which documents for VTI were filed most recently?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.filingDate AS filingDate ORDER BY d.filingDate DESC LIMIT 1",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.filing_date AS filingDate ORDER BY d.filing_date DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -868,7 +762,7 @@
   },
   {
     "question": "Which funds have no performance commentary?",
-    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(p:Profile) WHERE NOT (p)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(:PerformanceCommentary) RETURN f.name AS fundName",
+    "expected_cypher": "MATCH (f:Fund)-[:DEFINED_BY]->(p:Profile) WHERE NOT (p)-[:HAS_SECTION]->(:Section:PerformanceCommentary) RETURN f.name AS fundName",
     "complexity": "hard"
   },
   {
@@ -883,7 +777,7 @@
   },
   {
     "question": "Which funds share the same source document?",
-    "expected_cypher": "MATCH (f1:Fund)-[:EXTRACTED_FROM]->(d:Document)<-[:EXTRACTED_FROM]-(f2:Fund) WHERE id(f1) < id(f2) RETURN f1.name AS fund1, f2.name AS fund2, d.accessionNumber AS documentId",
+    "expected_cypher": "MATCH (f1:Fund)-[:EXTRACTED_FROM]->(d:Document)<-[:EXTRACTED_FROM]-(f2:Fund) WHERE id(f1) < id(f2) RETURN f1.name AS fund1, f2.name AS fund2, d.accession_number AS documentId",
     "complexity": "hard"
   },
   {
@@ -908,7 +802,7 @@
   },
   {
     "question": "Can you compare the expense ratio and turnover rate of VTI and VOO?",
-    "expected_cypher": "MATCH (f:Fund) WHERE f.ticker IN ['VTI', 'VOO'] RETURN f.ticker AS ticker, f.expenseRatio AS expenseRatio, f.turnoverRate AS turnoverRate",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VTI', 'VOO'] RETURN f.ticker AS ticker, fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -923,7 +817,7 @@
   },
   {
     "question": "What is the average number of holdings across all Vanguard funds?",
-    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE p.name CONTAINS 'Vanguard' RETURN avg(f.numberHoldings) AS averageHoldings",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE p.name CONTAINS 'Vanguard' OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN avg(fh.numberHoldings) AS averageHoldings",
     "complexity": "medium"
   },
   {
@@ -978,12 +872,12 @@
   },
   {
     "question": "Show the income statement text from Microsoft's most recent 10-K filing.",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.incomeStatement AS incomeStatement, fin.fiscalYeat AS fiscalYear ORDER BY rel.year DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.incomeStatement AS incomeStatement, fin.fiscalYear AS fiscalYear ORDER BY rel.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "What is the balance sheet and cash flow data for Amazon from its 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.balanceSheet AS balanceSheet, fin.cashFlow AS cashFlow, fin.fiscalYeat AS fiscalYear ORDER BY rel.year DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AMZN'})-[rel:REPORTS_IN]->(filing:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN fin.balanceSheet AS balanceSheet, fin.cashFlow AS cashFlow, fin.fiscalYear AS fiscalYear ORDER BY rel.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -993,42 +887,127 @@
   },
   {
     "question": "What source document was the VTI fund data extracted from?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate, d.accessionNumber AS accessionNumber ORDER BY d.filingDate DESC",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate, d.accession_number AS accessionNumber ORDER BY d.filing_date DESC",
     "complexity": "simple"
   },
   {
     "question": "Which document was the portfolio data for VTI extracted from?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate",
     "complexity": "medium"
   },
   {
     "question": "What document was used as the source for the VTI fund profile?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(p:Profile)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(p:Profile)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate",
     "complexity": "medium"
   },
   {
     "question": "What SEC filing document backs the 10-K data for Apple?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(filing:Filing10K)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate ORDER BY d.filingDate DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(filing:Filing10K)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate ORDER BY d.filing_date DESC LIMIT 1",
     "complexity": "medium"
   },
   {
     "question": "Show me the source documents for the insider transactions at Apple.",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate",
     "complexity": "medium"
   },
- {
+  {
     "question": "Show me the source document for the executive compensation package data for Apple.",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})<-[:AWARDED_BY]-(cp:CompensationPackage)-[:DISCLOSED_IN]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})<-[:AWARDED_BY]-(cp:CompensationPackage)-[:DISCLOSED_IN]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate",
     "complexity": "medium"
   },
   {
     "question": "Which documents for VOO were filed most recently?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.type AS type, d.filingDate AS filingDate ORDER BY d.filingDate DESC LIMIT 1",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate ORDER BY d.filing_date DESC LIMIT 1",
     "complexity": "simple"
   },
   {
     "question": "What is the accession number of the document the VGT portfolio was extracted from?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VGT'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) RETURN d.accessionNumber AS accessionNumber, d.url AS url, d.filingDate AS filingDate",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VGT'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:EXTRACTED_FROM]->(d:Document) RETURN d.accession_number AS accessionNumber, d.url AS url, d.filing_date AS filingDate",
+    "complexity": "medium"
+  },
+  {
+    "question": "Search for funds whose name contains 'growth'.",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'growth') YIELD node AS f, score RETURN f.ticker AS ticker, f.name AS fundName, score ORDER BY score DESC",
+    "complexity": "simple"
+  },
+  {
+    "question": "Find a manager named 'John' across all funds.",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('personNameIndex', 'John') YIELD node AS p, score MATCH (f:Fund)-[:MANAGED_BY]->(p) RETURN f.ticker AS ticker, f.name AS fundName, p.name AS managerName, score ORDER BY score DESC",
+    "complexity": "medium"
+  },
+  {
+    "question": "Which trusts have a name similar to 'Index Funds'?",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('trustNameIndex', 'Index Funds') YIELD node AS t, score RETURN t.name AS trustName, score ORDER BY score DESC",
+    "complexity": "simple"
+  },
+  {
+    "question": "Search for a provider whose name contains 'Vanguard'.",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('providerNameIndex', 'Vanguard') YIELD node AS p, score RETURN p.name AS providerName, score ORDER BY score DESC",
+    "complexity": "simple"
+  },
+  {
+    "question": "Find funds with 'bond' in their name and show me their expense ratios.",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'bond') YIELD node AS f, score MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS fundName, fh.expenseRatio AS expenseRatio, score ORDER BY score DESC",
+    "complexity": "medium"
+  },
+  {
+    "question": "Search for funds with 'international' in their name that have more than 5000 holdings.",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'international') YIELD node AS f, score MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.numberHoldings > 5000 RETURN f.ticker AS ticker, f.name AS fundName, fh.numberHoldings AS holdings, score ORDER BY score DESC",
+    "complexity": "hard"
+  },
+  {
+    "question": "Find managers named 'Michael' and show the funds they manage along with the fund's 1-year return.",
+    "expected_cypher": "CALL db.index.fulltext.queryNodes('personNameIndex', 'Michael') YIELD node AS p, score MATCH (f:Fund)-[:MANAGED_BY]->(p) MATCH (f)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) RETURN p.name AS managerName, f.ticker AS ticker, f.name AS fundName, ar.return1y AS return1y, score ORDER BY score DESC",
+    "complexity": "hard"
+  },
+  {
+    "question": "What was VTI's investment objective in 2023?",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY {year: 2023}]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective",
+    "complexity": "medium"
+  },
+  {
+    "question": "Show me the strategy section of VOO's profile from the year 2022.",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:DEFINED_BY {year: 2022}]->(:Profile)-[:HAS_SECTION]->(s:Section:Strategy) RETURN s.text AS strategy",
+    "complexity": "medium"
+  },
+  {
+    "question": "Compare the risk factors of VTI across the 2022 and 2023 profile years.",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[d:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(r:Section:RiskFactor) WHERE d.year IN [2022, 2023] RETURN d.year AS year, r.title AS riskTitle, r.text AS riskDescription ORDER BY d.year",
+    "complexity": "hard"
+  },
+  {
+    "question": "Show me the tables available for VTI.",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_TABLE]->(t:Table) RETURN t.title AS tableTitle, t.content AS content",
+    "complexity": "simple"
+  },
+  {
+    "question": "What is the content of the tables for the VOO fund?",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_TABLE]->(t:Table) RETURN t.title AS tableTitle, t.content AS content",
+    "complexity": "simple"
+  },
+  {
+    "question": "Show me the tables for VTI from the year 2023.",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_TABLE {year: 2023}]->(t:Table) RETURN t.title AS tableTitle, t.content AS content",
+    "complexity": "medium"
+  },
+  {
+    "question": "Which funds have tables available in the database?",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_TABLE]->(t:Table) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, count(t) AS tableCount ORDER BY tableCount DESC",
+    "complexity": "medium"
+  },
+  {
+    "question": "What is the reporting date of the documents associated with VTI?",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.url AS url, d.form AS type, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.filing_date DESC",
+    "complexity": "simple"
+  },
+  {
+    "question": "Show me the reporting and filing dates of all documents for the VOO fund.",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:EXTRACTED_FROM]->(d:Document) RETURN d.accession_number AS accession, d.url AS url, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.filing_date DESC",
+    "complexity": "simple"
+  },
+  {
+    "question": "Which documents have a reporting date in 2023?",
+    "expected_cypher": "MATCH (d:Document) WHERE d.reporting_date CONTAINS '2023' RETURN d.accession_number AS accession, d.url AS url, d.form AS type, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.reporting_date DESC",
     "complexity": "medium"
   }
 ]
