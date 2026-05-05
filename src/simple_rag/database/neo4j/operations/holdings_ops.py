@@ -8,6 +8,7 @@ import logging
 import numpy as np
 import re
 from ..base import Neo4jDatabaseBase
+from simple_rag.models.asset_categories import ASSET_CATEGORY_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +39,43 @@ class HoldingsOperations(Neo4jDatabaseBase):
             print(f"💰 Processing {len(holdings_df)} holdings for {series_id}...")
 
         df = holdings_df.replace({np.nan: None})
-        
+
         for col in ['shares', 'market_value', 'weight_pct']:
             if col in df.columns:
                 df[col] = df[col].apply(lambda x: float(x) if x is not None else 0.0)
 
+        # Normalize identifier fields: empty strings → None so unique constraints don't collide
+        _EMPTY = {'', 'None', 'nan', 'NaN'}
+        for col in ['isin', 'cusip', 'lei', 'ticker']:
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda x: None if (x is None or str(x).strip() in _EMPTY) else str(x).strip()
+                )
+
+        import hashlib as _hl
+
         def generate_id(row):
-            return str(row.get('isin', 'UNKNOWN')).strip()
+            isin = row.get('isin')
+            if isin:
+                return isin
+            cusip = row.get('cusip')
+            if cusip:
+                return f"cusip_{cusip}"
+            key = f"{row.get('name', '')}|{row.get('ticker', '')}|{row.get('lei', '')}"
+            return f"gen_{_hl.md5(key.encode()).hexdigest()[:16]}"
 
         df['node_id'] = df.apply(generate_id, axis=1)
-        
+
+        def enrich_category(row):
+            code = row.get('asset_category')
+            cat = ASSET_CATEGORY_MAP.get(code) if code else None
+            row['category_type'] = cat.category if cat else None      # "Bonds" / "Equities" / "Alternatives"
+            row['category_name'] = cat.name if cat else None
+            row['category_subcategory'] = cat.subcategory if cat else None
+            return row
+
+        df = df.apply(enrich_category, axis=1)
+
         all_holdings = df.to_dict('records')
         total_count = len(all_holdings)
 
@@ -99,7 +127,7 @@ class HoldingsOperations(Neo4jDatabaseBase):
         MATCH (port:Portfolio {seriesId: $portfolio_id})
         UNWIND $batch as row
         
-        MERGE (h:Holding)
+        MERGE (h:Holding {nodeId: row.node_id})
         ON CREATE SET
             h.name = row.name,
             h.ticker = row.ticker,
@@ -110,9 +138,24 @@ class HoldingsOperations(Neo4jDatabaseBase):
             h.sector = row.sector,
             h.category = row.asset_category,
             h.categoryDesc = row.asset_category_desc,
+            h.categoryType = row.category_type,
             h.issuerCategory = row.issuer_category,
             h.issuerDesc = row.issuer_category_desc,
             h.createdAt = timestamp()
+        ON MATCH SET
+            h.name = row.name,
+            h.ticker = row.ticker,
+            h.cusip = row.cusip,
+            h.isin = row.isin,
+            h.lei = row.lei,
+            h.country = row.country,
+            h.sector = row.sector,
+            h.category = row.asset_category,
+            h.categoryDesc = row.asset_category_desc,
+            h.categoryType = row.category_type,
+            h.issuerCategory = row.issuer_category,
+            h.issuerDesc = row.issuer_category_desc,
+            h.updatedAt = timestamp()
 
         MERGE (port)-[rel:HAS_HOLDING]->(h)
         ON CREATE SET
@@ -123,7 +166,26 @@ class HoldingsOperations(Neo4jDatabaseBase):
             rel.fairValueLevel = row.fair_value_level,
             rel.isRestricted = row.is_restricted,
             rel.payoffProfile = row.payoff_profile
-        
+        ON MATCH SET
+            rel.shares = row.shares,
+            rel.marketValue = row.market_value,
+            rel.weight = row.weight_pct,
+            rel.currency = row.currency,
+            rel.fairValueLevel = row.fair_value_level,
+            rel.isRestricted = row.is_restricted,
+            rel.payoffProfile = row.payoff_profile
+
+        // AssetCategory node + relationship (skipped when code is unknown)
+        FOREACH (_ IN CASE WHEN row.category_type IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (cat:AssetCategory {code: row.asset_category})
+            ON CREATE SET
+                cat.name = row.category_name,
+                cat.category = row.category_type,
+                cat.subcategory = row.category_subcategory,
+                cat.createdAt = timestamp()
+            MERGE (h)-[:IN_CATEGORY]->(cat)
+        )
+
         FOREACH (_ IN CASE WHEN row.ticker IS NOT NULL AND row.ticker <> '' THEN [1] ELSE [] END |
             MERGE (c:Company {ticker: row.ticker})
             ON CREATE SET
@@ -300,17 +362,70 @@ class HoldingsOperations(Neo4jDatabaseBase):
             MERGE (h)-[r:IS_EQUITY_OF]->(c)
             RETURN r
             """
-            
+
             result = self._execute_write(query, {
                 "holding_id": holding_id,
                 "company_ticker": company_ticker
             })
-            
+
             if result:
                 print(f"✅ Linked holding {holding_id} to company {company_ticker}")
                 return result[0]["r"]
             return None
-            
+
         except Exception as e:
             print(f"❌ Error linking holding to company: {e}")
             return None
+
+    def enrich_holdings_categories(self, verbose: bool = True) -> int:
+        """
+        Backfill AssetCategory nodes and IN_CATEGORY relationships for all
+        existing Holding nodes that have a `category` property (the SEC code).
+
+        Safe to re-run — all operations are MERGE-based.  Use this to apply
+        category data to holdings that were ingested before this feature was added.
+
+        Returns:
+            Number of holdings linked to a category.
+        """
+        categories_payload = [
+            {
+                "code": cat.code,
+                "name": cat.name,
+                "category": cat.category,
+                "subcategory": cat.subcategory,
+            }
+            for cat in ASSET_CATEGORY_MAP.values()
+        ]
+
+        query = """
+        UNWIND $categories AS cat_data
+
+        MERGE (cat:AssetCategory {code: cat_data.code})
+        ON CREATE SET
+            cat.name = cat_data.name,
+            cat.category = cat_data.category,
+            cat.subcategory = cat_data.subcategory,
+            cat.createdAt = timestamp()
+
+        WITH cat, cat_data
+        MATCH (h:Holding)
+        WHERE h.category = cat_data.code
+
+        SET h.categoryType = cat_data.category
+
+        MERGE (h)-[:OF_ASSET_TYPE]->(cat)
+
+        RETURN count(h) AS linked
+        """
+
+        try:
+            result = self._execute_write(query, {"categories": categories_payload})
+            total = sum(r["linked"] for r in result) if result else 0
+            if verbose:
+                print(f"✅ Linked {total} holdings to AssetCategory nodes")
+            return total
+        except Exception as e:
+            if verbose:
+                print(f"❌ Error enriching holding categories: {e}")
+            raise

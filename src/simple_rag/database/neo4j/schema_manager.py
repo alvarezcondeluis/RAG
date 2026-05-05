@@ -173,12 +173,17 @@ class SchemaManager(Neo4jDatabaseBase):
             "CREATE CONSTRAINT document_accession_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.accessionNumber IS UNIQUE",
 
             # --- 5. SECURITIES ---
-            # Holdings are global per ISIN (the same security held by multiple
-            # portfolios shares one node). Neo4j unique constraints ignore NULL,
-            # so holdings without an ISIN are still allowed.
+            # nodeId is a synthetic key: ISIN when available, else "cusip_<CUSIP>",
+            # else "gen_<md5>". Used as the MERGE key in holdings ingestion.
+            "CREATE CONSTRAINT holding_node_id_unique IF NOT EXISTS FOR (h:Holding) REQUIRE h.nodeId IS UNIQUE",
+            # Keep the ISIN-only constraint for direct ISIN lookups (NULL-safe).
             "CREATE CONSTRAINT holding_isin_unique IF NOT EXISTS FOR (h:Holding) REQUIRE h.isin IS UNIQUE",
 
-            # --- 6. CHARTS ---
+            # --- 6. ASSET CATEGORIES ---
+            # 16 fixed SEC category codes (EC, ABS-MBS, DBT, …). Code is the MERGE key.
+            "CREATE CONSTRAINT asset_category_code_unique IF NOT EXISTS FOR (a:AssetCategory) REQUIRE a.code IS UNIQUE",
+
+            # --- 7. CHARTS ---
             # holdings_ops.add_chart_to_fund builds id = "{ticker}_{category}_{md5(svg)}".
             "CREATE CONSTRAINT image_id_unique IF NOT EXISTS FOR (i:Image) REQUIRE i.id IS UNIQUE",
         ]
@@ -232,9 +237,10 @@ class SchemaManager(Neo4jDatabaseBase):
             "CREATE INDEX document_reporting_date_index IF NOT EXISTS FOR (d:Document) ON (d.reportingDate)",
             "CREATE INDEX document_type_index IF NOT EXISTS FOR (d:Document) ON (d.type)",
 
-            # Holdings — lookup by security identifier
+            # Holdings — lookup by security identifier and category group
             "CREATE INDEX holding_ticker_index IF NOT EXISTS FOR (h:Holding) ON (h.ticker)",
             "CREATE INDEX holding_lei_index IF NOT EXISTS FOR (h:Holding) ON (h.lei)",
+            "CREATE INDEX holding_category_type_index IF NOT EXISTS FOR (h:Holding) ON (h.categoryType)",
 
             # Sections — sectionType is used to MATCH the right Section subtype
             "CREATE INDEX section_section_type_index IF NOT EXISTS FOR (s:Section) ON (s.sectionType)",

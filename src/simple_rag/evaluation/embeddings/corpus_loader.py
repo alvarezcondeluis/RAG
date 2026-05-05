@@ -6,7 +6,7 @@ profile documents:
 
 Company filings (10-K):
     Section:RiskFactor, Section:BusinessInformation, Section:LegalProceeding,
-    Section:ManagemetDiscussion, Section:Properties, Section:Financials
+    Section:ManagementDiscussion, Section:Properties, Section:Financials
 
 Fund profiles (Profile):
     Section:Objective, Section:PerformanceCommentary,
@@ -42,60 +42,63 @@ _CHUNK_QUERIES = {
     "RiskFactor_10K": """
         MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)
         WHERE s.text IS NOT NULL AND size(s.text) > 200
-        RETURN f.id AS id, s.text AS text, s.title AS title
+        RETURN elementId(s) AS id, s.text AS text, s.title AS title
         LIMIT $per_label
     """,
     "BusinessInformation": """
         MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)
         WHERE s.text IS NOT NULL AND size(s.text) > 200
-        RETURN f.id AS id, s.text AS text, s.title AS title
+        RETURN elementId(s) AS id, s.text AS text, s.title AS title
         LIMIT $per_label
     """,
     "LegalProceeding": """
         MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)
         WHERE s.text IS NOT NULL AND size(s.text) > 200
-        RETURN f.id AS id, s.text AS text, s.title AS title
+        RETURN elementId(s) AS id, s.text AS text, s.title AS title
         LIMIT $per_label
     """,
-    "ManagemetDiscussion": """
-        MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion)
+    "ManagementDiscussion": """
+        MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)
         WHERE s.text IS NOT NULL AND size(s.text) > 200
-        RETURN f.id AS id, s.text AS text, s.title AS title
+        RETURN elementId(s) AS id, s.text AS text, s.title AS title
         LIMIT $per_label
     """,
     "Properties": """
         MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties)
         WHERE s.text IS NOT NULL AND size(s.text) > 200
-        RETURN f.id AS id, s.text AS text, s.title AS title
+        RETURN elementId(s) AS id, s.text AS text, s.title AS title
         LIMIT $per_label
     """,
     "Financials": """
         MATCH (f:Filing10K)-[:HAS_SECTION]->(s:Section:Financials)
         WHERE s.fiscalYear IS NOT NULL
-        RETURN f.id AS id, COALESCE(s.incomeStatement, s.balanceSheet, s.cashFlow, '') AS text
+          AND COALESCE(s.incomeStatement, s.balanceSheet, s.cashFlow, '') <> ''
+        RETURN elementId(s) AS id,
+               COALESCE(s.incomeStatement, s.balanceSheet, s.cashFlow) AS text
         LIMIT $per_label
     """,
     "Objective_Fund": """
         MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Objective)
         WHERE s.text IS NOT NULL AND size(s.text) > 100
-        RETURN p.id AS id, s.text AS text, fund.name AS title
+        RETURN elementId(s) AS id, s.text AS text, fund.name AS title
         LIMIT $per_label
     """,
     "PerformanceCommentary": """
         MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:PerformanceCommentary)
         WHERE s.text IS NOT NULL AND size(s.text) > 100
-        RETURN p.id AS id, s.text AS text, fund.name AS title
+        RETURN elementId(s) AS id, s.text AS text, fund.name AS title
         LIMIT $per_label
     """,
     "RiskFactor_Fund": """
         MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(c:Chunk)
-        RETURN c.id as id, s.title AS title, c.text AS text
+        WHERE c.text IS NOT NULL AND size(c.text) > 50
+        RETURN elementId(c) AS id, c.text AS text, fund.name AS title
         LIMIT $per_label
     """,
     "Strategy": """
-        MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Strategy)
-        WHERE s.text IS NOT NULL AND size(s.text) > 100
-        RETURN p.id AS id, s.text AS text, fund.name AS title
+        MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Strategy)-[:HAS_CHUNK]->(c:Chunk)
+        WHERE c.text IS NOT NULL AND size(c.text) > 50
+        RETURN elementId(c) AS id, c.text AS text, fund.name AS title
         LIMIT $per_label
     """,
 }

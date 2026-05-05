@@ -39,6 +39,7 @@ dependencies = [
     "langchain-openai>=1.1.10",
     "ipykernel>=7.2.0",
     "einops>=0.8.2",
+    "groq>=1.2.0",
 ]
 
 [dependency-groups]

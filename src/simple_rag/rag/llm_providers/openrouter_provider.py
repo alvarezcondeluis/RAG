@@ -28,33 +28,43 @@ class OpenRouterProvider(LLMProvider):
         self,
         api_key: Optional[str] = None,
         model_id: Optional[str] = None,
+        base_url: Optional[str] = None,
     ):
         load_dotenv()
-        self.api_key = api_key or os.getenv("OPEN_ROUTER_API_KEY")
-        if not self.api_key:
+        self._base_url = base_url or OPENROUTER_BASE_URL
+        is_local = not self._base_url.startswith("https://openrouter")
+        self.api_key = api_key or (None if is_local else os.getenv("OPEN_ROUTER_API_KEY"))
+        if not is_local and not self.api_key:
             raise ValueError(
                 "OpenRouter API key not found. Set OPEN_ROUTER_API_KEY in .env or pass api_key."
             )
-        self.client = OpenAI(
-            base_url=OPENROUTER_BASE_URL,
-            api_key=self.api_key,
-            default_headers={
+        client_kwargs: dict = {"base_url": self._base_url, "api_key": self.api_key or "local"}
+        if not is_local:
+            client_kwargs["default_headers"] = {
                 "HTTP-Referer": "https://github.com/sec-filings-intelligence",
                 "X-Title": "SEC Filings Intelligence",
-            },
-        )
-        self.model_id = model_id or "meta-llama/llama-3.3-70b-instruct:free"
+            }
+        self.client = OpenAI(**client_kwargs)
+        self.model_id = model_id or ("meta-llama/llama-3.3-70b-instruct:free" if not is_local else self._detect_model())
+
+    def _detect_model(self) -> str:
+        models = self.list_models()
+        if models:
+            logger.info("Auto-selected model '%s' from %s", models[0].id, self._base_url)
+            return models[0].id
+        return "local-model"
 
     @property
     def provider_name(self) -> str:
-        return "OpenRouter"
+        return "OpenRouter" if self._base_url == OPENROUTER_BASE_URL else f"OpenAI-compat ({self._base_url})"
 
     def list_models(self) -> List[ModelInfo]:
-        """Fetch available models from the OpenRouter API."""
+        """Fetch available models from the API."""
         try:
+            headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key and self.api_key != "local" else {}
             resp = httpx.get(
-                f"{OPENROUTER_BASE_URL}/models",
-                headers={"Authorization": f"Bearer {self.api_key}"},
+                f"{self._base_url}/models",
+                headers=headers,
                 timeout=15,
             )
             resp.raise_for_status()
@@ -148,11 +158,8 @@ class OpenRouterProvider(LLMProvider):
 
     def test_connection(self) -> bool:
         try:
-            resp = httpx.get(
-                f"{OPENROUTER_BASE_URL}/models",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=10,
-            )
+            headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key and self.api_key != "local" else {}
+            resp = httpx.get(f"{self._base_url}/models", headers=headers, timeout=10)
             return resp.status_code == 200
         except Exception:
             return False

@@ -31,13 +31,6 @@ EMBEDDING_MODELS: List[ModelSpec] = [
         notes="Project default; long context, instruction-tuned. Optimized for SEC domains.",
     ),
     ModelSpec(
-        hf_id="nlpaueb/sec-bert-base",
-        family="sec-bert",
-        expected_dim=768,
-        max_seq_length=512,
-        notes="BERT pre-trained on SEC EDGAR filings; raw encoder, mean-pooled. Domain-specific.",
-    ),
-    ModelSpec(
         hf_id="BAAI/bge-base-en-v1.5",
         family="bge",
         expected_dim=768,
