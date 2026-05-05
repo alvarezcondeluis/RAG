@@ -112,21 +112,21 @@ class CypherTranslator:
         self.device = device
         self.temperature = temperature
         self.groq_api_key = None
-        self.selector = DynamicFewShotSelector(k=2)
+        self.selector = DynamicFewShotSelector(k=4)
         
-        # Initialize HuggingFace attributes (will be set if using HF backend)
+        # Initialize HuggingFace attributes 
         self.hf_model = None
         self.hf_tokenizer = None
         
-        # Groq token tracking (Free tier limits - model-specific)
+        # Groq token tracking 
         self.groq_tokens_used = 0
         self.groq_requests_count = 0
         self.groq_request_timestamps = []  # Track request times for RPM limiting
         self.groq_reset_time = datetime.now() + timedelta(days=1)
         
-        # Set limits based on model (Free tier)
+        # Set limits based on model 
         if backend == "groq":
-            # Check if using 70B model (stricter limits) or 8B model
+            # Check if using 70B model 8B model
             if "70b" in model_name.lower():
                 self.groq_daily_limit = 1000  # 70B: 1,000 requests/day
                 self.groq_tpm_limit = 6000    # 70B: 6,000 tokens/minute
@@ -685,12 +685,19 @@ class CypherTranslator:
                 
                 # Build retry prompt with error feedback — always use the full detailed
                 # schema on retries so the LLM has the complete graph context to fix errors.
+                # Add targeted examples based on error type
+                error_specific_examples = self._get_error_specific_examples(error_summary)
+                
+                if error_specific_examples:
+                    print(f"💡 Injecting error-specific examples for retry attempt {attempt + 1}")
+                
                 retry_prompt_text = self.retry_prompt.format(
                     schema=self.detailed_schema,
                     entity_context=entity_context,
                     question=processed_query,
                     failed_query=cypher_query,
-                    validation_errors=error_summary
+                    validation_errors=error_summary,
+                    error_examples=error_specific_examples
                 )
 
                 token_est = len(retry_prompt_text) // 4
@@ -714,6 +721,93 @@ class CypherTranslator:
             print(f"✗ Error during translation: {e}")
             logger.error(f"Translation error: {e}", exc_info=True)
             return None
+    
+    def _get_error_specific_examples(self, error_summary: str) -> str:
+        """
+        Analyze validation errors and return targeted examples to help fix them.
+        
+        Args:
+            error_summary: String containing validation error messages
+            
+        Returns:
+            String with relevant examples, or empty string if no specific pattern detected
+        """
+        error_lower = error_summary.lower()
+        examples = []
+        
+        # Pattern 1: Undefined variable (e.g., "Variable `p` not defined")
+        if "variable" in error_lower and "not defined" in error_lower:
+            examples.append("""
+ERROR PATTERN: Undefined Variable
+WRONG: MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio) RETURN p.count
+       (p is not defined because Portfolio is anonymous)
+       
+CORRECT: MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.date
+         (p is now defined and can be used in RETURN)
+
+CORRECT: MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h)
+         (Use count(h) to count holdings, not p.count which doesn't exist)
+""")
+        
+        # Pattern 2: DISTINCT + ORDER BY scope issue
+        if "distinct" in error_lower and ("order by" in error_lower or "not possible to access" in error_lower):
+            examples.append("""
+ERROR PATTERN: DISTINCT + ORDER BY Scope
+WRONG: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) 
+       RETURN DISTINCT f.ticker, f.name ORDER BY r.year DESC
+       (r.year is not in RETURN, cannot ORDER BY it with DISTINCT)
+       
+CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) 
+         RETURN DISTINCT f.ticker, f.name, r.year ORDER BY r.year DESC
+         (Include r.year in RETURN when using it in ORDER BY with DISTINCT)
+
+CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) 
+         RETURN f.ticker, f.name ORDER BY r.year DESC
+         (Remove DISTINCT if you don't need it)
+""")
+        
+        # Pattern 3: Property without value in curly braces
+        if "property" in error_lower and ("without" in error_lower or "value" in error_lower):
+            examples.append("""
+ERROR PATTERN: Property Without Value
+WRONG: MATCH (f:Fund {ticker}) RETURN f.name
+       (ticker has no value assigned)
+       
+CORRECT: MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name
+         (ticker has a value 'VTI')
+
+CORRECT: MATCH (f:Fund) WHERE f.ticker IS NOT NULL RETURN f.name
+         (Use WHERE clause for property checks without specific values)
+""")
+        
+        # Pattern 4: Pattern expressions introducing variables
+        if "pattern" in error_lower and ("introduce" in error_lower or "new variable" in error_lower):
+            examples.append("""
+ERROR PATTERN: Pattern Expression Introducing Variables
+WRONG: WHERE node IN (f)-[r:REL]->(n) 
+       (Cannot introduce r or n inside pattern expression)
+       
+CORRECT: MATCH (f)-[r:REL]->(n) WHERE node = n RETURN f
+         (Define variables in MATCH, use them in WHERE)
+""")
+        
+        # Pattern 5: Accessing properties on wrong node/relationship
+        if "property" in error_lower or "does not exist" in error_lower:
+            examples.append("""
+SCHEMA REMINDER:
+- expenseRatio, turnover, netAssets, numberHoldings are on FinancialHighlight node
+- weight, marketValue, shares, payoffProfile are on HAS_HOLDING relationship
+- year is on HAS_FINANCIAL_HIGHLIGHT and DEFINED_BY relationships (use r.year)
+- Portfolio only has: date, seriesId (NO count property!)
+
+CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) 
+         RETURN fh.expenseRatio, r.year ORDER BY r.year DESC
+""")
+        
+        # Return formatted examples or empty string
+        if examples:
+            return "\n" + "="*60 + "\nRELEVANT EXAMPLES TO FIX YOUR ERROR:\n" + "="*60 + "\n".join(examples)
+        return ""
     
     
     def _clean_cypher(self, query: str) -> str:

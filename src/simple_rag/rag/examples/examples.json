@@ -8,6 +8,10 @@
     "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'BND'}) RETURN p.name AS providerName"
   },
   {
+    "question": "Who manages the fund with the highest turnover?",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover IS NOT NULL RETURN p.name AS providerName, f.ticker, f.name, fh.turnover ORDER BY fh.turnover DESC LIMIT 1"
+  },
+  {
     "question": "Who manages the trust for the fund with turnover rate 4%?",
     "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) -[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover = 4 RETURN p.name AS providerName ORDER BY rel.year DESC LIMIT 1"
   },
@@ -380,27 +384,27 @@
     "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(p:Section:Properties) RETURN p.text AS properties"
   },
   {
-    "question": "CORRECTION EXAMPLE - NEVER use math operators inside curly braces. Use a WHERE clause instead.",
+    "question": "Show me holdings with market value greater than 10000.",
     "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.marketValue > 10000 RETURN h.name, r.marketValue"
   },
   {
-    "question": "CORRECTION EXAMPLE - WHERE must come before RETURN, never after.",
+    "question": "Which funds have net assets greater than 1 million?",
     "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssets > 1000000 RETURN f.ticker, fh.netAssets ORDER BY r.year DESC LIMIT 1"
   },
   {
-    "question": "CORRECTION EXAMPLE - payoffProfile, weight, marketValue, shares are on the HAS_HOLDING relationship (r), NOT on the Holding node.",
+    "question": "Show me the top 5 holdings in VTI with their weight, market value, shares, and payoff profile.",
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN h.name, r.payoffProfile, r.weight, r.marketValue, r.shares ORDER BY r.weight DESC LIMIT 5"
   },
   {
-    "question": "CORRECTION EXAMPLE - STRUCTURAL HOPS: Never jump directly from Fund to Holding. You MUST traverse through Portfolio. MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding).",
+    "question": "Count the total number of holdings in VTI's portfolio.",
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS totalHoldings"
   },
   {
-    "question": "CORRECTION EXAMPLE - PROVIDER vs PERSON: If a query asks for a company, firm, provider, or 'who manages the trust', look for the Provider node via MANAGES. If it asks for human managers or people, look for the Person node via MANAGED_BY.",
+    "question": "Which providers manage trusts that issue funds?",
     "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) RETURN p.name AS providerName"
   },
   {
-    "question": "CORRECTION EXAMPLE - expenseRatio, turnover, netAssets, numberHoldings, advisoryFees are properties on the FinancialHighlight node, NOT on the Fund node. Access them via HAS_FINANCIAL_HIGHLIGHT relationship.",
+    "question": "Show me the expense ratio, turnover, net assets, and number of holdings for VTI.",
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, fh.netAssets AS netAssets, fh.numberHoldings AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
@@ -670,5 +674,93 @@
   {
     "question": "Show me the minimum and maximum expense ratios across all funds",
     "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio IS NOT NULL RETURN min(fh.expenseRatio) AS minExpenseRatio, max(fh.expenseRatio) AS maxExpenseRatio"
+  },
+  {
+    "question": "How many holdings does VTI have by counting them in the portfolio?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
+  },
+  {
+    "question": "How many holdings does VTI have in its portfolio?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
+  },
+  {
+    "question": "What is the total number of holdings for VOO?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
+  },
+  {
+    "question": "What is the number of holdings for VFIAX from its financial highlights?",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.numberHoldings AS holdingsCount, f.ticker AS ticker, f.name AS fundName ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "How many holdings does the Vanguard Small Cap Fund have?",
+    "cypher": "MATCH (f:Fund {ticker: 'VSCPX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.numberHoldings AS totalHoldings, f.ticker, f.name ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Show me the portfolio date and series ID for VFIAX.",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.date AS portfolioDate, p.seriesId AS seriesId, f.ticker AS ticker, f.name AS fundName"
+  },
+  {
+    "question": "Show me all funds with more than 5000 holdings, ordered by year.",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.numberHoldings > 5000 RETURN DISTINCT f.ticker, f.name, fh.numberHoldings, r.year ORDER BY r.year DESC"
+  },
+  {
+    "question": "Show me the top 10 funds by total return, sorted by year and return value.",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker, f.name, fh.totalReturn, r.year ORDER BY r.year DESC, fh.totalReturn DESC LIMIT 10"
+  },
+  {
+    "question": "Show me the latest financial highlights for funds with high turnover, ordered by year.",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover > 20 RETURN DISTINCT f.ticker, f.name, fh.turnover, r.year ORDER BY r.year DESC, fh.turnover DESC"
+  },
+  {
+    "question": "List all providers managing funds with their latest financial data, sorted by year.",
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN DISTINCT p.name AS providerName, f.ticker, f.name, fh.netAssets, r.year ORDER BY r.year DESC, fh.netAssets DESC"
+  },
+  {
+    "question": "What are the net assets for the fund with ticker VTI?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, f.name, fh.netAssets ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What is the net assets for VTI specifically?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, f.name, fh.netAssets ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Show me financial data for the exact ticker IMTB.",
+    "cypher": "MATCH (f:Fund {ticker: 'IMTB'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, f.name, fh.netAssets, fh.expenseRatio ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Get the expense ratio for ticker VOO only.",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, f.name, fh.expenseRatio ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What are the holdings for the fund with ticker VFIAX?",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN f.ticker, f.name, h.name AS holdingName, h.ticker AS holdingTicker LIMIT 10"
+  },
+  {
+    "question": "Find all documents with reporting dates in 2023.",
+    "cypher": "MATCH (d:Document) WHERE d.reporting_date CONTAINS '2023' RETURN d.accession_number, d.url, d.form, d.filing_date, d.reporting_date ORDER BY d.reporting_date DESC"
+  },
+  {
+    "question": "Which documents have a reporting date in 2023?",
+    "cypher": "MATCH (d:Document) WHERE d.reporting_date CONTAINS '2023' RETURN d.accession_number AS accession, d.url AS url, d.form AS type, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.reporting_date DESC"
+  },
+  {
+    "question": "Show me documents filed in 2022.",
+    "cypher": "MATCH (d:Document) WHERE d.filing_date CONTAINS '2022' RETURN d.accession_number AS accession, d.url AS url, d.form AS type, d.filing_date AS filingDate ORDER BY d.filing_date DESC"
+  },
+  {
+    "question": "Find all documents with reporting dates containing '2024'.",
+    "cypher": "MATCH (d:Document) WHERE d.reporting_date CONTAINS '2024' RETURN d.accession_number, d.url, d.form, d.filing_date, d.reporting_date ORDER BY d.filing_date DESC"
+  },
+  {
+    "question": "Show me all N-CSR form documents for VTI.",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document {form: 'N-CSR'}) RETURN d.accession_number, d.url, d.filing_date"
+  },
+  {
+    "question": "What is the reporting date and filing date for VTI's documents from 2023?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:EXTRACTED_FROM]->(d:Document) WHERE d.reporting_date CONTAINS '2023' RETURN d.accession_number AS accession, d.url AS url, d.form AS type, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.filing_date DESC"
+  },
+  {
+    "question": "Show me all N-CSR documents for VOO.",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:EXTRACTED_FROM]->(d:Document {form: 'N-CSR'}) RETURN d.accession_number AS accession, d.url AS url, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.filing_date DESC"
   }
 ]

@@ -222,7 +222,7 @@ class SchemaManager(Neo4jDatabaseBase):
             """,
         ]
 
-        # 2. RANGE / LOOKUP INDEXES (Property filters & equality)
+        # 2. RANGE / LOOKUP INDEXES 
         range_queries = [
             # Funds — name fallback when ticker is N/A
             "CREATE INDEX fund_name_index IF NOT EXISTS FOR (f:Fund) ON (f.name)",

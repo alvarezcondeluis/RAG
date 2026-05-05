@@ -46,12 +46,14 @@ Your Previous (Invalid) Query:
 
 Validation Errors:
 {validation_errors}
+{error_examples}
 
 Rules:
 1. Output ONLY the corrected Cypher query, no explanations or markdown
 2. Fix ALL the validation errors listed above
-3. Use ONLY node labels, relationship types, and property names that exist in the schema
-4. Use proper Cypher syntax
-5. Do NOT use MERGE, CREATE, SET, DELETE, or any write operations
+3. Study the error examples provided - they show you exactly how to fix this type of error
+4. Use ONLY node labels, relationship types, and property names that exist in the schema
+5. Use proper Cypher syntax
+6. Do NOT use MERGE, CREATE, SET, DELETE, or any write operations
 
 Corrected Cypher Query:"""

@@ -186,10 +186,6 @@ def _init_pipeline(config: PipelineConfig):
     from simple_rag.database.neo4j.config import settings
     from simple_rag.rag.query_handler import QueryHandler
     from simple_rag.rag.llm_providers.registry import ProviderRegistry
-    from simple_rag.rag.answer_generation.prompt_templates import (
-        ANSWER_SYSTEM_PROMPT,
-        build_answer_prompt,
-    )
     from simple_rag.rag.answer_generation.result_classifier import ResultClassifier
 
     # Neo4j driver
