@@ -1,554 +1,158 @@
 [
+  { "text": "What time is the sunset today?", "labels": ["not_related"] },
+  { "text": "Best places to visit in Japan", "labels": ["not_related"] },
+  { "text": "How to change a car tire?", "labels": ["not_related"] },
+  { "text": "What are the rules of cricket?", "labels": ["not_related"] },
+  { "text": "How do I set up a fish tank?", "labels": ["not_related"] },
+  { "text": "Best way to remove stains from clothes", "labels": ["not_related"] },
+  { "text": "How to solve a Rubik's cube?", "labels": ["not_related"] },
+  { "text": "What programming language should I learn first?", "labels": ["not_related"] },
+  { "text": "How to tie a necktie?", "labels": ["not_related"] },
+  { "text": "What year did the Titanic sink?", "labels": ["not_related"] },
+  { "text": "How to grow indoor plants?", "labels": ["not_related"] },
+  { "text": "What is Bitcoin trading at right now?", "labels": ["not_related"] },
+  { "text": "How do I open a stock trading account?", "labels": ["not_related"] },
+  { "text": "What is the difference between stocks and bonds in general?", "labels": ["not_related"] },
+  { "text": "What is the ticker for Vanguard Total Bond Market?", "labels": ["fund_basic"] },
+  { "text": "Show me the expense ratio for VXUS", "labels": ["fund_basic"] },
+  { "text": "Which trust issues the S&P 500 ETF?", "labels": ["fund_basic"] },
+  { "text": "What provider offers VTI?", "labels": ["fund_basic"] },
+  { "text": "How much does it cost per 10k invested in VOO?", "labels": ["fund_basic"] },
+  { "text": "What is the advisory fee for VGT?", "labels": ["fund_basic"] },
+  { "text": "On which exchange does VOO trade?", "labels": ["fund_basic"] },
+  { "text": "What share class is VFIAX?", "labels": ["fund_basic"] },
+  { "text": "List all funds from iShares Trust", "labels": ["fund_basic"] },
+  { "text": "Show me funds with expense ratio under 0.04%", "labels": ["fund_basic"] },
+  { "text": "Which funds does Vanguard manage?", "labels": ["fund_basic"] },
+  { "text": "What is the full name of the fund VBTLX?", "labels": ["fund_basic"] },
+  { "text": "What was VOO's total return in 2024?", "labels": ["fund_basic"] },
+  { "text": "Show me the 1-year trailing return for VOO", "labels": ["fund_basic"] },
+  { "text": "Compare total returns for 2022 across all funds", "labels": ["fund_basic"] },
+  { "text": "Which fund had the worst year in 2022?", "labels": ["fund_basic"] },
+  { "text": "Show me the net income ratio for VOO over all years", "labels": ["fund_basic"] },
+  { "text": "What was the NAV at the end of 2023 for VGT?", "labels": ["fund_basic"] },
+  { "text": "Has VOO ever had a negative total return?", "labels": ["fund_basic"] },
+  { "text": "Show the 10-year trailing return for VTI", "labels": ["fund_basic"] },
+  { "text": "Average expense ratio from financial highlights for VOO", "labels": ["fund_basic"] },
+  { "text": "What is the annual expense cost for the VBK fund?", "labels": ["fund_basic"] },
+  { "text": "Show me the 5-year return for ESGV", "labels": ["fund_basic"] },
+  { "text": "What is the turnover rate for VGWAX?", "labels": ["fund_basic"] },
+  { "text": "Which year had the worst total return for VBR?", "labels": ["fund_basic"] },
+  { "text": "What is the NAV at year end for MGK?", "labels": ["fund_basic"] },
+  { "text": "What is the complete fund name behind the ticker VISVX?", "labels": ["fund_basic"] },
+  { "text": "Show me the financial highlights for VEDTX", "labels": ["fund_basic"] },
+  { "text": "How much are the advisory fees for the VMGAX fund?", "labels": ["fund_basic"] },
+  { "text": "What are the top 10 holdings of VGT?", "labels": ["fund_portfolio"] },
+  { "text": "Show sector allocation for VOO", "labels": ["fund_portfolio"] },
+  { "text": "Which funds invest heavily in Japan?", "labels": ["fund_portfolio"] },
+  { "text": "What percentage of VTI is in the Energy sector?", "labels": ["fund_portfolio"] },
+  { "text": "List the top holdings in VOO by market value", "labels": ["fund_portfolio"] },
+  { "text": "Does VOO hold Amazon stock?", "labels": ["fund_portfolio"] },
+  { "text": "Show me all funds that have Tesla as a holding", "labels": ["fund_portfolio"] },
+  { "text": "How many holdings are in VGT's portfolio?", "labels": ["fund_portfolio"] },
+  { "text": "What is the weight of the Financials sector in VOO?", "labels": ["fund_portfolio"] },
+  { "text": "Show me funds that allocate more than 50% to the US", "labels": ["fund_portfolio"] },
+  { "text": "What is the largest single holding in VTI by weight?", "labels": ["fund_portfolio"] },
+  { "text": "Which sector has the biggest allocation in VGT?", "labels": ["fund_portfolio"] },
+  { "text": "List all countries represented in the VOO portfolio", "labels": ["fund_portfolio"] },
+  { "text": "Which funds hold more than 1000 individual stocks?", "labels": ["fund_portfolio"] },
+  { "text": "What region has the highest weight in VSGX?", "labels": ["fund_portfolio"] },
+  { "text": "What are the top holdings in VBK?", "labels": ["fund_portfolio"] },
+  { "text": "What is the sector breakdown for the VAW materials ETF?", "labels": ["fund_portfolio"] },
+  { "text": "Which funds include NVDA as a portfolio holding?", "labels": ["fund_portfolio"] },
+  { "text": "What is the geographic exposure for VSGX?", "labels": ["fund_portfolio"] },
+  { "text": "Which funds use a passive indexing approach?", "labels": ["fund_profile"] },
+  { "text": "Find funds that prioritize environmental sustainability", "labels": ["fund_profile"] },
+  { "text": "What funds are designed for retirement income?", "labels": ["fund_profile"] },
+  { "text": "Show me funds with a deep value investing philosophy", "labels": ["fund_profile"] },
+  { "text": "Which funds aim to minimize volatility?", "labels": ["fund_profile"] },
+  { "text": "Find funds focused on real estate investment", "labels": ["fund_profile"] },
+  { "text": "What funds have a strategy centered on dividend growth?", "labels": ["fund_profile"] },
+  { "text": "Show me funds with a multi-factor investment strategy", "labels": ["fund_profile"] },
+  { "text": "What is the investment objective of ESGV?", "labels": ["fund_profile"] },
+  { "text": "What does the risk section for EDV say?", "labels": ["fund_profile"] },
+  { "text": "Show me the performance commentary for VBR", "labels": ["fund_profile"] },
+  { "text": "Which funds mention Wellington Management in their strategy?", "labels": ["fund_profile"] },
+  { "text": "Find funds whose strategy mentions tracking the CRSP small-cap index", "labels": ["fund_profile"] },
+  { "text": "What risk factors are described for VPU?", "labels": ["fund_profile"] },
+  { "text": "What risk factors does Apple mention about supply chain?", "labels": ["company_filing"] },
+  { "text": "Show me the business overview from Microsoft's 10-K", "labels": ["company_filing"] },
+  { "text": "Are there any legal proceedings for Tesla?", "labels": ["company_filing"] },
+  { "text": "What does Amazon's management discussion say about AWS growth?", "labels": ["company_filing"] },
+  { "text": "Get the net income from NVDA financial statements", "labels": ["company_filing"] },
+  { "text": "Show me the 10-K filing for Alphabet", "labels": ["company_filing"] },
+  { "text": "What does Apple's risk factors section say about China?", "labels": ["company_filing"] },
+  { "text": "Revenue segments for Microsoft from their annual report", "labels": ["company_filing"] },
+  { "text": "Show operating expenses from Tesla's income statement", "labels": ["company_filing"] },
+  { "text": "What properties does Amazon report in their 10-K?", "labels": ["company_filing"] },
+  { "text": "Get the total assets from Apple's balance sheet", "labels": ["company_filing"] },
+  { "text": "Show business information section for NVDA", "labels": ["company_filing"] },
+  { "text": "What does NVDA's 10-K say about semiconductor demand risk?", "labels": ["company_filing"] },
+  { "text": "Show me the properties section for Amazon from their annual report", "labels": ["company_filing"] },
+  { "text": "Who is the CEO of Google?", "labels": ["company_people"] },
+  { "text": "Show insider buy transactions for AAPL", "labels": ["company_people"] },
+  { "text": "What was the total compensation for Microsoft's CEO?", "labels": ["company_people"] },
+  { "text": "List all insider sales for NVDA", "labels": ["company_people"] },
+  { "text": "Who manages the Vanguard Growth fund?", "labels": ["company_people"] },
+  { "text": "Show me compensation details for Amazon executives", "labels": ["company_people"] },
+  { "text": "Which person made the largest insider transaction for TSLA?", "labels": ["company_people"] },
+  { "text": "Get the shareholder return linked to CEO compensation at Apple", "labels": ["company_people"] },
+  { "text": "How many funds does each manager oversee?", "labels": ["company_people"] },
+  { "text": "Show me insider transaction volume for tech company executives", "labels": ["company_people"] },
+  { "text": "What is the remaining share count after MSFT insider sell?", "labels": ["company_people"] },
+  { "text": "List portfolio managers who manage both equity and bond funds", "labels": ["company_people"] },
+  { "text": "Who manages the Vanguard Small Cap Growth fund VBK?", "labels": ["company_people"] },
+  { "text": "What was Amazon CEO's total compensation?", "labels": ["company_people"] },
   {
-    "text": "What time is the sunset today?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "What is the expense ratio for VBK and what is its investment strategy?",
+    "labels": ["fund_basic", "fund_profile"]
   },
   {
-    "text": "Best places to visit in Japan",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Show me ESGV performance highlights and its ESG strategy description",
+    "labels": ["fund_basic", "fund_profile"]
   },
   {
-    "text": "How to change a car tire?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Find small-cap value funds with low turnover and describe their objectives",
+    "labels": ["fund_basic", "fund_profile"]
   },
   {
-    "text": "What are the rules of cricket?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Which ESG funds from Vanguard have more than 10% in Technology sector?",
+    "labels": ["fund_profile", "fund_portfolio"]
   },
   {
-    "text": "How do I set up a fish tank?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Show me VBR's risk factors and top holdings",
+    "labels": ["fund_profile", "fund_portfolio"]
   },
   {
-    "text": "Who directed the movie Inception?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Which passive index funds have the most concentrated sector allocation?",
+    "labels": ["fund_profile", "fund_portfolio"]
   },
   {
-    "text": "Best way to remove stains from clothes",
-    "labels": [
-      "not_related"
-    ]
+    "text": "What are the holdings and net assets for MGK?",
+    "labels": ["fund_basic", "fund_portfolio"]
   },
   {
-    "text": "How to solve a Rubik's cube?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Find funds holding TSLA and show Tesla's insider transactions",
+    "labels": ["fund_portfolio", "company_people"]
   },
   {
-    "text": "What programming language should I learn first?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "List VOX holdings and show 10-K filings for communication sector companies",
+    "labels": ["fund_portfolio", "company_filing"]
   },
   {
-    "text": "How to tie a necktie?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Show me funds that own NVDA shares and NVIDIA's disclosed risk factors",
+    "labels": ["fund_portfolio", "company_filing"]
   },
   {
-    "text": "What year did the Titanic sink?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Which VBK managers also manage other Vanguard equity funds?",
+    "labels": ["fund_basic", "company_people"]
   },
   {
-    "text": "How to grow indoor plants?",
-    "labels": [
-      "not_related"
-    ]
+    "text": "Show me small-cap growth funds with low expense ratios that hold NVDA",
+    "labels": ["fund_basic", "fund_portfolio", "fund_profile"]
   },
   {
-    "text": "What is the ticker for Vanguard Total Bond Market?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Show me the expense ratio for VXUS",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Which trust issues the S&P 500 ETF?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What provider offers VTI?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "How much does it cost per 10k invested in VOO?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What is the advisory fee for VGT?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "On which exchange does VOO trade?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What share class is VFIAX?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "List all funds from iShares Trust",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Show me funds with expense ratio under 0.04%",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Which funds does Vanguard manage?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What is the full name of the fund VBTLX?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What was VOO's total return in 2024?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Show me the 1-year trailing return for VOO",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What is the return since inception for VXUS?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "How did VTI perform in 2020?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Compare total returns for 2022 across all funds",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Which fund had the worst year in 2022?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Show me the net income ratio for VOO over all years",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What was the NAV at the end of 2023 for VGT?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Has VOO ever had a negative total return?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Show the 10-year trailing return for VTI",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "Average expense ratio from financial highlights for VOO",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What is the turnover from financial highlights for VTI in 2021?",
-    "labels": [
-      "fund_basic"
-    ]
-  },
-  {
-    "text": "What are the top 10 holdings of VGT?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Show sector allocation for VOO",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Which funds invest heavily in Japan?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "What percentage of VTI is in the Energy sector?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "List the top holdings in VOO by market value",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Does VOO hold Amazon stock?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Show me all funds that have Tesla as a holding",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Geographic allocation breakdown for VEA",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "How many holdings are in VGT's portfolio?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "What is the weight of the Financials sector in VOO?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Show me funds that allocate more than 50% to the US",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "What are the common stocks between VOO and VGT?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "What is the largest single holding in VTI by weight?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Which sector has the biggest allocation in VGT?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "List all countries represented in the VOO portfolio",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "What is the market value of AAPL inside the VTI portfolio?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Which funds hold more than 1000 individual stocks?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Show me the fair value level 3 holdings in VOO",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "What region has the highest weight in VXUS?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "How many distinct countries does VTI invest in?",
-    "labels": [
-      "fund_portfolio"
-    ]
-  },
-  {
-    "text": "Which funds use a passive indexing approach?",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Find funds that prioritize environmental sustainability",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "What funds are designed for retirement income?",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Show me funds with a deep value investing philosophy",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Which funds aim to minimize volatility?",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Find funds focused on real estate investment",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "What funds have a strategy centered on dividend growth?",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Show me funds that describe themselves as aggressive",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Which funds mention emerging market exposure in their strategy?",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Find funds whose risk description mentions interest rate risk",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "What is the investment objective for funds focused on healthcare?",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "Show me funds with a multi-factor investment strategy",
-    "labels": [
-      "fund_profile"
-    ]
-  },
-  {
-    "text": "What risk factors does Apple mention about supply chain?",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Show me the business overview from Microsoft's 10-K",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Are there any legal proceedings for Tesla?",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "What does Amazon's management discussion say about AWS growth?",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Get the net income from NVDA financial statements",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Show me the 10-K filing for Alphabet",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "What does Apple's risk factors section say about China?",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Revenue segments for Microsoft from their annual report",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Show operating expenses from Tesla's income statement",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "What properties does Amazon report in their 10-K?",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Get the total assets from Apple's balance sheet",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Show business information section for NVDA",
-    "labels": [
-      "company_filing"
-    ]
-  },
-  {
-    "text": "Who is the CEO of Google?",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "Show insider buy transactions for AAPL",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "What was the total compensation for Microsoft's CEO?",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "List all insider sales for NVDA",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "Who manages the Vanguard Growth fund?",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "Show me compensation details for Amazon executives",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "Which person made the largest insider transaction for TSLA?",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "Get the shareholder return linked to CEO compensation at Apple",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "How many funds does each manager oversee?",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "Show me insider transaction volume for tech company executives",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "What is the remaining share count after MSFT insider sell?",
-    "labels": [
-      "company_people"
-    ]
-  },
-  {
-    "text": "List portfolio managers who manage both equity and bond funds",
-    "labels": [
-      "company_people"
-    ]
+    "text": "Show me VBR's expense ratio, top 5 holdings, and portfolio manager",
+    "labels": ["fund_basic", "fund_portfolio", "company_people"]
   }
 ]

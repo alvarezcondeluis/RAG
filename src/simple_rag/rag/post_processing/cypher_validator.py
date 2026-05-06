@@ -108,6 +108,7 @@ class CypherValidator:
                      "filing_date", "filingdate", "filingDate",
                      "reporting_date", "reportingDate",
                      "accessionNumber", "accesionNumber"},
+        "AssetCategory": {"code", "name", "type", "subtype"},
     }
 
     # ─── Schema: valid relationship types and their (start, end) pairs ───
@@ -155,6 +156,7 @@ class CypherValidator:
                       ("Properties", "Chunk"), ("Properties", "SectionChunk"),
                       ("Strategy", "Chunk"), ("Objective", "Chunk"),
                       ("PerformanceCommentary", "Chunk")},
+        "OF_ASSET_TYPE": {("Holding", "AssetCategory")},
     }
 
     # Flat sets for quick lookup

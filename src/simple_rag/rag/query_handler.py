@@ -64,12 +64,13 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 
     "fund_portfolio": """
 Relevant schema:
-(:Fund /* properties: ticker, name */)-[:HAS_PORTFOLIO]->(p:Portfolio /* properties: date, seriesId */)
-(p)-[:HAS_HOLDING /* properties: shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile */]->(h:Holding /* properties: name, ticker, isin, lei, category, country, sector, assetCategory, issuerCategory */)
+(:Fund /* properties: ticker, name */)-[:HAS_PORTFOLIO]->(p:Portfolio /* properties: date, seriesId, count */)
+(p)-[:HAS_HOLDING /* properties: shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile */]->(h:Holding /* properties: name, ticker, isin, lei, category, country, issuerCategory */)
+(h:Holding)-[:OF_ASSET_TYPE]->(:AssetCategory /* properties: code, name, type, subtype */)
 (:Holding)-[:REPRESENTS]->(:Company /* properties: ticker, name */)
 (p)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, reportingDate, accessionNumber */)
 QUERY RULES:
-- Use f.numberHoldings for count — do NOT count holdings manually.
+- Use p.count for number of holdings — do NOT count holdings manually.
 - Weight on HAS_HOLDING is the portfolio weight.
 
 CRITICAL CYPHER SYNTAX & LOGIC RULES:
@@ -173,8 +174,6 @@ class QueryHandler:
                               (the widest schema).
         **cypher_kwargs:  Extra keyword arguments forwarded to CypherTranslator.
     """
-
-    
 
     def __init__(
         self,

@@ -29,15 +29,15 @@
   },
   {
     "question": "Which funds have more than 5000 holdings?",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.numberHoldings > 5000 RETURN f.ticker, f.name, fh.numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio) WHERE p.count > 5000 RETURN DISTINCT f.ticker, f.name, p.count AS numberHoldings"
   },
   {
     "question": "How many holdings does each fund have in the database?",
-    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) WITH f, count(h) AS holdingCount WHERE holdingCount > 100 RETURN f.ticker, holdingCount"
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio) WHERE p.count > 100 RETURN f.ticker AS ticker, p.count AS holdingCount ORDER BY holdingCount DESC"
   },
   {
     "question": "How many holdings does the fund VTI have in total?",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
   },
   {
     "question": "Which funds are issued by 'Vanguard Index Funds'?",
@@ -81,7 +81,7 @@
   },
   {
     "question": "Show me all general information about VTI including financial highlights, profile details, and images",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:DEFINED_BY]->(p:Profile) OPTIONAL MATCH (f)-[:HAS_CHART]->(img:Image) RETURN f.ticker, f.name, f.securityExchange, fh.expenseRatio, fh.turnover, fh.numberHoldings, fh.netAssets, fh.advisoryFees, fh.totalReturn, p.summaryProspectus, collect(img.title) AS images"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile) OPTIONAL MATCH (f)-[:HAS_CHART]->(img:Image) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker, f.name, f.securityExchange, fh.expenseRatio, fh.turnover, port.count AS numberHoldings, fh.netAssets, fh.advisoryFees, fh.totalReturn, prof.summaryProspectus, collect(img.title) AS images"
   },
   {
     "question": "Show me all the funds that have more than 15% invested in Technology and return the funds with distinct in the property name",
@@ -93,7 +93,7 @@
   },
   {
     "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'S&P 500' RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, fh.advisoryFees AS fee, fh.numberHoldings AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'S&P 500' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, fh.advisoryFees AS fee, p.count AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What percentage of VTI's holdings are US-based companies?",
@@ -225,7 +225,7 @@
   },
   {
     "question": "Return the net assets and total number of holdings for the Vanguard Dividend Appreciation fund.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Dividend Appreciation' RETURN f.name AS name, fh.netAssets AS netAssets, fh.numberHoldings AS totalHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Dividend Appreciation' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS name, fh.netAssets AS netAssets, p.count AS totalHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Show me the revenue segments from the 10-K of Amazon.",
@@ -345,7 +345,7 @@
   },
   {
     "question": "Show me the main details for both VOO and VGT funds.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VOO', 'VGT'] RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.numberHoldings AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VOO', 'VGT'] OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, p.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What is the payoff profile of the top holding in VTI?",
@@ -369,11 +369,11 @@
   },
   {
     "question": "Show me general information about the VIG fund.",
-    "cypher": "MATCH (f:Fund {ticker: 'VIG'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.turnover AS turnoverRate, fh.numberHoldings AS numberHoldings, fh.advisoryFees AS advisoryFees, f.securityExchange AS exchange ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VIG'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.turnover AS turnoverRate, p.count AS numberHoldings, fh.advisoryFees AS advisoryFees, f.securityExchange AS exchange ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Give me the main details for the VOO fund.",
-    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.turnover AS turnoverRate, fh.numberHoldings AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.turnover AS turnoverRate, p.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Which funds share the same source document?",
@@ -405,7 +405,7 @@
   },
   {
     "question": "Show me the expense ratio, turnover, net assets, and number of holdings for VTI.",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, fh.netAssets AS netAssets, fh.numberHoldings AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, fh.netAssets AS netAssets, p.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "How has the expense ratio for BND shifted across the available financial highlight years?",
@@ -421,7 +421,7 @@
   },
   {
     "question": "Give me the assets under management and number of holdings for the Total Bond Market fund.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Total Bond Market' RETURN f.name AS name, fh.netAssets AS netAssets, fh.numberHoldings AS totalHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Total Bond Market' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS name, fh.netAssets AS netAssets, p.count AS totalHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What does the prospectus text say for the VOO fund?",
@@ -649,7 +649,7 @@
   },
   {
     "question": "What is the average number of holdings across all Vanguard funds?",
-    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE p.name CONTAINS 'Vanguard' OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN avg(fh.numberHoldings) AS averageHoldings"
+    "cypher": "MATCH (prov:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE prov.name CONTAINS 'Vanguard' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN avg(p.count) AS averageHoldings"
   },
   {
     "question": "What is the average expense ratio for all funds in the database?",
@@ -677,23 +677,23 @@
   },
   {
     "question": "How many holdings does VTI have by counting them in the portfolio?",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
   },
   {
     "question": "How many holdings does VTI have in its portfolio?",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
   },
   {
     "question": "What is the total number of holdings for VOO?",
-    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN count(h) AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
   },
   {
     "question": "What is the number of holdings for VFIAX from its financial highlights?",
-    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.numberHoldings AS holdingsCount, f.ticker AS ticker, f.name AS fundName ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
   },
   {
     "question": "How many holdings does the Vanguard Small Cap Fund have?",
-    "cypher": "MATCH (f:Fund {ticker: 'VSCPX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.numberHoldings AS totalHoldings, f.ticker, f.name ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VSCPX'})-[r:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count AS totalHoldings, f.ticker, f.name"
   },
   {
     "question": "Show me the portfolio date and series ID for VFIAX.",
@@ -701,7 +701,7 @@
   },
   {
     "question": "Show me all funds with more than 5000 holdings, ordered by year.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.numberHoldings > 5000 RETURN DISTINCT f.ticker, f.name, fh.numberHoldings, r.year ORDER BY r.year DESC"
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio) WHERE p.count > 5000 RETURN DISTINCT f.ticker, f.name, p.count AS numberHoldings"
   },
   {
     "question": "Show me the top 10 funds by total return, sorted by year and return value.",

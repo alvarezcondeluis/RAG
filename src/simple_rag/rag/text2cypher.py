@@ -766,6 +766,31 @@ CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
          (Remove DISTINCT if you don't need it)
 """)
         
+        # Pattern 2b: Aggregate function + ORDER BY scope issue
+        # The Neo4j error says "DISTINCT or an aggregation" so "aggregation" is the signal
+        # when the query uses AVG/COUNT/SUM/etc. without DISTINCT.
+        if "aggregation" in error_lower and "not possible to access" in error_lower:
+            examples.append("""
+ERROR PATTERN: Aggregate Function + ORDER BY Scope
+When AVG, COUNT, SUM, MIN, or MAX is in RETURN, all non-aggregated variables become
+grouping keys and relationship variables (r, rel, etc.) become out of scope for ORDER BY.
+
+WRONG: MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
+       RETURN f.ticker, AVG(fh.turnover) AS averageTurnoverRate ORDER BY r.year DESC LIMIT 1
+       (r is not in RETURN — AVG creates aggregation scope, r becomes inaccessible)
+
+CORRECT (average across all years — no ORDER BY needed):
+       MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
+       RETURN f.ticker, AVG(fh.turnover) AS averageTurnoverRate
+
+CORRECT (latest single value — drop AVG, use ORDER BY + LIMIT):
+       MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
+       RETURN f.ticker, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1
+
+RULE: Never mix an aggregate function in RETURN with ORDER BY on a relationship variable
+      that is not also in the RETURN clause.
+""")
+
         # Pattern 3: Property without value in curly braces
         if "property" in error_lower and ("without" in error_lower or "value" in error_lower):
             examples.append("""
@@ -795,13 +820,17 @@ CORRECT: MATCH (f)-[r:REL]->(n) WHERE node = n RETURN f
         if "property" in error_lower or "does not exist" in error_lower:
             examples.append("""
 SCHEMA REMINDER:
-- expenseRatio, turnover, netAssets, numberHoldings are on FinancialHighlight node
+- expenseRatio, turnover, netAssets are on FinancialHighlight node
 - weight, marketValue, shares, payoffProfile are on HAS_HOLDING relationship
 - year is on HAS_FINANCIAL_HIGHLIGHT and DEFINED_BY relationships (use r.year)
-- Portfolio only has: date, seriesId (NO count property!)
+- Portfolio has: date, seriesId, count (use p.count for number of holdings)
+- Do NOT use fh.numberHoldings — use p.count from Portfolio instead
 
-CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) 
+CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
          RETURN fh.expenseRatio, r.year ORDER BY r.year DESC
+
+CORRECT: MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)
+         RETURN p.count AS holdingsCount
 """)
         
         # Return formatted examples or empty string
@@ -867,6 +896,11 @@ CORRECT: MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
 
         # Aggregates collapse duplicates on their own — leave them alone
         if re.search(r'\b(COUNT|SUM|AVG|MIN|MAX|COLLECT)\s*\(', query, re.IGNORECASE):
+            return query
+
+        # ORDER BY may reference relationship variables (e.g. r.year) that are not in RETURN.
+        # Injecting DISTINCT in that case causes a scope error — skip.
+        if re.search(r'\bORDER\s+BY\b', query, re.IGNORECASE):
             return query
 
         # Count relationship hops in the MATCH portion only
