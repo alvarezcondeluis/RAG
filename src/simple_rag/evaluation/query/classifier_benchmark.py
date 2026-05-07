@@ -1,0 +1,669 @@
+#!/usr/bin/env python3
+"""
+Query Classifier Benchmark: SetFit vs LLM-based Classification
+
+Compares two approaches for query classification:
+1. SetFit (existing, lightweight, fast)
+2. LLM-based (using OpenRouter or local LM Studio)
+
+Measures accuracy, precision, recall, F1, and response time.
+"""
+
+import sys
+import json
+import time
+import statistics
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass, field
+from collections import Counter
+import numpy as np
+
+# Add project src to path for imports
+# Script is at: .../RAG/src/simple_rag/evaluation/query/classifier_benchmark.py
+# SRC_ROOT should be: .../RAG/src
+SCRIPT_DIR = Path(__file__).parent
+SRC_ROOT = SCRIPT_DIR.parent.parent.parent
+PROJECT_ROOT = SRC_ROOT.parent
+sys.path.insert(0, str(SRC_ROOT))
+
+from sklearn.metrics import classification_report, hamming_loss, f1_score, precision_recall_fscore_support
+from sklearn.preprocessing import MultiLabelBinarizer
+
+
+@dataclass
+class ClassificationResult:
+    """Stores metrics for a single query classification."""
+    query_id: int
+    query: str
+    expected_labels: List[str]
+    predicted_labels: List[str]
+    confidence_score: float
+    time_ms: float
+    error: Optional[str] = None
+
+
+@dataclass
+class BenchmarkStats:
+    """Aggregated statistics for a classifier."""
+    classifier_name: str
+    total_queries: int = 0
+    correct_exact_match: int = 0
+    hamming_loss: float = 0.0
+    avg_time_ms: float = 0.0
+    median_time_ms: float = 0.0
+    min_time_ms: float = 0.0
+    max_time_ms: float = 0.0
+    accuracy: float = 0.0
+    precision_macro: float = 0.0
+    recall_macro: float = 0.0
+    f1_macro: float = 0.0
+    precision_weighted: float = 0.0
+    recall_weighted: float = 0.0
+    f1_weighted: float = 0.0
+    per_label_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    failed_queries: List[int] = field(default_factory=list)
+    error_count: int = 0
+
+
+class SetFitClassifier:
+    """Direct SetFit model classifier."""
+
+    LABELS = ["not_related", "fund_basic", "fund_portfolio", "fund_profile", "company_filing", "company_people"]
+    LABEL_THRESHOLDS = {
+        "not_related": 0.5,
+        "fund_basic": 0.5,
+        "fund_portfolio": 0.3,
+        "fund_profile": 0.5,
+        "company_filing": 0.5,
+        "company_people": 0.5,
+    }
+
+    def __init__(self, model_path: Optional[str] = None):
+        from setfit import SetFitModel
+
+        # Default to project's trained model if not specified
+        if model_path is None:
+            model_path = PROJECT_ROOT / "src" / "simple_rag" / "rag" / "query" / "models" / "query_classifier"
+        else:
+            model_path = Path(model_path)
+
+        print(f"Loading SetFit model from: {model_path}")
+        self.model = SetFitModel.from_pretrained(str(model_path), device="cpu", local_files_only=True)
+        self.name = "SetFit"
+
+    def classify(self, query: str) -> Tuple[List[str], float]:
+        """
+        Classify a query.
+
+        Returns:
+            (labels, confidence_score)
+        """
+        probs = self.model.predict_proba([query])[0]
+        if hasattr(probs, "numpy"):
+            probs = probs.numpy()
+
+        label_probs = {label: float(probs[i]) for i, label in enumerate(self.LABELS)}
+        active_labels = [
+            label for label, p in label_probs.items()
+            if p >= self.LABEL_THRESHOLDS.get(label, 0.5)
+        ]
+
+        # Fallback: if nothing crosses threshold, take highest
+        if not active_labels:
+            top_label = max(label_probs, key=label_probs.get)
+            active_labels = [top_label]
+
+        active_labels.sort(key=lambda l: label_probs[l], reverse=True)
+        confidence = label_probs[active_labels[0]]
+
+        return active_labels, confidence
+
+
+class LLMQueryClassifier:
+    """LLM-based query classifier using OpenRouter or local endpoint."""
+
+    CLASSIFICATION_PROMPT = """You are an expert query classifier for a financial SEC filings RAG system.
+
+Your task is to classify the given user query into one or more of these categories:
+
+Categories:
+- fund_basic: Questions about fund properties like expense ratios, returns, net assets, costs, fees
+- fund_portfolio: Questions about fund holdings, portfolio composition, sector allocations, regional allocations
+- fund_profile: Questions about fund strategy, risks, objectives, performance commentary (text/document search)
+- company_filing: Questions about company 10-K filings, business information, financial metrics, risk factors
+- company_people: Questions about company executives, CEOs, insider transactions, compensation
+- not_related: Questions completely unrelated to SEC filings or financial data
+
+Rules:
+1. A query can belong to MULTIPLE categories (use the "categories" array in your response)
+2. Always include all applicable categories
+3. Return confidence as a single float between 0.0 and 1.0 (average confidence for selected categories)
+4. Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
+{{"categories": ["category1", "category2"], "confidence": 0.85, "reasoning": "brief explanation"}}
+
+Examples:
+- "What is the expense ratio of VTI?" → {{"categories": ["fund_basic"], "confidence": 0.95}}
+- "What are the top holdings and sectors in VTSAX?" → {{"categories": ["fund_portfolio"], "confidence": 0.90}}
+- "Tell me about Apple's risk factors" → {{"categories": ["company_filing"], "confidence": 0.92}}
+- "What is the weather today?" → {{"categories": ["not_related"], "confidence": 0.98}}
+- "Show me portfolio holdings and compare expense ratios" → {{"categories": ["fund_basic", "fund_portfolio"], "confidence": 0.88}}
+
+Query to classify: {query}
+
+Respond with ONLY the JSON object, nothing else:"""
+
+    def __init__(
+        self,
+        provider_type: str = "openrouter",
+        model_id: Optional[str] = None,
+        api_key: Optional[str] = None,
+        local_host: str = "localhost",
+        local_port: int = 1234,
+    ):
+        """
+        Initialize LLM classifier.
+
+        Args:
+            provider_type: 'openrouter' or 'local'
+            model_id: Model ID for OpenRouter (e.g., 'meta-llama/llama-3.3-70b-instruct:free')
+            api_key: OpenRouter API key (if None, loads from env)
+            local_host: Host for local LM Studio (default: localhost)
+            local_port: Port for local LM Studio (default: 1234)
+        """
+        self.provider_type = provider_type
+        self.name = f"LLM ({provider_type})"
+
+        if provider_type == "openrouter":
+            from simple_rag.rag.llm_providers.openrouter_provider import OpenRouterProvider
+            self.provider = OpenRouterProvider(api_key=api_key, model_id=model_id or "meta-llama/llama-3.3-70b-instruct:free")
+            self.name = f"LLM (OpenRouter - {self.provider.model_id})"
+        elif provider_type == "local":
+            from simple_rag.rag.text2cypher import CypherTranslator
+            # Use local LM Studio via OpenAI-compatible endpoint
+            import os
+            # Create a minimal provider for local LM Studio
+            from openai import OpenAI
+            self.client = OpenAI(
+                base_url=f"http://{local_host}:{local_port}/v1",
+                api_key="not-needed"
+            )
+            self.provider = None
+            self.name = f"LLM (Local LM Studio)"
+        else:
+            raise ValueError(f"Unknown provider type: {provider_type}")
+
+    def classify(self, query: str) -> Tuple[List[str], float]:
+        """
+        Classify a query using LLM.
+
+        Returns:
+            (labels, confidence_score) or raises exception on error
+        """
+        prompt = self.CLASSIFICATION_PROMPT.format(query=query)
+
+        try:
+            if self.provider_type == "openrouter":
+                response = self.provider.generate(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=500,
+                )
+                content = response.content
+            else:
+                try:
+                    response = self.client.chat.completions.create(
+                        model="local-model",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        max_tokens=500,
+                    )
+                    content = response.choices[0].message.content
+                except Exception as connection_error:
+                    raise ConnectionError(
+                        f"Failed to connect to local LM Studio at {self.client.base_url}\n"
+                        f"Error: {connection_error}\n"
+                        f"Make sure LM Studio is running on localhost:1234"
+                    )
+
+            # Parse JSON response
+            import json
+            # Try to extract JSON from potential markdown code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+
+            result = json.loads(content)
+            labels = result.get("categories", [])
+            confidence = result.get("confidence", 0.5)
+
+            return labels, float(confidence)
+        except ConnectionError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Failed to parse LLM response: {e}")
+
+
+class QueryClassifierBenchmark:
+    """Benchmark suite for comparing query classifiers."""
+
+    LABELS = ["not_related", "fund_basic", "fund_portfolio", "fund_profile", "company_filing", "company_people"]
+
+    def __init__(self, test_set_path: str):
+        self.test_set_path = Path(test_set_path)
+        self.test_data: List[Dict[str, Any]] = []
+        self.setfit_results: List[ClassificationResult] = []
+        self.llm_results: List[ClassificationResult] = []
+        self.mlb = MultiLabelBinarizer(classes=self.LABELS)
+        self.mlb.fit([self.LABELS])
+
+    def load_test_set(self):
+        """Load test set from JSON file."""
+        with open(self.test_set_path, "r") as f:
+            self.test_data = json.load(f)
+        print(f"✓ Loaded {len(self.test_data)} test queries")
+
+    def run_setfit_benchmark(self) -> BenchmarkStats:
+        """Run SetFit classifier on all test queries."""
+        print("\n" + "="*80)
+        print("🚀 Running SetFit Benchmark")
+        print("="*80)
+
+        setfit = SetFitClassifier()
+        self.setfit_results = []
+
+        for i, item in enumerate(self.test_data, 1):
+            query = item["text"]
+            expected_labels = item.get("labels", [])
+
+            try:
+                start = time.time()
+                predicted_labels, confidence = setfit.classify(query)
+                elapsed_ms = (time.time() - start) * 1000
+
+                result = ClassificationResult(
+                    query_id=i,
+                    query=query,
+                    expected_labels=expected_labels,
+                    predicted_labels=predicted_labels,
+                    confidence_score=confidence,
+                    time_ms=elapsed_ms,
+                )
+                self.setfit_results.append(result)
+
+                if i % 20 == 0:
+                    print(f"  [{i}/{len(self.test_data)}] {query[:60]}... → {predicted_labels} ({elapsed_ms:.1f}ms)")
+            except Exception as e:
+                result = ClassificationResult(
+                    query_id=i,
+                    query=query,
+                    expected_labels=expected_labels,
+                    predicted_labels=[],
+                    confidence_score=0.0,
+                    time_ms=0,
+                    error=str(e),
+                )
+                self.setfit_results.append(result)
+                print(f"  ❌ Q{i}: {e}")
+
+        print(f"\n✓ SetFit benchmark complete ({len(self.setfit_results)} queries)")
+        return self._compute_stats(self.setfit_results, "SetFit")
+
+    def run_llm_benchmark(
+        self,
+        provider_type: str = "openrouter",
+        model_id: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> BenchmarkStats:
+        """Run LLM classifier on all test queries."""
+        print("\n" + "="*80)
+        print(f"🚀 Running LLM Benchmark ({provider_type})")
+        print("="*80)
+
+        llm = LLMQueryClassifier(provider_type=provider_type, model_id=model_id, api_key=api_key)
+        self.llm_results = []
+
+        for i, item in enumerate(self.test_data, 1):
+            query = item["text"]
+            expected_labels = item.get("labels", [])
+
+            try:
+                start = time.time()
+                predicted_labels, confidence = llm.classify(query)
+                elapsed_ms = (time.time() - start) * 1000
+
+                result = ClassificationResult(
+                    query_id=i,
+                    query=query,
+                    expected_labels=expected_labels,
+                    predicted_labels=predicted_labels,
+                    confidence_score=confidence,
+                    time_ms=elapsed_ms,
+                )
+                self.llm_results.append(result)
+
+                if i % 5 == 0:
+                    print(f"  [{i}/{len(self.test_data)}] {query[:60]}... → {predicted_labels} ({elapsed_ms:.1f}ms)")
+            except Exception as e:
+                result = ClassificationResult(
+                    query_id=i,
+                    query=query,
+                    expected_labels=expected_labels,
+                    predicted_labels=[],
+                    confidence_score=0.0,
+                    time_ms=0,
+                    error=str(e),
+                )
+                self.llm_results.append(result)
+                print(f"  ❌ Q{i}: {str(e)[:100]}")
+
+        print(f"\n✓ LLM benchmark complete ({len(self.llm_results)} queries)")
+        return self._compute_stats(self.llm_results, f"LLM ({provider_type})")
+
+    def _compute_stats(self, results: List[ClassificationResult], name: str) -> BenchmarkStats:
+        """Compute metrics from classification results."""
+        stats = BenchmarkStats(classifier_name=name, total_queries=len(results))
+
+        if not results:
+            return stats
+
+        # Separate errors from successes
+        successful = [r for r in results if r.error is None]
+        stats.error_count = len(results) - len(successful)
+
+        if not successful:
+            return stats
+
+        # Binary matrices for multi-label metrics
+        y_true = self.mlb.transform([r.expected_labels for r in successful])
+        y_pred = self.mlb.transform([r.predicted_labels for r in successful])
+
+        # Exact match accuracy
+        stats.correct_exact_match = sum(
+            1 for r in successful if set(r.expected_labels) == set(r.predicted_labels)
+        )
+        stats.accuracy = stats.correct_exact_match / len(successful)
+
+        # Hamming loss
+        stats.hamming_loss = hamming_loss(y_true, y_pred)
+
+        # Timing stats
+        times = [r.time_ms for r in successful]
+        stats.avg_time_ms = statistics.mean(times)
+        stats.median_time_ms = statistics.median(times)
+        stats.min_time_ms = min(times)
+        stats.max_time_ms = max(times)
+
+        # Per-label metrics
+        precision, recall, f1, support = precision_recall_fscore_support(
+            y_true, y_pred, labels=range(len(self.LABELS)), zero_division=0
+        )
+
+        for i, label in enumerate(self.LABELS):
+            stats.per_label_metrics[label] = {
+                "precision": float(precision[i]),
+                "recall": float(recall[i]),
+                "f1": float(f1[i]),
+                "support": int(support[i]),
+            }
+
+        # Macro averages
+        stats.precision_macro = float(np.mean(precision))
+        stats.recall_macro = float(np.mean(recall))
+        stats.f1_macro = float(np.mean(f1))
+
+        # Weighted averages
+        total_support = np.sum(support)
+        stats.precision_weighted = float(np.average(precision, weights=support)) if total_support > 0 else 0.0
+        stats.recall_weighted = float(np.average(recall, weights=support)) if total_support > 0 else 0.0
+        stats.f1_weighted = float(np.average(f1, weights=support)) if total_support > 0 else 0.0
+
+        # Failed queries
+        stats.failed_queries = [r.query_id for r in results if r.error is not None]
+
+        return stats
+
+    def generate_report(self, setfit_stats: BenchmarkStats, llm_stats: BenchmarkStats, output_file: Optional[str] = None):
+        """Generate comprehensive comparison report."""
+        report_lines = []
+
+        report_lines.append("=" * 100)
+        report_lines.append("QUERY CLASSIFIER BENCHMARK REPORT")
+        report_lines.append("=" * 100)
+        report_lines.append("")
+
+        # Summary comparison
+        report_lines.append("📊 SUMMARY COMPARISON")
+        report_lines.append("-" * 100)
+        report_lines.append(f"{'Metric':<30} {'SetFit':<30} {'LLM':<30}")
+        report_lines.append("-" * 100)
+        report_lines.append(f"{'Total Queries':<30} {setfit_stats.total_queries:<30} {llm_stats.total_queries:<30}")
+        report_lines.append(f"{'Successful':<30} {setfit_stats.total_queries - setfit_stats.error_count:<30} {llm_stats.total_queries - llm_stats.error_count:<30}")
+        report_lines.append(f"{'Failed/Errors':<30} {setfit_stats.error_count:<30} {llm_stats.error_count:<30}")
+        report_lines.append("")
+
+        # Accuracy
+        report_lines.append("🎯 ACCURACY METRICS")
+        report_lines.append("-" * 100)
+        report_lines.append(f"{'Exact Match Accuracy':<30} {setfit_stats.accuracy*100:>28.2f}% {llm_stats.accuracy*100:>28.2f}%")
+        report_lines.append(f"{'Correct Queries':<30} {setfit_stats.correct_exact_match:>30} {llm_stats.correct_exact_match:>30}")
+        report_lines.append(f"{'Hamming Loss':<30} {setfit_stats.hamming_loss:>30.4f} {llm_stats.hamming_loss:>30.4f}")
+        report_lines.append("")
+
+        # F1 Scores
+        report_lines.append("📈 F1 SCORES (Multi-Label)")
+        report_lines.append("-" * 100)
+        report_lines.append(f"{'F1 (Macro)':<30} {setfit_stats.f1_macro:>30.4f} {llm_stats.f1_macro:>30.4f}")
+        report_lines.append(f"{'F1 (Weighted)':<30} {setfit_stats.f1_weighted:>30.4f} {llm_stats.f1_weighted:>30.4f}")
+        report_lines.append(f"{'Precision (Macro)':<30} {setfit_stats.precision_macro:>30.4f} {llm_stats.precision_macro:>30.4f}")
+        report_lines.append(f"{'Recall (Macro)':<30} {setfit_stats.recall_macro:>30.4f} {llm_stats.recall_macro:>30.4f}")
+        report_lines.append("")
+
+        # Performance/Latency
+        report_lines.append("⚡ PERFORMANCE (Response Time)")
+        report_lines.append("-" * 100)
+        report_lines.append(f"{'Average Latency':<30} {setfit_stats.avg_time_ms:>28.2f} ms {llm_stats.avg_time_ms:>28.2f} ms")
+        report_lines.append(f"{'Median Latency':<30} {setfit_stats.median_time_ms:>28.2f} ms {llm_stats.median_time_ms:>28.2f} ms")
+        report_lines.append(f"{'Min Latency':<30} {setfit_stats.min_time_ms:>28.2f} ms {llm_stats.min_time_ms:>28.2f} ms")
+        report_lines.append(f"{'Max Latency':<30} {setfit_stats.max_time_ms:>28.2f} ms {llm_stats.max_time_ms:>28.2f} ms")
+
+        speedup = setfit_stats.avg_time_ms / llm_stats.avg_time_ms if llm_stats.avg_time_ms > 0 else float('inf')
+        if speedup < 1:
+            report_lines.append(f"{'Speed Differential':<30} {'LLM is ' + f'{1/speedup:.1f}x slower':<30} {'(baseline)':<30}")
+        else:
+            report_lines.append(f"{'Speed Differential':<30} {'(baseline)':<30} {'SetFit is ' + f'{speedup:.1f}x faster':<30}")
+        report_lines.append("")
+
+        # Per-label breakdown
+        report_lines.append("🏷️  PER-LABEL METRICS")
+        report_lines.append("-" * 100)
+
+        if llm_stats.per_label_metrics:
+            report_lines.append(f"{'Label':<20} {'Metric':<12} {'SetFit':<15} {'LLM':<15} {'Support':<10}")
+        else:
+            report_lines.append(f"{'Label':<20} {'Metric':<12} {'SetFit':<15} {'Support':<10}")
+
+        report_lines.append("-" * 100)
+
+        for label in self.LABELS:
+            if label not in setfit_stats.per_label_metrics:
+                continue
+
+            support = setfit_stats.per_label_metrics[label]["support"]
+            if support > 0:
+                setfit_f1 = setfit_stats.per_label_metrics[label]["f1"]
+                setfit_p = setfit_stats.per_label_metrics[label]["precision"]
+                setfit_r = setfit_stats.per_label_metrics[label]["recall"]
+
+                if llm_stats.per_label_metrics and label in llm_stats.per_label_metrics:
+                    llm_f1 = llm_stats.per_label_metrics[label]["f1"]
+                    llm_p = llm_stats.per_label_metrics[label]["precision"]
+                    llm_r = llm_stats.per_label_metrics[label]["recall"]
+                    report_lines.append(f"{label:<20} {'F1':<12} {setfit_f1:>14.4f} {llm_f1:>14.4f} {support:>9}")
+                    report_lines.append(f"{'':<20} {'Precision':<12} {setfit_p:>14.4f} {llm_p:>14.4f}")
+                    report_lines.append(f"{'':<20} {'Recall':<12} {setfit_r:>14.4f} {llm_r:>14.4f}")
+                else:
+                    report_lines.append(f"{label:<20} {'F1':<12} {setfit_f1:>14.4f} {support:>9}")
+                    report_lines.append(f"{'':<20} {'Precision':<12} {setfit_p:>14.4f}")
+                    report_lines.append(f"{'':<20} {'Recall':<12} {setfit_r:>14.4f}")
+                report_lines.append("")
+
+        # Overall assessment
+        report_lines.append("=" * 100)
+        report_lines.append("📋 ASSESSMENT")
+        report_lines.append("=" * 100)
+
+        if setfit_stats.accuracy > llm_stats.accuracy:
+            report_lines.append(f"✅ SetFit has better accuracy: {setfit_stats.accuracy*100:.1f}% vs {llm_stats.accuracy*100:.1f}%")
+        else:
+            report_lines.append(f"✅ LLM has better accuracy: {llm_stats.accuracy*100:.1f}% vs {setfit_stats.accuracy*100:.1f}%")
+
+        if setfit_stats.avg_time_ms < llm_stats.avg_time_ms:
+            speedup = llm_stats.avg_time_ms / setfit_stats.avg_time_ms
+            report_lines.append(f"⚡ SetFit is {speedup:.1f}x faster than LLM ({setfit_stats.avg_time_ms:.1f}ms vs {llm_stats.avg_time_ms:.1f}ms)")
+        else:
+            speedup = setfit_stats.avg_time_ms / llm_stats.avg_time_ms
+            report_lines.append(f"⚡ LLM is {speedup:.1f}x faster than SetFit ({llm_stats.avg_time_ms:.1f}ms vs {setfit_stats.avg_time_ms:.1f}ms)")
+
+        report_lines.append("")
+        report_lines.append("RECOMMENDATION:")
+        if setfit_stats.accuracy > 0.85 and setfit_stats.avg_time_ms < 150:
+            report_lines.append("  → SetFit is the superior choice: high accuracy with minimal latency")
+        elif llm_stats.accuracy > setfit_stats.accuracy and llm_stats.avg_time_ms < 5000:
+            report_lines.append("  → LLM provides better accuracy despite higher latency (acceptable for batch processing)")
+        else:
+            report_lines.append("  → Hybrid approach: Use SetFit for real-time, LLM for accuracy-critical tasks")
+
+        report_lines.append("=" * 100)
+
+        # Print to console
+        report_text = "\n".join(report_lines)
+        print("\n" + report_text)
+
+        # Save to file
+        if output_file:
+            output_path = Path(output_file)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w") as f:
+                f.write(report_text)
+            print(f"\n💾 Report saved to: {output_path}")
+
+        return report_text
+
+
+def check_local_lm_studio(host: str = "localhost", port: int = 1234) -> bool:
+    """Check if local LM Studio is available."""
+    try:
+        import httpx
+        response = httpx.get(
+            f"http://{host}:{port}/v1/models",
+            timeout=2.0,
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Query Classifier Benchmark")
+    parser.add_argument(
+        "--test-set",
+        type=str,
+        default="simple_rag/rag/query/classification_test_set.json",
+        help="Path to test set JSON",
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        choices=["openrouter", "local"],
+        default="local",
+        help="LLM provider type (default: local LM Studio)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="meta-llama/llama-3.3-70b-instruct:free",
+        help="Model ID for OpenRouter",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="OpenRouter API key (or env var OPEN_ROUTER_API_KEY)",
+    )
+    parser.add_argument(
+        "--local-host",
+        type=str,
+        default="localhost",
+        help="Host for local LM Studio",
+    )
+    parser.add_argument(
+        "--local-port",
+        type=int,
+        default=1234,
+        help="Port for local LM Studio",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="src/simple_rag/evaluation/query/benchmark_report.txt",
+        help="Output report file",
+    )
+    parser.add_argument(
+        "--skip-llm",
+        action="store_true",
+        help="Skip LLM benchmark (SetFit only)",
+    )
+
+    args = parser.parse_args()
+
+    # Load test set
+    benchmark = QueryClassifierBenchmark(args.test_set)
+    benchmark.load_test_set()
+
+    # Run SetFit benchmark
+    setfit_stats = benchmark.run_setfit_benchmark()
+
+    # Run LLM benchmark
+    if args.skip_llm:
+        print("\n⏭️  Skipping LLM benchmark (--skip-llm set)")
+        llm_stats = BenchmarkStats(classifier_name="LLM (skipped)")
+    else:
+        # Check if local LM Studio is available
+        if args.provider == "local":
+            print(f"\n🔍 Checking for local LM Studio at {args.local_host}:{args.local_port}...")
+            if check_local_lm_studio(args.local_host, args.local_port):
+                print(f"✅ Local LM Studio found!")
+            else:
+                print(f"⚠️  WARNING: Local LM Studio not responding at {args.local_host}:{args.local_port}")
+                print(f"   Make sure LM Studio is running in the background")
+                print(f"   If not available, the benchmark will fail with a connection error")
+
+        try:
+            llm_stats = benchmark.run_llm_benchmark(
+                provider_type=args.provider,
+                model_id=args.model,
+                api_key=args.api_key,
+            )
+        except ConnectionError as e:
+            print(f"\n❌ LLM Connection Error: {e}")
+            print("\n   Options:")
+            if args.provider == "local":
+                print("   1. Start LM Studio and run the benchmark again")
+                print("   2. Or use OpenRouter instead: --provider openrouter")
+            print("   3. Or skip LLM benchmark: --skip-llm")
+            raise
+        except Exception as e:
+            print(f"\n❌ LLM benchmark failed: {e}")
+            print("   Run with --skip-llm to benchmark SetFit only")
+            raise
+
+    # Generate report
+    benchmark.generate_report(setfit_stats, llm_stats, output_file=args.output)
+
+
+if __name__ == "__main__":
+    main()
