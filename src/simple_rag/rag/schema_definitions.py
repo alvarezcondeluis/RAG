@@ -57,9 +57,10 @@ DETAILED_SCHEMA = """
 (:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
 
 # Holdings Structure
-(:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId})
+(:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId, count})  # count = number of holdings
 (:Portfolio)-[:HAS_HOLDING {shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile}]->(:Holding {
     name, ticker, isin, lei, country, category, categoryDesc, issuerCategory, businessAddress})
+(:Holding)-[:OF_ASSET_TYPE]->(:AssetCategory {code, name, type, subtype})
 (:Portfolio)-[:EXTRACTED_FROM]->(:Document)
 # Financial Highlights — IMPORTANT: 'year' is on the RELATIONSHIP, not the node!
 # ALWAYS use: (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) and access r.year

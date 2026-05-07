@@ -6,8 +6,8 @@ enabling pluggable model selection for answer generation.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Iterator, List, Dict, Optional
+from dataclasses import dataclass
+from typing import Iterator, List, Dict
 
 
 @dataclass

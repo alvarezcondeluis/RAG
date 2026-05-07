@@ -35,6 +35,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                     if not hasattr(chunk, 'text'):
                         continue
                     risk_list_data.append({
+                        "id": chunk.id,
                         "title": getattr(chunk, 'title', 'Untitled'),
                         "text": chunk.text,
                         "vector": getattr(chunk, 'embedding', None)
@@ -46,6 +47,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                     if not hasattr(chunk, 'text'):
                         continue
                     strategy_list_data.append({
+                        "id": chunk.id,
                         "title": getattr(chunk, 'title', 'Untitled'),
                         "text": chunk.text,
                         "vector": getattr(chunk, 'embedding', None)
@@ -121,8 +123,8 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 MERGE (prof)-[:HAS_SECTION]->(risk_sec:Section:RiskFactor)
                 SET risk_sec.title = 'Risk Factors'
                 FOREACH (r_item IN $risk_list |
-                    MERGE (risk_sec)-[:HAS_CHUNK]->(rc:Chunk {text: r_item.text})
-                    SET rc.embedding = r_item.vector
+                    MERGE (risk_sec)-[:HAS_CHUNK]->(rc:Chunk {id: r_item.id})
+                    SET rc.text = r_item.text, rc.embedding = r_item.vector
                 )
             )
 
@@ -130,8 +132,8 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 MERGE (prof)-[:HAS_SECTION]->(strat_sec:Section:Strategy)
                 SET strat_sec.title = 'Strategy'
                 FOREACH (s_item IN $strat_list |
-                    MERGE (strat_sec)-[:HAS_CHUNK]->(strat_chunk:Chunk {text: s_item.text})
-                    SET strat_chunk.embedding = s_item.vector
+                    MERGE (strat_sec)-[:HAS_CHUNK]->(strat_chunk:Chunk {id: s_item.id})
+                    SET strat_chunk.text = s_item.text, strat_chunk.embedding = s_item.vector
                 )
             )
             

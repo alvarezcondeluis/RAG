@@ -17,6 +17,7 @@ neo4j/import/
 neo4j/data/
 neo4j/plugins/
 /rag
+src/simple_rag/evaluation/embeddings/reports
 .rag
 example.pdf
 *.pdf

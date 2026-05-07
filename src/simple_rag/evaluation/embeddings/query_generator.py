@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from simple_rag.evaluation.embeddings.corpus_loader import CorpusChunk
-from simple_rag.rag.llm_providers.groq_provider import GroqProvider
+from simple_rag.rag.llm_providers.openrouter_provider import OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +35,35 @@ class QAPair:
         return asdict(self)
 
 
-_PROMPT_TEMPLATE = """You are helping build a retrieval evaluation set for a SEC filings RAG system.
-
-Read the passage and write {n_questions} distinct, realistic user questions
-that this passage (and only this passage) would answer well.
+_PROMPT_TEMPLATE = """Read the passage below and write exactly {n_questions} question(s) a financial analyst would ask to find this passage.
 
 Rules:
-- Questions must be answerable strictly from the passage.
-- Use natural phrasing a financial analyst or investor would use.
-- Do NOT mention the passage or quote it directly.
-- Do NOT include answers, only the questions.
-- Each question on its own line, no numbering, no bullets.
+- Output ONLY the question(s), nothing else.
+- One question per line, no numbering, no bullets, no preamble.
+- Each question must end with a question mark.
+- Questions must be specific to the content (mention companies, funds, figures, or topics from the text).
+- Do NOT copy sentences from the passage verbatim.
 
-Passage category: {category}
-Parent entity: {parent}
+Context: {category} — {parent}
 
-PASSAGE:
-\"\"\"
+Passage:
 {text}
-\"\"\"
 
-Questions:"""
+Question(s):"""
+
+
+_META_PATTERNS = re.compile(
+    r"^(okay|alright|sure|let'?s|the user wants|i need to|i'll|first,|so,|"
+    r"note:|answer:|here (is|are)|based on|looking at|this passage|"
+    r"the passage|according to)",
+    re.IGNORECASE,
+)
 
 
 def _parse_questions(raw: str, max_questions: int) -> List[str]:
+    # Strip <think>...</think> blocks (Qwen3 chain-of-thought)
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
     questions: List[str] = []
     for line in raw.splitlines():
         line = line.strip()
@@ -68,6 +73,8 @@ def _parse_questions(raw: str, max_questions: int) -> List[str]:
         line = line.strip(' "\'')
         if not line or len(line) < 8:
             continue
+        if _META_PATTERNS.match(line):
+            continue
         if not line.endswith("?"):
             line = line + "?"
         questions.append(line)
@@ -76,9 +83,12 @@ def _parse_questions(raw: str, max_questions: int) -> List[str]:
     return questions
 
 
+LM_STUDIO_URL = "http://127.0.0.1:1234/v1"
+
+
 def generate_test_set(
     corpus: List[CorpusChunk],
-    provider: Optional[GroqProvider] = None,
+    provider: Optional[OpenRouterProvider] = None,
     questions_per_chunk: int = 1,
     max_chunks: Optional[int] = None,
     cache_path: Optional[Path] = None,
@@ -91,7 +101,7 @@ def generate_test_set(
         with open(cache_path, "r", encoding="utf-8") as f:
             return [QAPair(**row) for row in json.load(f)]
 
-    provider = provider or GroqProvider()
+    provider = provider or OpenRouterProvider(base_url=LM_STUDIO_URL)
     selected = corpus if max_chunks is None else corpus[:max_chunks]
     pairs: List[QAPair] = []
 
@@ -105,7 +115,17 @@ def generate_test_set(
         )
         try:
             resp = provider.generate(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a financial analyst assistant. "
+                            "Respond with ONLY the requested questions — "
+                            "no thinking, no preamble, no explanations."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.4,
                 max_tokens=256,
             )
