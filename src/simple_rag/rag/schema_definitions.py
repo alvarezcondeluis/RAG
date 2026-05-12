@@ -34,12 +34,18 @@ DETAILED_SCHEMA = """
 # Profile (versioned by year)
 (:Fund)-[:DEFINED_BY {year}]->(:Profile {summaryProspectus}) # Contains the whole text content of the prospectus
 # Profile sections use multi-labeled Section nodes (filter by label, not property)
+# IMPORTANT — embeddings on Profile sections:
+#   - :Section:Objective       → embedding ON THE SECTION (no chunks). Use profileObjectiveIndex.
+#   - :Section:Strategy        → no embedding on section; child :Chunk has embedding. Use profileChunkIndex.
+#   - :Section:RiskFactor      → no embedding on section; child :Chunk has embedding. Use profileChunkIndex.
+#   - :Section:PerformanceCommentary → no embedding anywhere; only structural retrieval.
 (:Profile)-[:HAS_SECTION]->(:Section:Objective {text, title, embedding})
-(:Profile)-[:HAS_SECTION]->(:Section:PerformanceCommentary {text, title, embedding})
+(:Profile)-[:HAS_SECTION]->(:Section:PerformanceCommentary {text, title})
 (:Profile)-[:HAS_SECTION]->(:Section:RiskFactor {text, title})
 (:Profile)-[:HAS_SECTION]->(:Section:Strategy {text, title})
-# RiskFactor and Strategy sections have child chunks:
-(:Section)-[:HAS_CHUNK]->(:Chunk {text, embedding})
+# Chunks under Profile Strategy / RiskFactor sections (these are the embedded units)
+(:Section:Strategy)-[:HAS_CHUNK]->(:Chunk {text, embedding})
+(:Section:RiskFactor)-[:HAS_CHUNK]->(:Chunk {text, embedding})
 (:Profile)-[:EXTRACTED_FROM]->(:Document)
 # Charts/Images
 (:Fund)-[:HAS_CHART {year}]->(:Image {category, svg, title})
@@ -60,7 +66,7 @@ DETAILED_SCHEMA = """
 (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId, count})  # count = number of holdings
 (:Portfolio)-[:HAS_HOLDING {shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile}]->(:Holding {
     name, ticker, isin, lei, country, category, categoryDesc, issuerCategory, businessAddress})
-(:Holding)-[:OF_ASSET_TYPE]->(:AssetCategory {code, name, type, subtype})
+(:Holding)-[:OF_ASSET_TYPE]->(:AssetCategory {code, name, category, subcategory})
 (:Portfolio)-[:EXTRACTED_FROM]->(:Document)
 # Financial Highlights — IMPORTANT: 'year' is on the RELATIONSHIP, not the node!
 # ALWAYS use: (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) and access r.year
@@ -70,13 +76,14 @@ DETAILED_SCHEMA = """
     turnover,                    # Portfolio turnover rate (percentage)
     expenseRatio,                # Total expense ratio (percentage)
     totalReturn,                 # Total return for the period (percentage)
-    netAssets,                   # Total net assets under management 
+    netAssets,                   # Total net assets under management
     netAssetsValueBeginning,     # Price of one share at period start
     netAssetsValueEnd,           # Price of one share at period end
     netIncomeRatio,              # Net investment income ratio (percentage)
-    numberHoldings,              # Total number of holdings (integer) - USE THIS, not count(h)!
-    advisoryFees                # Advisory fees (numeric)
+    advisoryFees                 # Advisory fees (numeric)
 })
+# ⚠️ numberHoldings is NOT on FinancialHighlight. Use Portfolio.count:
+# MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count AS numberHoldings
 
 # ============================================================
 # === COMPANY STRUCTURE (10-K Filings) ===
@@ -95,12 +102,21 @@ DETAILED_SCHEMA = """
 (:Company)-[:REPORTS_IN {year}]->(:Filing10K)
 (:Filing10K)-[:EXTRACTED_FROM]->(:Document)
 
-# 10-K Section Types
-(:Filing10K)-[:HAS_SECTION]->(:Section {id, title, text})
-# Section additional labels: RiskFactor, BusinessInformation, LegalProceeding, ManagementDiscussion, Properties
+# 10-K Section Types — sections store {text, title}; embeddings live on the child :Chunk nodes.
+# Note: 'ManagemetDiscussion' is intentionally misspelled (matches actual label in DB).
+(:Filing10K)-[:HAS_SECTION]->(:Section:RiskFactor {text, title})
+(:Filing10K)-[:HAS_SECTION]->(:Section:BusinessInformation {text, title})
+(:Filing10K)-[:HAS_SECTION]->(:Section:LegalProceeding {text, title})
+(:Filing10K)-[:HAS_SECTION]->(:Section:ManagemetDiscussion {text, title})
+(:Filing10K)-[:HAS_SECTION]->(:Section:Properties {text, title})
 
-# Section chunks for fine-grained retrieval (linked to parent Section)
-(:Section)-[:HAS_CHUNK]->(:Chunk:SectionChunk {title, text, embedding})
+# Section chunks for fine-grained retrieval — these are the embedded units.
+# All five Section types above expose: (:Section)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
+(:Section:RiskFactor)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
+(:Section:BusinessInformation)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
+(:Section:LegalProceeding)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
+(:Section:ManagemetDiscussion)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
+(:Section:Properties)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 # === FINANCIAL METRICS & SEGMENTS ===
 (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
 (:Section:Financials)-[:HAS_METRIC]->(:FinancialMetric {label, value})
@@ -118,9 +134,38 @@ DETAILED_SCHEMA = """
 (:InsiderTransaction)-[:EXTRACTED_FROM]->(:Document)
 
 
+# ============================================================
+# === VECTOR INDEXES (semantic search via $queryVector parameter) ===
+# ============================================================
+# Use these when the question asks about MEANING / TOPIC / CONCEPT of narrative
+# text. Pattern: CALL db.index.vector.queryNodes('<indexName>', $k, $queryVector)
+#
+#   filing10kChunkIndex
+#     → :Chunk under any 10-K section (RiskFactor, BusinessInformation,
+#       LegalProceeding, ManagemetDiscussion, Properties).
+#     Returns Chunk nodes — traverse <-[:HAS_CHUNK]-(:Section) to get the
+#     parent Section, and <-[:HAS_SECTION]-(:Filing10K)<-[:REPORTS_IN]-(:Company)
+#     to get the company. Filter by Section label (e.g. :RiskFactor) inside MATCH.
+#
+#   profileChunkIndex
+#     → :Chunk under :Section:Strategy or :Section:RiskFactor (Profile side).
+#     Traverse <-[:HAS_CHUNK]-(:Section) <-[:HAS_SECTION]-(:Profile) <-[:DEFINED_BY]-(:Fund).
+#
+#   profileObjectiveIndex
+#     → :Section:Objective directly (embedding lives on the section, no chunks).
+#     Traverse <-[:HAS_SECTION]-(:Profile) <-[:DEFINED_BY]-(:Fund).
+#
+# DECISION RULE:
+#   - Numeric/property/relationship questions → use plain MATCH patterns.
+#   - Narrative-content questions ("what risks…", "describe the strategy…") →
+#     use vector index call. Hybrid is allowed: filter by structure (e.g. by
+#     ticker), then vector-search inside the filtered subgraph.
+#   - :Section:PerformanceCommentary has NO embeddings — use only text search
+#     or structural retrieval, not vector search.
+
 # === IMPORTANT NOTES ===
-# 1. netAssets, numberHoldings, expenseRatio, advisoryFees are on FinancialHighlight, NOT on Fund
-# 2. numberHoldings property already contains the count but you can recalculate
+# 1. netAssets, expenseRatio, advisoryFees are on FinancialHighlight, NOT on Fund
+# 2. numberHoldings is on Portfolio.count — use MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count
 # 3. turnover is absolute (2 = 2%, not 0.02)
 # 4. Use 'ticker' for symbols (VTI), 'name' for full names
 # 5. Vector indexes exist on embedding properties for semantic search

@@ -702,6 +702,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         company_ticker: str,
         filing_date: date,
         section_name: str,
+        full_text: str,
         chunks: List[Dict[str, Any]]
     ) -> int:
         """
@@ -718,19 +719,13 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             filing_date: Date of the 10-K filing
             section_name: One of 'risk_factors', 'business_info', 'mda',
                           'legal_proceedings', 'properties'
+            full_text: Full text of the section
             chunks: List of dicts with keys:
                     id, title, text, embedding, section_type, subsection,
                     chunk_index, filing_cik, filing_date, section_name
 
         Returns:
             Number of SectionChunk nodes created/updated
-            
-        Example Usage:
-            # Step 1: Create parent section with full text
-            self.add_risk_factors_section(ticker, date, full_text)
-            
-            # Step 2: Add chunks linked to that section
-            self.add_section_chunks(ticker, date, "risk_factors", chunked_data)
         """
         if not chunks:
             return 0
@@ -758,6 +753,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             UNWIND $chunks AS chunk
             MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk:SectionChunk {text: chunk.text})
             SET sc.title        = chunk.title,
+                sec.fullText     = $full_text,
                 sc.embedding    = chunk.embedding,
                 sc.chunkType    = chunk.sectionType,
                 sc.subsection   = chunk.subsection,
@@ -769,6 +765,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             result = self._execute_write(query, {
                 "ticker": company_ticker,
                 "year": year,
+                "full_text": full_text,
                 "section_type": section_name,
                 "chunks": chunk_list,
             })

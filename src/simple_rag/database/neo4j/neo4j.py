@@ -31,7 +31,6 @@ Note:
 from typing import Optional, List, Dict, Any
 import logging
 
-from .base import Neo4jDatabaseBase
 from .schema_manager import SchemaManager
 from .operations.fund_operations import FundOperations
 from .operations.company_operations import CompanyOperations

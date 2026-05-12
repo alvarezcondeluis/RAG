@@ -1,4 +1,6 @@
+import re
 import sys
+import builtins
 import time
 import json
 import statistics
@@ -9,13 +11,45 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 
+def _is_jupyter() -> bool:
+    """Return True when running inside a Jupyter / IPython kernel."""
+    try:
+        return get_ipython() is not None  # type: ignore[name-defined]
+    except NameError:
+        return False
+
+
 class _BenchmarkLogger:
-    """Write to both stdout and a file simultaneously."""
+    """
+    Tee all print() output to a report file.
+
+    Terminal: replaces sys.stdout — every write() is captured automatically.
+    Jupyter:  does NOT replace sys.stdout (doing so breaks Jupyter's cell
+              output routing). Instead, overrides builtins.print so every
+              print() call writes to both the cell display and the file.
+    """
     def __init__(self, file_path: Path) -> None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = open(file_path, "w", encoding="utf-8")
-        self._stdout = sys.stdout
-        sys.stdout = self
+        self._in_jupyter = _is_jupyter()
+
+        if self._in_jupyter:
+            # Override builtins.print to tee to file without touching sys.stdout
+            self._original_print = builtins.print
+            _file = self._file
+            _orig = self._original_print
+
+            def _tee_print(*args, **kwargs):
+                _orig(*args, **kwargs)
+                sep = kwargs.get("sep", " ")
+                end = kwargs.get("end", "\n")
+                _file.write(sep.join(str(a) for a in args) + end)
+                _file.flush()
+
+            builtins.print = _tee_print
+        else:
+            self._stdout = sys.stdout
+            sys.stdout = self
 
     def write(self, data: str) -> None:
         self._stdout.write(data)
@@ -26,7 +60,10 @@ class _BenchmarkLogger:
         self._file.flush()
 
     def close(self) -> None:
-        sys.stdout = self._stdout
+        if self._in_jupyter:
+            builtins.print = self._original_print
+        else:
+            sys.stdout = self._stdout
         self._file.close()
 
 # Import your existing modules
@@ -53,6 +90,7 @@ class TestResult:
     expected_results: List[Dict] = field(default_factory=list)
     llm_prompt: str = ""  # full initial LLM prompt (schema + examples + question), only populated on error
     prompt_token_estimate: int = 0  # estimated token count for the initial LLM prompt
+    validation_failures: List[str] = field(default_factory=list)  # validator rule tags that fired during retries
 
 class Text2CypherBenchmark:
     """
@@ -68,15 +106,23 @@ class Text2CypherBenchmark:
         openai_compatible_host: str = "localhost",
         openai_compatible_port: int = 8080,
         use_schema_injection: bool = True,
+        few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
+        retry_module: bool = True,
     ):
         self.test_path = Path(test_set_path)
         self.neo = Neo4jDatabase()
+        self.retry_module = retry_module
 
         # Build extra kwargs for CypherTranslator (forwarded via QueryHandler **cypher_kwargs)
         extra_kwargs = {}
         if backend == "openai":
             extra_kwargs["openai_compatible_host"] = openai_compatible_host
             extra_kwargs["openai_compatible_port"] = openai_compatible_port
+        # When retry_module=False: run validation once (to record rule violations)
+        # but never send a retry prompt — max_validation_retries=1 achieves this
+        # because the loop breaks immediately after the first failed attempt.
+        if not retry_module:
+            extra_kwargs["max_validation_retries"] = 1
 
         # Initialize the QueryHandler (Classification → Schema Slice → Cypher)
         self.handler = QueryHandler(
@@ -84,6 +130,7 @@ class Text2CypherBenchmark:
             cypher_model=model_name,
             cypher_backend=backend,
             use_entity_resolver=True,
+            few_shot_embedding_model=few_shot_embedding_model,
             **extra_kwargs,
         )
 
@@ -246,6 +293,7 @@ class Text2CypherBenchmark:
             result.generated_cypher = handle_result.cypher or ""
             result.llm_prompt = getattr(self.handler.translator, 'last_initial_prompt', '') or ''
             result.prompt_token_estimate = len(result.llm_prompt) // 4  # ~4 chars per token
+            result.validation_failures = list(getattr(self.handler.translator, 'last_validation_failures', []))
 
             if handle_result.error:
                 result.error_type = f"Pipeline Error ({handle_result.category})"
@@ -363,10 +411,13 @@ class Text2CypherBenchmark:
         print(f"🚀 Text-to-Cypher Integrated Pipeline Benchmark")
         print(f"{'='*80}")
         schema_mode_label = "slice (classifier-injected)" if self.use_schema_injection else "full DETAILED_SCHEMA"
+        retry_label = (f"ENABLED ({self.handler.translator.max_validation_retries} attempts)"
+                       if self.retry_module else "DISABLED (1 attempt, no retry prompts)")
         print(f"📊 Total Questions: {len(test_data)}")
         print(f"🤖 Code Model: {self.handler.translator.model_name}")
         print(f"🏷️  Classifier: SetFit (9 categories)")
         print(f"📐 Schema Mode:  {schema_mode_label} | retries always use full schema")
+        print(f"🔄 Retry Module: {retry_label}")
         print(f"📁 Report: {report_path}")
         print(f"{'='*80}\n")
 
@@ -396,9 +447,12 @@ class Text2CypherBenchmark:
         avg_tokens = statistics.mean(token_estimates) if token_estimates else 0
         total_tokens = sum(token_estimates)
 
+        retry_label = (f"ENABLED ({self.handler.translator.max_validation_retries} attempts)"
+                       if self.retry_module else "DISABLED (no retry prompts)")
         print("\n" + "="*60)
         print("📊 PIPELINE BENCHMARK REPORT")
         print("="*60)
+        print(f"Retry Module:         {retry_label}")
         print(f"Total Questions:      {total}")
         print(f"Passed (Correct Data): {passed}")
         print(f"Failed:               {failed}")
@@ -432,6 +486,8 @@ class Text2CypherBenchmark:
                         print(f"   LLM PROMPT — {r.prompt_token_estimate:,} tokens (est.) — initial request sent to model:")
                         print(f"   {'─'*76}")
                         
+        self._print_failure_analytics()
+
         # --- NULL EXPECTED RESULTS ---
         # Questions where the expected Cypher itself returned 0 records.
         # These are untestable and must be fixed in test_set.json.
@@ -450,6 +506,108 @@ class Text2CypherBenchmark:
                 print(f"    Expected Cypher: {r.expected_cypher}")
         else:
             print("  ✅ All expected Cyphers returned results — no fixes needed.")
+
+    def _print_failure_analytics(self):
+        """Print a structured breakdown of all failure types to guide debugging."""
+        failed = [r for r in self.results if not r.success]
+        if not failed:
+            print("\n✅ No failures — analytics not needed.")
+            return
+
+        total_failed = len(failed)
+
+        print(f"\n{'='*60}")
+        print(f"🔬 FAILURE ANALYTICS  ({total_failed} total failures)")
+        print(f"{'='*60}")
+
+        # ── 0. Validator rule violations across ALL queries (retries included) ──
+        all_vf = [rule for r in self.results for rule in r.validation_failures]
+        retry_note = ("each retry attempt counted separately"
+                      if self.retry_module else "retry module DISABLED — first attempt only")
+        if all_vf:
+            vf_counts = Counter(all_vf)
+            total_vf  = len(all_vf)
+            queries_with_vf = sum(1 for r in self.results if r.validation_failures)
+            print(f"\n🛡️  Validator Rule Violations  "
+                  f"({total_vf} triggers across {queries_with_vf} queries | {retry_note}):")
+            for rule, count in vf_counts.most_common():
+                pct = count / total_vf * 100
+                bar = "█" * max(1, round(pct / 5))
+                print(f"  {rule:<35} {count:3d}  ({pct:5.1f}%)  {bar}")
+        else:
+            print(f"\n🛡️  Validator Rule Violations: none  [{retry_note}]")
+
+        # ── 1. Top-level error type distribution ─────────────────────
+        print(f"\n📌 Failure Type Distribution:")
+        error_type_counts = Counter(r.error_type or "Unknown" for r in failed)
+        for etype, count in error_type_counts.most_common():
+            pct = count / total_failed * 100
+            bar = "█" * max(1, round(pct / 5))
+            print(f"  {etype:<40} {count:3d}  ({pct:5.1f}%)  {bar}")
+
+        # ── 2. Incorrect Result sub-analysis ─────────────────────────
+        incorrect = [r for r in failed if r.error_type == "Incorrect Result"]
+        if incorrect:
+            empty_gen   = [r for r in incorrect if not r.generated_results]
+            nonempty    = [r for r in incorrect if r.generated_results]
+            wrong_count = [r for r in nonempty
+                           if len(r.generated_results) != len(r.expected_results)]
+            same_count  = [r for r in nonempty
+                           if len(r.generated_results) == len(r.expected_results)]
+            print(f"\n📊 Incorrect Result Sub-Analysis  ({len(incorrect)} queries):")
+            print(f"  Generated 0 records (empty result)  : {len(empty_gen):3d}")
+            print(f"  Wrong record count                   : {len(wrong_count):3d}")
+            print(f"  Same count, wrong values             : {len(same_count):3d}")
+            if empty_gen:
+                print(f"\n  Queries that returned 0 records:")
+                for r in empty_gen:
+                    q_preview = r.question[:65] + ("…" if len(r.question) > 65 else "")
+                    print(f"    Q{r.question_id:<4} [{r.complexity:<6}] {q_preview}")
+
+        # ── 3. Syntax/Execution Error — Neo4j exception types ────────
+        syntax_errors = [r for r in failed if r.error_type == "Syntax/Execution Error"]
+        if syntax_errors:
+            print(f"\n🔎 Syntax/Execution Error Breakdown  ({len(syntax_errors)} queries):")
+            exc_types: Counter = Counter()
+            for r in syntax_errors:
+                msg = r.error_message or ""
+                # Pattern: "ExceptionName: ..." (Python exception str representation)
+                m = re.match(r'^([A-Za-z][A-Za-z0-9_]*(?:Error|Exception))', msg)
+                if m:
+                    exc_types[m.group(1)] += 1
+                else:
+                    # Neo4j wire format: "{code: Neo.ClientError.Statement.SyntaxError} ..."
+                    m2 = re.search(r'Neo\.[A-Za-z.]+', msg)
+                    exc_types[m2.group(0) if m2 else "Other/Unknown"] += 1
+            for exc, count in exc_types.most_common():
+                print(f"  {exc:<50}: {count:3d}")
+
+        # ── 4. Pipeline Error — embedded category breakdown ──────────
+        pipeline_errors = [r for r in failed
+                           if r.error_type and r.error_type.startswith("Pipeline Error")]
+        if pipeline_errors:
+            print(f"\n⚙️  Pipeline Error Breakdown  ({len(pipeline_errors)} queries):")
+            pe_cats: Counter = Counter()
+            for r in pipeline_errors:
+                # error_type is "Pipeline Error (category)"
+                m = re.search(r'\((.+)\)', r.error_type or "")
+                pe_cats[m.group(1) if m else "unknown"] += 1
+            for cat, count in pe_cats.most_common():
+                print(f"  {cat:<30}: {count:3d}")
+            # Show the distinct error messages to understand root causes
+            msg_counts: Counter = Counter(r.error_message or "" for r in pipeline_errors)
+            print(f"  Root-cause messages:")
+            for msg, count in msg_counts.most_common():
+                print(f"    [{count}x] {msg[:80]}")
+
+        # ── 5. Failures by complexity ─────────────────────────────────
+        print(f"\n📈 Failures by Complexity:")
+        for complexity in sorted(set(r.complexity for r in self.results)):
+            total_c  = sum(1 for r in self.results if r.complexity == complexity)
+            failed_c = sum(1 for r in failed    if r.complexity == complexity)
+            pct = failed_c / total_c * 100 if total_c else 0
+            bar = "█" * max(1, round(pct / 5))
+            print(f"  {complexity:<10}: {failed_c:3d} / {total_c:3d} failed  ({pct:5.1f}%)  {bar}")
 
     def _ask_user_validation(self, result: TestResult, item: Dict) -> bool:
         """Ask user if the generated query and results are correct."""

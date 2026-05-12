@@ -61,6 +61,7 @@ class CypherTranslator:
         max_validation_retries: int = DEFAULT_VALIDATION_RETRIES,
         llama_cpp_host: Optional[str] = None,
         llama_cpp_port: Optional[int] = None,
+        few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -112,7 +113,7 @@ class CypherTranslator:
         self.device = device
         self.temperature = temperature
         self.groq_api_key = None
-        self.selector = DynamicFewShotSelector(k=4)
+        self.selector = DynamicFewShotSelector(k=4, embedding_model=few_shot_embedding_model)
         
         # Initialize HuggingFace attributes 
         self.hf_model = None
@@ -158,6 +159,7 @@ class CypherTranslator:
         self.detailed_schema = DETAILED_SCHEMA  # always the full schema — never overwritten by slicing
         self.schema = DETAILED_SCHEMA           # may be temporarily replaced by a schema slice
         self.last_initial_prompt: Optional[str] = None  # prompt used on the first LLM call (captured for debugging)
+        self.last_validation_failures: list = []  # validator rule tags that fired during the last translate() call
         
         # Use imported prompt templates
         self.prompt = PromptTemplate(
@@ -566,7 +568,7 @@ class CypherTranslator:
                 return llm_response.content
             return str(llm_response)
 
-    def translate(self, user_query: str, temperature: Optional[float] = None) -> Optional[str]:
+    def translate(self, user_query: str, temperature: Optional[float] = None, query_vector=None) -> Optional[str]:
         """
         Translate natural language query to Cypher query using LangChain.
         
@@ -625,8 +627,8 @@ class CypherTranslator:
                 entity_summary = ", ".join([f"{t}:{n}" for t, n in sorted(entity_list, key=lambda x: (str(x[0]), str(x[1])))])
                 print(f"🔍 Entities: {entity_summary}")
         
-        # Step 2: Get few-shot examples
-        examples_str = self.selector.get_formatted_context(user_query)
+        # Step 2: Get few-shot examples (reuse pre-computed vector to avoid duplicate Nomic inference)
+        examples_str = self.selector.get_formatted_context(user_query, query_vector=query_vector)
         n_examples = len(examples_str.split('Example'))-1
         print(f"📚 Examples: {n_examples} retrieved")
         if examples_str.strip():
@@ -638,17 +640,58 @@ class CypherTranslator:
             # Update temperature if provided
             if temperature is not None and self.backend in ["ollama", "groq"]:
                 self.llm.temperature = temperature
-            
-            # Step 3: Initial LLM invocation
-            full_prompt = self.prompt.format(
-                schema=self.schema,
-                examples=examples_str,
-                entity_context=entity_context,
-                question=processed_query
-            )
+
+            # Step 3: Initial LLM invocation — with context-overflow fallback.
+            # If the assembled prompt is too long for the model's n_ctx, retry with
+            # progressively fewer few-shot examples (k → k//2 → 0) before giving up.
+            def _build_prompt(ex_str: str) -> str:
+                return self.prompt.format(
+                    schema=self.schema,
+                    examples=ex_str,
+                    entity_context=entity_context,
+                    question=processed_query,
+                )
+
+            def _is_context_overflow(exc: Exception) -> bool:
+                msg = str(exc).lower()
+                return "context length" in msg or "n_keep" in msg or "too many tokens" in msg
+
+            full_prompt = _build_prompt(examples_str)
             self.last_initial_prompt = full_prompt  # stored for benchmark error reporting
 
-            response = self._invoke_llm(full_prompt)
+            response = None
+            current_examples = examples_str
+            fallback_ks = [self.selector.k // 2, 0]  # e.g. 4 → [2, 0]
+            try:
+                response = self._invoke_llm(full_prompt)
+            except Exception as ctx_err:
+                if not _is_context_overflow(ctx_err):
+                    raise
+                for fallback_k in fallback_ks:
+                    if fallback_k > 0:
+                        fallback_docs = self.selector.vector_store.similarity_search_with_score(
+                            user_query, k=fallback_k
+                        )
+                        current_examples = self.selector.format_examples_as_string(
+                            [d.metadata for d, _ in fallback_docs],
+                            [self.selector._l2_to_similarity(s) for _, s in fallback_docs],
+                        )
+                        print(f"⚠ Context overflow — retrying with k={fallback_k} examples")
+                    else:
+                        current_examples = ""
+                        print("⚠ Context overflow — retrying with 0 examples")
+                    full_prompt = _build_prompt(current_examples)
+                    self.last_initial_prompt = full_prompt
+                    try:
+                        response = self._invoke_llm(full_prompt)
+                        break
+                    except Exception as retry_err:
+                        if not _is_context_overflow(retry_err):
+                            raise
+                if response is None:
+                    print("❌ Prompt too long even with 0 examples — skipping query.")
+                    return None
+
             cypher_query = self._clean_cypher(response)
             
             if not cypher_query:
@@ -658,13 +701,18 @@ class CypherTranslator:
             print(f"✓ Generated Cypher (attempt 1): {cypher_query}")
             
             # Step 4: Validate + retry loop
+            self.last_validation_failures = []
             for attempt in range(1, self.max_validation_retries + 1):
                 validation_result = self.validator.validate(cypher_query)
-                
+
                 if validation_result.is_valid:
                     print(f"✅ Validation passed (attempt {attempt})")
                     break
-                
+
+                # Record which rule fired for benchmark analytics
+                if validation_result.triggered_rule:
+                    self.last_validation_failures.append(validation_result.triggered_rule)
+
                 # Validation failed
                 error_summary = "\n".join(
                     [f"  - [SYNTAX] {e}" for e in validation_result.syntax_errors] +

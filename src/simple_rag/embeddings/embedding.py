@@ -21,18 +21,18 @@ class EmbedData:
     def generate_embedding(self, context):
         return self.model.get_text_embedding_batch(context)
         
-    def embed(self, texts: List[str], description: str = "Embedding") -> List[List[float]]:
+    def embed(self, texts: List[str], description: str = "Embedding", show_progress: bool = True) -> List[List[float]]:
         """
         Embeds a list of texts with a progress bar and error handling.
         """
         if not texts:
             return []
-            
+
         embeddings = []
         total_batches = (len(texts) + self.batch_size - 1) // self.batch_size
 
-        # TQDM is now inside the method for granular visibility
-        with tqdm(total=len(texts), desc=description, unit="doc") as pbar:
+        # Suppress tqdm for single-item calls (e.g. query embedding at inference time)
+        with tqdm(total=len(texts), desc=description, unit="doc", disable=not show_progress or len(texts) == 1) as pbar:
             for i in range(0, len(texts), self.batch_size):
                 batch = texts[i : i + self.batch_size]
                 try:

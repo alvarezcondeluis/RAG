@@ -15,129 +15,15 @@ Usage:
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from simple_rag.rag.query.query_classification import QueryClassifier, QueryCategory, LABELS
 from simple_rag.rag.text2cypher import CypherTranslator
 from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
+from simple_rag.rag.schema_slices import SCHEMA_SLICES, get_merged_schema
 from simple_rag.rag.context_enrichment import ContextEnricher
 
 logger = logging.getLogger(__name__)
-
-# ─── Schema slices ────────────────────────────────────────────────────────────
-# Each slice contains ONLY the subgraph relevant to its category,
-# keeping the LLM prompt small and focused.
-
-from typing import Dict
-
-SCHEMA_SLICES: Dict[str, str] = {
-
-    "fund_basic": """
-Relevant schema: 
-(:Provider /* properties: name */)-[:MANAGES]->(:Trust /* properties: name */)-[:ISSUES]->(f:Fund /* properties: ticker, name, expenseRatio, netAssets, turnoverRate, advisoryFees, numberHoldings, costsPer10k, securityExchange */)
-(:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass /* properties: name, description */)
-(:Fund)-[:HAS_CHART]->(:Image /* properties: category, svg, title */)
-(:Fund)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, accessionNumber */)
-(:Fund)-[:HAS_AVERAGE_RETURNS /* properties: date */]->(:AverageReturns /* properties: return1y, return5y, return10y, returnInception */)
-(:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT /* properties: year */]->(:FinancialHighlight /* properties: turnover, expenseRatio, totalReturn, netAssets, netAssetsValueBeginning, netAssetsValueEnd, netIncomeRatio */)
-(:Fund)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, reportingDate, accessionNumber */)
-(:Fund)-[r:HAS_SECTOR_ALLOCATION /* properties: weight, date */]->(:Sector /* properties: name */)
-(:Fund)-[r:HAS_REGION_ALLOCATION /* properties: weight, date */]->(:Region /* properties: name */)
-QUERY RULES:
-- For name searches use CALL db.index.fulltext.queryNodes('fundNameIndex', 'search_term')
-- For exact ticker matching use {ticker: 'VTI'} directly.
-- numberHoldings is pre-calculated — do NOT count holdings.
-- The year is on the RELATIONSHIP, not the node: use r.year.
-- turnover is absolute (2 = 2%, not 0.02).
-- Use the numberHoldings property of the Fund node to get the number of holdings.
-- ALWAYS return the source of the information via the EXTRACTED FROM document node.
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. STRICT SCHEMA ALIGNMENT: `netAssets` and `turnoverRate` are DIRECTLY on the `Fund` node. Do NOT look for them on Portfolio or FinancialHighlight nodes. `turnoverRate` is absolute (2 = 2%, not 0.02).
-2. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`. NEVER place `WHERE` after `RETURN`.
-3. COMPARING ENTITIES: When asked to compare multiple funds (e.g., "Compare VTI and VOO"), DO NOT match them into a single row. Return each fund as a separate row using `IN` (e.g., `WHERE f.ticker IN ['VTI', 'VOO'] RETURN f.ticker...`).
-4. LATEST / LAST DATA: When a user asks for the "last", "latest", or "current" metric, ALWAYS use `ORDER BY r.year DESC LIMIT 1`.
-5. HISTORICAL GROWTH (Since X years ago): To calculate growth over time, MATCH the highlights, order by year, `collect(fh)`, and compare `highlights[0]` (latest) to `highlights[X]` (previous). 
-6. DIVISION BY ZERO: When calculating percentages, ALWAYS use `CASE WHEN denominator = 0 THEN 0 ELSE (numerator * 100.0 / denominator) END`.
-7. INCOMPLETE FILTERS: NEVER generate empty or incomplete property filters like `(n:Label {name})`. Only include explicit values like `{name: 'Vanguard'}`.
-""",
-
-    "fund_portfolio": """
-Relevant schema:
-(:Fund /* properties: ticker, name */)-[:HAS_PORTFOLIO]->(p:Portfolio /* properties: date, seriesId, count */)
-(p)-[:HAS_HOLDING /* properties: shares, marketValue, weight, fairValueLevel, isRestricted, payoffProfile */]->(h:Holding /* properties: name, ticker, isin, lei, category, country, issuerCategory */)
-(h:Holding)-[:OF_ASSET_TYPE]->(:AssetCategory /* properties: code, name, type, subtype */)
-(:Holding)-[:REPRESENTS]->(:Company /* properties: ticker, name */)
-(p)-[:EXTRACTED_FROM]->(:Document /* properties: url, type, filingDate, reportingDate, accessionNumber */)
-QUERY RULES:
-- Use p.count for number of holdings — do NOT count holdings manually.
-- Weight on HAS_HOLDING is the portfolio weight.
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. STRICT SCHEMA ALIGNMENT: `payoffProfile`, `marketValue`, and `weight` are properties of the `[r:HAS_HOLDING]` relationship, NOT the `Holding` node. 
-2. INLINE MATH: NEVER use math operators (`>`, `<`, `gt`) inside curly braces in MATCH patterns (e.g., BAD: `[r:HAS_HOLDING {marketValue: > 10000}]`). ALWAYS use a `WHERE` clause (e.g., `WHERE r.marketValue > 10000`).
-3. DIVISION BY ZERO: When calculating percentage ratios, ALWAYS use `CASE WHEN total = 0 THEN 0 ELSE (part * 100.0 / total) END`.
-4. COMMAS: Ensure proper commas are placed between variables in the `RETURN` statement before aggregate functions (e.g., `RETURN a, COUNT(b)`).
-""",
-
-    "fund_profile": """
-Contains all the general information of the fund, like the objective the risks, the performance commentary, etc:
-(:Fund /* properties: ticker, name */)-[:DEFINED_BY /* properties: date */]->(:Profile /* properties: id, summaryProspectus */)
-(:Profile)-[:HAS_STRATEGY_CHUNK]->(:StrategyChunk /* properties: id, title, text, embedding */)
-(:Profile)-[:HAS_RISK_CHUNK]->(:RiskChunk /* properties: id, title, text, embedding */)
-(:Profile)-[:HAS_OBJECTIVE_CHUNK]->(:Objective /* properties: id, text, embedding */)
-(:Profile)-[:HAS_PERFORMANCE_COMMENTARY_CHUNK]->(:PerformanceCommentary /* properties: id, text, embedding */)
-(:Profile)-[:EXTRACTED_FROM]->(:Document /* properties: accessionNumber, url,reportingDate, filingDate */)
-
-QUERY RULES:
-- These nodes have embeddings — use vector search for semantic queries.
-- Vector indexes exist on embedding properties.
-- ALWAYS return ticker and name alongside the requested data.
-- Do NOT attempt to extract netAssets or numerical performance from these text nodes.
-""",
-
-    "company_filing": """
-Relevant schema:
-(:Company /* properties: ticker, name, cik */)-[:REPORTS_IN /* properties: year */]->(filing:Filing10K)
-(filing)-[:HAS_SECTION]->(:Section:RiskFactor /* properties: title, text, sectionType, secItem */)
-(filing)-[:HAS_SECTION]->(:Section:BusinessInformation /* properties: title, text, sectionType, secItem */)
-(filing)-[:HAS_SECTION]->(:Section:ManagementDiscussion /* properties: title, text, sectionType, secItem */)
-(filing)-[:HAS_SECTION]->(:Section:LegalProceeding /* properties: title, text, sectionType, secItem */)
-(filing)-[:HAS_SECTION]->(:Section:Properties /* properties: title, text, sectionType, secItem */)
-(:Section)-[:HAS_CHUNK]->(:Chunk:SectionChunk /* properties: title, text, embedding, chunkType */)
-(filing)-[:HAS_FINACIALS]->(fin:Section:Financials /* properties: incomeStatement, balanceSheet, cashFlow, fiscalYear */)
-(fin)-[:HAS_METRIC]->(:FinancialMetric /* properties: label, value */)
-(:FinancialMetric)-[:HAS_SEGMENT]->(:Segment /* properties: label, value, percentage */)
-(filing)-[:EXTRACTED_FROM]->(:Document /* properties: accession_number, url, filing_date */)
-
-QUERY RULES:
-- Company ticker is a stock ticker like 'AAPL', 'MSFT'.
-- The relationship is HAS_FINACIALS (with one 'N').
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`. NEVER place `WHERE` after `RETURN`.
-2. LATEST FILING: When asked for the "latest" or "newest" filing/metrics, use `ORDER BY filing.date DESC LIMIT 1`.
-""",
-
-    "company_people": """
-Relevant schema:
-(:Fund /* properties: ticker, name */)-[:MANAGED_BY /* properties: date */]->(:Person /* properties: name */)
-(:Company /* properties: ticker, name, cik */)-[:HAS_CEO /* properties: ceoCompensation, ceoActuallyPaid, date */]->(:Person /* properties: name */)
-(:Company)-[:HAS_INSIDER_TRANSACTION]->(:InsiderTransaction /* properties: position, transactionType, shares, price, value, remainingShares */)-[:MADE_BY]->(:Person /* properties: name */)
-(:Person)-[:RECEIVED_COMPENSATION]->(:CompensationPackage /* properties: totalCompensation, shareholderReturn, date */)
-(:CompensationPackage)-[:AWARDED_BY]->(:Company)
-
-QUERY RULES:
-- Fund managers are linked via MANAGED_BY.
-- Company CEOs are linked via HAS_CEO.
-- Use personNameIndex for fuzzy person name search.
-
-CRITICAL CYPHER SYNTAX & LOGIC RULES:
-1. WHERE CLAUSE POSITION: `WHERE` must immediately follow `MATCH` or `WITH`. NEVER place `WHERE` after `RETURN`.
-2. INLINE MATH: NEVER use math operators (`>`, `<`) inside node patterns. Use `WHERE` clauses.
-""",
-
-}
 
 
 # ─── Result container ─────────────────────────────────────────────────────────
@@ -154,6 +40,7 @@ class QueryResult:
     error: Optional[str] = None
     requires_vector_search: bool = False
     enrichment: Dict[str, Any] = field(default_factory=dict)
+    query_embedding: Optional[List[float]] = None  # eager-embedded; passed as $queryVector at exec time
 
 
 # ─── Handler ──────────────────────────────────────────────────────────────────
@@ -182,6 +69,11 @@ class QueryHandler:
         cypher_backend: str = "ollama",
         cypher_model: str = "llama3.1:8b",
         confidence_threshold: float = 0.45,
+        embedder=None,
+        embedder_model: str = "nomic-ai/nomic-embed-text-v1.5",
+        enable_query_embedding: bool = True,
+        default_k: int = 5,
+        few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
         **cypher_kwargs,
     ):
         # ── Classifier ──────────────────────────────────────────────
@@ -196,11 +88,34 @@ class QueryHandler:
             neo4j_driver=neo4j_driver,
             model_name=cypher_model,
             backend=cypher_backend,
+            few_shot_embedding_model=few_shot_embedding_model,
             **cypher_kwargs,
         )
 
         self.neo4j_driver = neo4j_driver
         self.confidence_threshold = confidence_threshold
+
+        # ── Query embedder (eager — every query is embedded so vector search is always available) ──
+        self.enable_query_embedding = enable_query_embedding
+        self.default_k = default_k
+        self._embedder = None
+        self._embedder_model = embedder_model
+        # Only reuse the pre-computed query vector for few-shot if both models are identical.
+        # If they differ, dimensions/semantics won't match the FAISS index.
+        self._few_shot_reuse_vector = (few_shot_embedding_model == embedder_model)
+        self._embedding_cache: Dict[str, List[float]] = {}
+        if enable_query_embedding:
+            if embedder is not None:
+                self._embedder = embedder
+                print("✓ Query embedder injected")
+            else:
+                from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+                self._embedder = HuggingFaceEmbedding(
+                    model_name=embedder_model,
+                    trust_remote_code=True,
+                    cache_folder="./cache",
+                )
+                print(f"✓ Query embedder loaded: {embedder_model}")
 
         # Context enrichment engine (reuses the translator's entity resolver)
         self.enricher = ContextEnricher(
@@ -209,6 +124,20 @@ class QueryHandler:
         )
 
         print("✓ QueryHandler ready")
+
+    def _embed_query(self, query: str) -> Optional[List[float]]:
+        """Embed a user query for vector search. Cached on the query string."""
+        if not self.enable_query_embedding or self._embedder is None:
+            return None
+        if query in self._embedding_cache:
+            return self._embedding_cache[query]
+        try:
+            embedding = self._embedder.get_query_embedding(query)
+            self._embedding_cache[query] = embedding
+            return embedding
+        except Exception as e:
+            logger.warning(f"Query embedding failed: {e}")
+            return None
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -239,7 +168,18 @@ class QueryHandler:
         """
         import time
         start_pipeline = time.time()
-        
+
+        # Step 0 — embed the query.
+        # Nomic ($queryVector) is only needed when execute=True — skip it during benchmarking.
+        # MiniLM (few-shot FAISS) is embedded later inside translate(), only if needed.
+        query_embedding = None
+        if execute and self.enable_query_embedding:
+            start_embedding = time.time()
+            query_embedding = self._embed_query(user_query)
+            embedding_time = time.time() - start_embedding
+            if query_embedding is not None:
+                print(f"🧬 Query embedded ({len(query_embedding)}d) in {embedding_time*1000:.0f}ms")
+
         # Step 1 — classify
         start_classification = time.time()
         prediction = self.classifier.predict(user_query)
@@ -272,14 +212,8 @@ class QueryHandler:
             schema_slice = SCHEMA_SLICES.get(active_labels[0], "")
             print(f"→ Single label: {active_labels[0]} ({confidence:.2%})")
         else:
-            # Merge all active schema slices
             selected_schema_name = " + ".join(active_labels)
-            parts = []
-            for lbl in active_labels:
-                s = SCHEMA_SLICES.get(lbl, "")
-                if s:
-                    parts.append(f"=== Schema: {lbl} ===\n{s}")
-            schema_slice = "\n\n".join(parts)
+            schema_slice = get_merged_schema(active_labels)
             print(f"🔀 Multi-label: [{', '.join(active_labels)}] — merging schemas")
 
         # Step 3 — build result container
@@ -288,6 +222,7 @@ class QueryHandler:
             category=top_label,
             confidence=confidence,
             schema_used=selected_schema_name,
+            query_embedding=query_embedding,
         )
 
         # fund_profile → also flag vector search
@@ -304,7 +239,8 @@ class QueryHandler:
             
         start_translation = time.time()
         cypher = self._translate_with_schema(
-            user_query, effective_schema, temperature=temperature
+            user_query, effective_schema, temperature=temperature,
+            query_vector=query_embedding if self._few_shot_reuse_vector else None,
         )
         translation_time = time.time() - start_translation
         result.cypher = cypher
@@ -313,9 +249,12 @@ class QueryHandler:
             result.error = "Failed to generate Cypher query."
             return result
 
-        # Step 5 — optionally execute
+        # Step 5 — optionally execute (always pass $queryVector + $k; Neo4j ignores unused params)
         if execute and cypher:
-            result.data = self._execute(cypher)
+            params = {"k": self.default_k}
+            if query_embedding is not None:
+                params["queryVector"] = query_embedding
+            result.data = self._execute(cypher, parameters=params)
 
         # Step 6 — context enrichment (supplementary queries for richer LLM context)
         if execute and result.data is not None:
@@ -340,6 +279,7 @@ class QueryHandler:
         user_query: str,
         schema_slice: str,
         temperature: Optional[float] = None,
+        query_vector=None,
     ) -> Optional[str]:
         """
         Temporarily swap the translator's schema, call translate(),
@@ -348,15 +288,16 @@ class QueryHandler:
         original_schema = self.translator.schema
         try:
             self.translator.schema = schema_slice
-            return self.translator.translate(user_query, temperature=temperature)
+            return self.translator.translate(user_query, temperature=temperature, query_vector=query_vector)
         finally:
             self.translator.schema = original_schema
 
-    def _execute(self, cypher: str) -> Any:
-        """Run a Cypher query and return the result rows."""
+    def _execute(self, cypher: str, parameters: Optional[Dict[str, Any]] = None) -> Any:
+        """Run a Cypher query (with optional parameters) and return the result rows."""
+        params = parameters or {}
         try:
             with self.neo4j_driver.session() as session:
-                records = session.run(cypher)
+                records = session.run(cypher, **params)
                 return [dict(record) for record in records]
         except Exception as e:
             logger.error(f"Cypher execution failed: {e}")

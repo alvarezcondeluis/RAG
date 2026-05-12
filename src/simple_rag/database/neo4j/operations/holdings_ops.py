@@ -183,7 +183,7 @@ class HoldingsOperations(Neo4jDatabaseBase):
                 cat.category = row.category_type,
                 cat.subcategory = row.category_subcategory,
                 cat.createdAt = timestamp()
-            MERGE (h)-[:IN_CATEGORY]->(cat)
+            MERGE (h)-[:OF_ASSET_TYPE]->(cat)
         )
 
         FOREACH (_ IN CASE WHEN row.ticker IS NOT NULL AND row.ticker <> '' THEN [1] ELSE [] END |

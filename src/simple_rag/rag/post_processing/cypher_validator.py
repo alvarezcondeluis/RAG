@@ -1,13 +1,23 @@
 """
 Cypher Query Validator Module.
 
-Uses cypher-guard for syntax checking (check_syntax, is_read, is_write)
-and implements custom lightweight schema validation.
+Validates Cypher queries for:
+1. READ-ONLY safety (no write operations allowed)
+2. Syntax correctness (via Neo4j EXPLAIN)
+3. Schema compliance (valid labels, properties, relationships)
+
+SECURITY FEATURE: Write Operations Blocked
+- By default, block_writes=True prevents all data modification
+- Blocks: CREATE, MERGE, DELETE, SET, REMOVE, DROP, ALTER
+- Only READ-ONLY queries allowed: MATCH, RETURN, WHERE, etc.
+- Protects against accidental or malicious data changes
+
+Uses cypher-guard for syntax checking and implements custom lightweight schema validation.
 
 NOTE: cypher-guard's validate_cypher() hangs on certain queries and is NOT used.
 NOTE: cypher-guard outputs verbose Rust DEBUG traces to stdout. When running
       benchmarks, redirect stdout or use `2>/dev/null | grep` to filter noise.
-      This module itself does NOT attempt to suppress Rust output because 
+      This module itself does NOT attempt to suppress Rust output because
       OS-level fd redirection causes deadlocks with the Rust runtime.
 """
 
@@ -28,6 +38,7 @@ class ValidationResult:
     schema_errors: List[str] = field(default_factory=list)
     is_read_query: Optional[bool] = None
     is_write_query: Optional[bool] = None
+    triggered_rule: Optional[str] = None  # short tag identifying which check fired first
 
     @property
     def all_errors(self) -> List[str]:
@@ -181,15 +192,31 @@ class CypherValidator:
         "EXTRACTED_FROM": {"date"},
     }
 
+    # Write operations that are blocked
+    BLOCKED_WRITE_KEYWORDS = [
+        "CREATE ", "CREATE(",
+        "MERGE ", "MERGE(",
+        "DELETE ", "DETACH DELETE",
+        "SET ",
+        "REMOVE ",
+        "DROP ",
+        "ALTER ",
+    ]
+
     def __init__(self, neo4j_driver=None, block_writes: bool = True, use_syntax_check: bool = True):
         """
         Initialize the CypherValidator.
-        
+
         Args:
             neo4j_driver: Neo4j driver instance to run EXPLAIN queries for validation.
-            block_writes: If True, mark write queries as invalid.
+            block_writes: If True, mark write queries as invalid (DEFAULT: True).
+                         This prevents all CREATE, DELETE, MERGE, SET, REMOVE operations.
             use_syntax_check: If True, use Neo4j EXPLAIN for syntax checking.
                              Set to False to skip syntax check (faster, less noise).
+
+        Security Note:
+            By default, block_writes=True ensures that only READ-only queries are allowed.
+            This prevents any accidental or malicious data modification.
         """
         self.driver = neo4j_driver
         self.block_writes = block_writes
@@ -218,6 +245,7 @@ class CypherValidator:
         inline_math = re.search(r'\{[^}]*(?:[<>]=?|!=)\s*[\d\w\'"]', query)
         if inline_math:
             result.is_valid = False
+            result.triggered_rule = "INLINE_MATH"
             result.syntax_errors.append(
                 "INLINE MATH ERROR: You used a comparison operator (>, <, >=, <=, !=) "
                 "inside curly braces in a MATCH pattern. This is invalid Cypher syntax. "
@@ -236,6 +264,7 @@ class CypherValidator:
         )
         if null_check_in_braces:
             result.is_valid = False
+            result.triggered_rule = "NULL_IN_BRACES"
             result.syntax_errors.append(
                 "NULL CHECK IN BRACES ERROR: You used IS NOT NULL, IS NULL, or NOT NULL "
                 "inside curly braces {}. Property maps only accept exact values (strings, numbers, booleans), "
@@ -254,6 +283,7 @@ class CypherValidator:
         )
         if operator_in_braces:
             result.is_valid = False
+            result.triggered_rule = "OPERATOR_IN_BRACES"
             result.syntax_errors.append(
                 "OPERATOR IN BRACES ERROR: You used a conditional operator (CONTAINS, STARTS WITH, ENDS WITH, IN) "
                 "inside curly braces {}. Property maps only accept exact values for equality matching. "
@@ -267,6 +297,7 @@ class CypherValidator:
         where_after_return = re.search(r'\bRETURN\b.+\bWHERE\b', query, re.IGNORECASE | re.DOTALL)
         if where_after_return:
             result.is_valid = False
+            result.triggered_rule = "WHERE_AFTER_RETURN"
             result.syntax_errors.append(
                 "CLAUSE ORDER ERROR: You placed a WHERE clause after RETURN. "
                 "In Cypher, WHERE must come before RETURN (right after MATCH/WITH). "
@@ -286,6 +317,7 @@ class CypherValidator:
         if where_agg:
             agg_fn = where_agg.group(1).upper()
             result.is_valid = False
+            result.triggered_rule = "AGGREGATE_IN_WHERE"
             result.syntax_errors.append(
                 f"AGGREGATE IN WHERE ERROR: You used {agg_fn}() inside a WHERE clause. "
                 "Aggregate functions (COUNT, SUM, AVG, MIN, MAX) cannot be used in WHERE predicates. "
@@ -301,6 +333,7 @@ class CypherValidator:
         count_then_rel = re.search(r'\bcount\s*\([^)]*\)\s*-\s*\[', query, re.IGNORECASE)
         if count_then_rel:
             result.is_valid = False
+            result.triggered_rule = "AGGREGATE_TRAVERSAL"
             result.syntax_errors.append(
                 "AGGREGATE TRAVERSAL ERROR: You used count(...)-[:REL]->... which is invalid. "
                 "count() returns a number, not a node — you cannot traverse a relationship from it. "
@@ -311,12 +344,50 @@ class CypherValidator:
             )
             return result
 
+        # Step 0e: Catch undefined relationship variables
+        # Find all relationship variable usages (e.g., r.weight, r.year)
+        undefined_rel_vars = self._check_undefined_relationship_variables(query)
+        if undefined_rel_vars:
+            result.is_valid = False
+            result.triggered_rule = "UNDEFINED_REL_VAR"
+            for var_name, property_names in undefined_rel_vars.items():
+                result.syntax_errors.append(
+                    f"UNDEFINED RELATIONSHIP VARIABLE ERROR: You used '{var_name}.{property_names[0]}' "
+                    f"but the relationship variable '{var_name}' is not defined in your MATCH pattern.\n"
+                    f"   In Cypher, you must capture relationship variables in square brackets: [r:REL_TYPE]\n"
+                    f"   BAD:  MATCH (f:Fund)-[:HAS_REGION_ALLOCATION]->(g:Region) "
+                    f"RETURN g.name, r.weight\n"
+                    f"   GOOD: MATCH (f:Fund)-[r:HAS_REGION_ALLOCATION]->(g:Region) "
+                    f"RETURN g.name AS region, r.weight AS weight\n"
+                    f"   The variable '{var_name}' is referenced in your RETURN/WHERE/ORDER BY clause, "
+                    f"so you MUST add it to the relationship pattern as [{var_name}:REL_TYPE]."
+                )
+            return result
+
         # Step 1: Write detection (keyword-based, no cypher-guard needed)
         self._classify_query(query, result)
         if self.block_writes and result.is_write_query:
             result.is_valid = False
+            result.triggered_rule = "WRITE_OPERATION"
+            # Extract which write operation was detected
+            write_op = None
+            upper = query.upper()
+            for kw in self.BLOCKED_WRITE_KEYWORDS:
+                if kw.strip() in upper:
+                    write_op = kw.strip()
+                    break
+
             result.syntax_errors.append(
-                "Write operations (CREATE, MERGE, DELETE, SET) are not allowed"
+                f"❌ WRITE OPERATION BLOCKED: {write_op or 'WRITE'}\n"
+                f"   This system only allows READ-ONLY Cypher queries (MATCH, RETURN, WHERE, etc.)\n"
+                f"   Write operations are disabled to protect the database:\n"
+                f"   - CREATE: Cannot create new nodes or relationships\n"
+                f"   - DELETE: Cannot delete nodes or relationships\n"
+                f"   - MERGE: Cannot create or update data\n"
+                f"   - SET: Cannot modify properties\n"
+                f"   - REMOVE: Cannot remove properties\n"
+                f"   - DROP: Cannot drop indexes or constraints\n"
+                f"   Please reformulate your query using only MATCH, WHERE, RETURN, and other read-only clauses."
             )
             return result
 
@@ -330,6 +401,14 @@ class CypherValidator:
         self._validate_schema_lightweight(query, result)
         if result.schema_errors:
             result.is_valid = False
+            unknown_labels = [e for e in result.schema_errors if e.startswith("Unknown node label")]
+            unknown_rels   = [e for e in result.schema_errors if e.startswith("Unknown relationship type")]
+            if unknown_labels and unknown_rels:
+                result.triggered_rule = "UNKNOWN_LABEL+UNKNOWN_REL_TYPE"
+            elif unknown_labels:
+                result.triggered_rule = "UNKNOWN_LABEL"
+            else:
+                result.triggered_rule = "UNKNOWN_REL_TYPE"
 
         return result
 
@@ -361,15 +440,63 @@ class CypherValidator:
         except Exception as e:
             error_name = type(e).__name__
             result.syntax_errors.append(f"{error_name}: {e}")
+            result.triggered_rule = "NEO4J_SYNTAX"
             return False
 
     def _classify_query(self, query: str, result: ValidationResult):
-        """Classify query as read or write using keyword detection."""
+        """
+        Classify query as read or write using keyword detection.
+
+        Write operations are detected by looking for keywords that modify data:
+        - CREATE / CREATE() - Creates new nodes or relationships
+        - MERGE / MERGE() - Creates or updates nodes/relationships
+        - DELETE / DETACH DELETE - Deletes nodes or relationships
+        - SET - Updates node/relationship properties
+        - REMOVE - Removes node/relationship properties or labels
+        - DROP - Drops indexes or constraints
+        - ALTER - Modifies database structure
+
+        Only MATCH, RETURN, WITH, WHERE, ORDER BY, LIMIT, SKIP are allowed (read-only).
+        """
         upper = query.upper()
-        write_keywords = ["CREATE ", "CREATE(", "MERGE ", "MERGE(", 
-                          "DELETE ", "SET ", "REMOVE ", "DROP "]
-        result.is_write_query = any(kw in upper for kw in write_keywords)
+        result.is_write_query = any(kw in upper for kw in self.BLOCKED_WRITE_KEYWORDS)
         result.is_read_query = not result.is_write_query
+
+    def _check_undefined_relationship_variables(self, query: str) -> Dict[str, List[str]]:
+        """
+        Check if relationship variables are used but not defined.
+
+        Returns a dict of {variable_name: [property1, property2, ...]} for undefined vars.
+        Example: {'r': ['weight', 'year']} means r.weight and r.year are used but r is not defined.
+        """
+        # Extract all relationship variables defined in MATCH patterns: [r:REL_TYPE]
+        defined_rel_vars = set()
+        rel_def_pattern = re.compile(r'\[\s*([a-zA-Z_]\w*)\s*:\s*[A-Z_]')
+        for match in rel_def_pattern.finditer(query):
+            defined_rel_vars.add(match.group(1))
+
+        # Extract all relationship variable usages: r.property, r.year, etc.
+        # Look in RETURN, WHERE, ORDER BY, WITH clauses
+        used_rel_vars = {}
+        rel_usage_pattern = re.compile(r'\b([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\b')
+
+        for match in rel_usage_pattern.finditer(query):
+            var_name = match.group(1)
+            property_name = match.group(2)
+
+            # Skip node variables (f, g, h, p, c, etc.) - these are typically single letters
+            # We're looking for relationship variables that are used but not defined
+            # Check if this variable is used in a context that suggests it's a relationship variable
+            # (i.e., used for properties that are typically on relationships like weight, year)
+            if property_name in {'weight', 'year', 'date', 'ceoCompensation', 'ceoActuallyPaid',
+                                'shares', 'marketValue', 'currency', 'fairValueLevel',
+                                'isRestricted', 'payoffProfile'}:
+                if var_name not in defined_rel_vars:
+                    if var_name not in used_rel_vars:
+                        used_rel_vars[var_name] = []
+                    used_rel_vars[var_name].append(property_name)
+
+        return used_rel_vars
 
     def _validate_schema_lightweight(self, query: str, result: ValidationResult):
         """
@@ -410,7 +537,7 @@ def get_validator(neo4j_driver=None, block_writes: bool = True) -> CypherValidat
 def validate_cypher(query: str, neo4j_driver=None) -> ValidationResult:
     """
     Convenience function to validate a Cypher query.
-    
+
     Example:
         >>> from simple_rag.rag.post_processing.cypher_validator import validate_cypher
         >>> result = validate_cypher("MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name")
@@ -418,3 +545,24 @@ def validate_cypher(query: str, neo4j_driver=None) -> ValidationResult:
         True
     """
     return get_validator(neo4j_driver).validate(query)
+
+
+def is_read_only_query(query: str) -> bool:
+    """
+    Check if a query is read-only (no write operations).
+
+    Returns:
+        True if query contains no write operations (CREATE, DELETE, MERGE, SET, etc.)
+        False if query would modify data
+
+    Example:
+        >>> is_read_only_query("MATCH (f:Fund) RETURN f.name")
+        True
+        >>> is_read_only_query("CREATE (f:Fund) RETURN f")
+        False
+    """
+    validator = CypherValidator(block_writes=True)
+    temp_result = ValidationResult(is_valid=True, original_query=query)
+    validator._classify_query(query, temp_result)
+    # Return True if it's a read query (no write detected)
+    return not temp_result.is_write_query

@@ -17,15 +17,15 @@
   },
   {
     "question": "What is the net assets value for VTI?",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, f.name, fh.netAssets ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, f.name, fh.netAssetsValueEnd ORDER BY r.year DESC"
   },
   {
     "question": "Show funds with expense ratio over 0.5%",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio > 0.5 RETURN f.ticker, f.name, fh.expenseRatio ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio > 0.5 RETURN f.ticker, f.name, fh.expenseRatio, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Does VTI have turnover higher than 10%?",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, fh.turnover > 10 AS isHighTurnover ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker, fh.turnover > 10 AS isHighTurnover, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Which funds have more than 5000 holdings?",
@@ -40,8 +40,8 @@
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count AS holdingsCount, f.ticker AS ticker, f.name AS fundName"
   },
   {
-    "question": "Which funds are issued by 'Vanguard Index Funds'?",
-    "cypher": "MATCH (t:Trust {name: 'Vanguard Index Funds'})-[:ISSUES]->(f:Fund) RETURN f.ticker, f.name"
+    "question": "Which funds are issued by Vanguard Index Funds?",
+    "cypher": "MATCH (t:Trust)-[:ISSUES]->(f:Fund) WHERE t.name CONTAINS 'Vanguard Index Funds' RETURN f.ticker, f.name"
   },
   {
     "question": "Find funds managed by Vangurd",
@@ -65,7 +65,7 @@
   },
   {
     "question": "Which people or actual human beings manage the Vanguard Growth fund?",
-    "cypher": "MATCH (f:Fund {name: 'Vanguard Growth Index Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName"
+    "cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'Vanguard Growth') YIELD node AS f, score WITH f ORDER BY score DESC LIMIT 1 MATCH (f)-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName"
   },
   {
     "question": "Does VTI have any image attached to it?",
@@ -76,12 +76,12 @@
     "cypher": "MATCH (f:Fund {ticker: 'VTI'}) RETURN f.securityExchange AS exchange"
   },
   {
-    "question": "What is the objective of 'nameofFund'?",
-    "cypher": "MATCH (f:Fund {name: 'nameofFund'})-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective"
+    "question": "What is the objective of the healthcare fund?",
+    "cypher": "MATCH (f:Fund) WHERE toLower(f.name) CONTAINS 'health' MATCH (f)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective"
   },
   {
     "question": "Show me all general information about VTI including financial highlights, profile details, and images",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile) OPTIONAL MATCH (f)-[:HAS_CHART]->(img:Image) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker, f.name, f.securityExchange, fh.expenseRatio, fh.turnover, port.count AS numberHoldings, fh.netAssets, fh.advisoryFees, fh.totalReturn, prof.summaryProspectus, collect(img.title) AS images"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Show me all the funds that have more than 15% invested in Technology and return the funds with distinct in the property name",
@@ -90,10 +90,6 @@
   {
     "question": "Show me the ordered list of funds in decreasing order of the 10 year returns",
     "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(p:AverageReturns) WHERE p.return10y IS NOT NULL RETURN f.name AS fundName, p.return10y AS tenYearReturn ORDER BY tenYearReturn DESC"
-  },
-  {
-    "question": "Show me the tickers of the 'S&P 500' related funds and the main information about each one of them",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'S&P 500' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, f.securityExchange AS exchange, fh.advisoryFees AS fee, p.count AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What percentage of VTI's holdings are US-based companies?",
@@ -217,15 +213,15 @@
   },
   {
     "question": "Return both the expense ratio and the turnover rate for VTI.",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What is the net assets for the fund IMTB?",
-    "cypher": "MATCH (f:Fund {ticker: 'IMTB'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssets AS netAssets ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'IMTB'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssets AS netAssets, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Return the net assets and total number of holdings for the Vanguard Dividend Appreciation fund.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Dividend Appreciation' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS name, fh.netAssets AS netAssets, p.count AS totalHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Dividend Appreciation' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS name, fh.netAssets AS netAssets, p.count AS totalHoldings, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Show me the revenue segments from the 10-K of Amazon.",
@@ -280,8 +276,108 @@
     "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE ar.returnInception IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, ar.returnInception AS returnSinceInception ORDER BY ar.returnInception DESC LIMIT 1"
   },
   {
+    "question": "What are the properties owned by Apple?",
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS sectionTitle, s.text AS properties"
+  },
+  {
+    "question": "Where does Microsoft have its offices and physical facilities?",
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS sectionTitle, s.text AS facilities, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What real estate or facilities does Google disclose in its 10-K?",
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS title, s.text AS propertiesText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Describe the manufacturing plants and facilities mentioned in Tesla's annual report.",
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS sectionTitle, s.text AS facilitiesDescription, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What distribution centers and warehouses does Amazon have according to its 10-K?",
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS sectionTitle, s.text AS propertiesText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What are the main business activities of Apple according to its 10-K?",
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Describe the business model of Microsoft as disclosed in its latest annual report.",
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessDescription, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What products and services does Google offer according to its 10-K business section?",
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS title, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "How does Tesla describe its operations and business in its 10-K filing?",
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessDescription, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Tell me about the business segments and operations of Amazon from its 10-K.",
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What are the main risks Apple faces according to its 10-K?",
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskDescription, r.year AS year ORDER BY r.year DESC"
+  },
+  {
+    "question": "What risk factors does Microsoft disclose in its latest annual filing?",
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskDescription, r.year AS year ORDER BY r.year DESC LIMIT 10"
+  },
+  {
+    "question": "List all key risks mentioned in Google's 10-K risk factor section.",
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskText, r.year AS year ORDER BY r.year DESC"
+  },
+  {
+    "question": "What risks does Tesla disclose in its 10-K filing?",
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskDescription, r.year AS year ORDER BY r.year DESC"
+  },
+  {
+    "question": "What does Amazon say are the risks to its business in its annual report?",
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskText, r.year AS year ORDER BY r.year DESC"
+  },
+  {
+    "question": "What does Apple's management say about the company's financial performance?",
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion) RETURN s.title AS sectionTitle, s.text AS managementDiscussion, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Show me the management discussion and analysis from Microsoft's 10-K.",
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion) RETURN s.title AS sectionTitle, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What is management's analysis of Google's financial results and business outlook?",
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion) RETURN s.title AS title, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What does Tesla's management discuss about their liquidity and capital resources in the 10-K?",
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion) RETURN s.title AS sectionTitle, s.text AS managementDiscussion, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "How does Amazon's management explain the evolution of their revenues in the latest filing?",
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion) RETURN s.title AS sectionTitle, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Are there any ongoing lawsuits or legal cases against Apple?",
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What legal proceedings is Microsoft currently involved in?",
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Does Google have any pending lawsuits disclosed in its 10-K?",
+    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What legal matters has Tesla disclosed in its latest annual report?",
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Show me the legal proceedings from Amazon's most recent 10-K filing.",
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+  },
+  {
     "question": "What is the average expense ratio across all funds managed by Vanguard?",
-    "cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN avg(fh.expenseRatio) AS avgExpenseRatio"
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund) WHERE p.name CONTAINS 'Vanguard' OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN avg(fh.expenseRatio) AS avgExpenseRatio"
   },
   {
     "question": "Which fund has the best 1-year return among Bond funds?",
@@ -289,11 +385,11 @@
   },
   {
     "question": "How many different trusts does Vanguard manage?",
-    "cypher": "MATCH (p:Provider {name: 'The Vanguard Group, Inc'})-[:MANAGES]->(t:Trust) RETURN count(t) AS trustCount"
+    "cypher": "MATCH (p:Provider)-[:MANAGES]->(t:Trust) WHERE p.name CONTAINS 'Vanguard' RETURN count(t) AS trustCount"
   },
   {
     "question": "What is the management discussion from the 10-K filing for Amazon?",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(md:Section:ManagementDiscussion) RETURN md.text AS managementDiscussion LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(md:Section:ManagemetDiscussion) RETURN md.text AS managementDiscussion LIMIT 5"
   },
   {
     "question": "Show me the legal proceedings from the 10-K for Microsoft.",
@@ -320,6 +416,10 @@
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn < 0 RETURN r.year AS year, fh.totalReturn AS totalReturn ORDER BY year DESC"
   },
   {
+    "question": "Search Microsoft's 10-K filings for information regarding their cloud computing growth, Azure performance, and server products.",
+    "cypher": "CALL db.index.vector.queryNodes('chunk_vector_index', 5, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)<-[:HAS_SECTION]-(f:Filing10k)<-[:REPORTS_IN]-(c:Company) WHERE c.ticker = 'MSFT' RETURN chunk.text AS text, s.title AS sectionTitle, f.year AS filingYear, score ORDER BY score DESC"
+  },
+  {
     "question": "What are the advisory fees for VTI?",
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.advisoryFees AS advisoryFees ORDER BY r.year DESC LIMIT 1"
   },
@@ -341,11 +441,11 @@
   },
   {
     "question": "Compare the expense ratio and turnover rate of VTI and VOO.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VTI', 'VOO'] RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VTI', 'VOO'] RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Show me the main details for both VOO and VGT funds.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VOO', 'VGT'] OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, p.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VOO', 'VGT'] OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, p.count AS numberHoldings, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What is the payoff profile of the top holding in VTI?",
@@ -369,11 +469,11 @@
   },
   {
     "question": "Show me general information about the VIG fund.",
-    "cypher": "MATCH (f:Fund {ticker: 'VIG'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.turnover AS turnoverRate, p.count AS numberHoldings, fh.advisoryFees AS advisoryFees, f.securityExchange AS exchange ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VIG'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Give me the main details for the VOO fund.",
-    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets, fh.turnover AS turnoverRate, p.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, port.count AS numberHoldings, prov.name AS provider, t.name AS trust, o.text AS objective, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Which funds share the same source document?",
@@ -389,7 +489,7 @@
   },
   {
     "question": "Which funds have net assets greater than 1 million?",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssets > 1000000 RETURN f.ticker, fh.netAssets ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssets > 1000000 RETURN f.ticker, fh.netAssets, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Show me the top 5 holdings in VTI with their weight, market value, shares, and payoff profile.",
@@ -405,7 +505,7 @@
   },
   {
     "question": "Show me the expense ratio, turnover, net assets, and number of holdings for VTI.",
-    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, fh.netAssets AS netAssets, p.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, fh.netAssets AS netAssets, p.count AS numberHoldings, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "How has the expense ratio for BND shifted across the available financial highlight years?",
@@ -413,15 +513,15 @@
   },
   {
     "question": "Give me the cost and fee data for both the VOO and VIG funds.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VOO', 'VIG'] RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VOO', 'VIG'] RETURN f.ticker AS ticker, f.name AS name, fh.expenseRatio AS expenseRatio, fh.turnover AS turnoverRate, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What is the current total assets figure for the BND fund?",
-    "cypher": "MATCH (f:Fund {ticker: 'BND'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssets AS netAssets ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund {ticker: 'BND'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN fh.netAssets AS netAssets, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Give me the assets under management and number of holdings for the Total Bond Market fund.",
-    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Total Bond Market' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS name, fh.netAssets AS netAssets, p.count AS totalHoldings ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.name CONTAINS 'Total Bond Market' OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS name, fh.netAssets AS netAssets, p.count AS totalHoldings, r.year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What does the prospectus text say for the VOO fund?",
@@ -472,8 +572,24 @@
     "cypher": "MATCH (c:Company {ticker: 'AAPL'})<-[:AWARDED_BY]-(cp:CompensationPackage) RETURN cp.totalCompensation AS totalCompensation, cp.shareholderReturn AS shareholderReturn, cp.date AS date"
   },
   {
-    "question": "Show me the shareholder return and total compensation linked to Amazon's executive pay package.",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})<-[:AWARDED_BY]-(cp:CompensationPackage) RETURN cp.totalCompensation AS totalCompensation, cp.shareholderReturn AS shareholderReturn, cp.date AS date"
+    "question": "Show me the most important information about the fund VOO?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Give me the main details for the VTI fund including returns and holdings",
+    "cypher": "MATCH (provider:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VTI'}) OPTIONAL MATCH (f)-[fhRel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WITH provider, f, fh, fhRel ORDER BY fhRel.year DESC WITH provider, f, collect(fh)[0] AS fh OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WITH provider, f, fh, ar, arRel ORDER BY arRel.year DESC WITH provider, f, fh, collect(ar)[0] AS ar OPTIONAL MATCH (f)-[profRel:DEFINED_BY]->(profile:Profile) WITH provider, f, fh, ar, profile, profRel ORDER BY profRel.year DESC WITH provider, f, fh, ar, collect(profile)[0] AS profile OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio)-[rel:HAS_HOLDING]->(h:Holding) WITH provider, f, fh, ar, profile, h, rel ORDER BY toFloat(rel.weight) DESC WITH provider, f, fh, ar, profile, collect({ticker: h.ticker, name: h.name, weight: rel.weight})[0..10] AS topHoldings RETURN f.name AS FundName, f.ticker AS Ticker, f.securityExchange AS Exchange, provider.name AS Provider, fh.expenseRatio AS ExpenseRatio, fh.netAssets AS TotalAssets, fh.totalReturn AS TotalReturn, fh.turnover AS Turnover, ar.return1y AS Return1Y, ar.return5y AS Return5Y, ar.return10y AS Return10Y, ar.returnInception AS ReturnInception, profile.summaryProspectus AS SummaryProspectus, topHoldings AS TopHoldings"
+  },
+  {
+    "question": "What is the key information for the BND bond fund?",
+    "cypher": "MATCH (provider:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'BND'}) OPTIONAL MATCH (f)-[fhRel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WITH provider, f, fh, fhRel ORDER BY fhRel.year DESC WITH provider, f, collect(fh)[0] AS fh OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WITH provider, f, fh, ar, arRel ORDER BY arRel.year DESC WITH provider, f, fh, collect(ar)[0] AS ar OPTIONAL MATCH (f)-[profRel:DEFINED_BY]->(profile:Profile) WITH provider, f, fh, ar, profile, profRel ORDER BY profRel.year DESC WITH provider, f, fh, ar, collect(profile)[0] AS profile OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio)-[rel:HAS_HOLDING]->(h:Holding) WITH provider, f, fh, ar, profile, h, rel ORDER BY toFloat(rel.weight) DESC WITH provider, f, fh, ar, profile, collect({ticker: h.ticker, name: h.name, weight: rel.weight})[0..10] AS topHoldings RETURN f.name AS FundName, f.ticker AS Ticker, f.securityExchange AS Exchange, provider.name AS Provider, fh.expenseRatio AS ExpenseRatio, fh.netAssets AS TotalAssets, fh.totalReturn AS TotalReturn, fh.turnover AS Turnover, ar.return1y AS Return1Y, ar.return5y AS Return5Y, ar.return10y AS Return10Y, ar.returnInception AS ReturnInception, profile.summaryProspectus AS SummaryProspectus, topHoldings AS TopHoldings"
+  },
+  {
+    "question": "Show me a comprehensive overview of the VIG dividend appreciation fund",
+    "cypher": "MATCH (provider:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VIG'}) OPTIONAL MATCH (f)-[fhRel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WITH provider, f, fh, fhRel ORDER BY fhRel.year DESC WITH provider, f, collect(fh)[0] AS fh OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WITH provider, f, fh, ar, arRel ORDER BY arRel.year DESC WITH provider, f, fh, collect(ar)[0] AS ar OPTIONAL MATCH (f)-[profRel:DEFINED_BY]->(profile:Profile) WITH provider, f, fh, ar, profile, profRel ORDER BY profRel.year DESC WITH provider, f, fh, ar, collect(profile)[0] AS profile OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio)-[rel:HAS_HOLDING]->(h:Holding) WITH provider, f, fh, ar, profile, h, rel ORDER BY toFloat(rel.weight) DESC WITH provider, f, fh, ar, profile, collect({ticker: h.ticker, name: h.name, weight: rel.weight})[0..10] AS topHoldings RETURN f.name AS FundName, f.ticker AS Ticker, f.securityExchange AS Exchange, provider.name AS Provider, fh.expenseRatio AS ExpenseRatio, fh.netAssets AS TotalAssets, fh.totalReturn AS TotalReturn, fh.turnover AS Turnover, ar.return1y AS Return1Y, ar.return5y AS Return5Y, ar.return10y AS Return10Y, ar.returnInception AS ReturnInception, profile.summaryProspectus AS SummaryProspectus, topHoldings AS TopHoldings"
+  },
+  {
+    "question": "Tell me about the VFIAX fund with all its key metrics and performance data",
+    "cypher": "MATCH (provider:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'VFIAX'}) OPTIONAL MATCH (f)-[fhRel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WITH provider, f, fh, fhRel ORDER BY fhRel.year DESC WITH provider, f, collect(fh)[0] AS fh OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WITH provider, f, fh, ar, arRel ORDER BY arRel.year DESC WITH provider, f, fh, collect(ar)[0] AS ar OPTIONAL MATCH (f)-[profRel:DEFINED_BY]->(profile:Profile) WITH provider, f, fh, ar, profile, profRel ORDER BY profRel.year DESC WITH provider, f, fh, ar, collect(profile)[0] AS profile OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio)-[rel:HAS_HOLDING]->(h:Holding) WITH provider, f, fh, ar, profile, h, rel ORDER BY toFloat(rel.weight) DESC WITH provider, f, fh, ar, profile, collect({ticker: h.ticker, name: h.name, weight: rel.weight})[0..10] AS topHoldings RETURN f.name AS FundName, f.ticker AS Ticker, f.securityExchange AS Exchange, provider.name AS Provider, fh.expenseRatio AS ExpenseRatio, fh.netAssets AS TotalAssets, fh.totalReturn AS TotalReturn, fh.turnover AS Turnover, ar.return1y AS Return1Y, ar.return5y AS Return5Y, ar.return10y AS Return10Y, ar.returnInception AS ReturnInception, profile.summaryProspectus AS SummaryProspectus, topHoldings AS TopHoldings"
   },
   {
     "question": "Which companies had the most insider purchase transactions? Use case-insensitive matching on transaction type.",
@@ -762,5 +878,13 @@
   {
     "question": "Show me all N-CSR documents for VOO.",
     "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:EXTRACTED_FROM]->(d:Document {form: 'N-CSR'}) RETURN d.accession_number AS accession, d.url AS url, d.filing_date AS filingDate, d.reporting_date AS reportingDate ORDER BY d.filing_date DESC"
+  },
+  {
+    "question": "Give me an overview of the VOO fund with all the relevant details.",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, port.count AS numberHoldings, prov.name AS provider, t.name AS trust, prof.summaryProspectus AS summaryProspectus, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "What is all the information available for the BND fund?",
+    "cypher": "MATCH (f:Fund {ticker: 'BND'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
   }
 ]

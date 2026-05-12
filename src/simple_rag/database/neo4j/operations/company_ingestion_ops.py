@@ -870,36 +870,15 @@ class CompanyIngestionOperations(CompanyCrudOperations):
         companies: List['CompanyEntity'],
         verbose: bool = True
     ) -> Dict[str, int]:
-        """
-        Ingest pre-chunked and pre-embedded 10-K filing sections into Neo4j.
-
-        Expects that each Filing10K already has its ``*_chunks`` lists
-        populated with ``CompanyContentChunk`` objects whose ``embedding``
-        field is filled.  The parent Section nodes (RiskFactor,
-        BusinessInformation, etc.) must already exist in the graph — i.e.
-        ``ingest_companies_batch`` should have been called first.
-
-        Graph effect:
-            (Section)-[:HAS_CHUNK]->(SectionChunk {embedding, text, …})
-
-        Args:
-            companies: List of CompanyEntity objects with chunked filings.
-            verbose: Whether to print progress.
-
-        Returns:
-            Dictionary with ``{'chunks_created': N, 'errors': N}``.
-        """
         stats: Dict[str, int] = {"chunks_created": 0, "errors": 0}
 
-        # Map Filing10K chunk-list attribute → section_id suffix used in
-        # add_section_chunks (must match the suffixes created by
-        # add_*_section() in company_crud_ops.py).
+        # Updated Map: (chunk_list_attr, full_text_attr, section_id_suffix)
         SECTION_MAP = [
-            ("risk_factors_chunks",          "risk_factors"),
-            ("business_information_chunks",  "business_info"),
-            ("management_discussion_chunks", "mda"),
-            ("legal_proceedings_chunks",     "legal_proceedings"),
-            ("properties_chunks",           "properties"),
+            ("risk_factors_chunks", "risk_factors", "risk_factors"),
+            ("business_information_chunks", "business_information", "business_info"),
+            ("management_discussion_chunks", "management_discussion_and_analysis", "mda"),
+            ("legal_proceedings_chunks", "legal_proceedings", "legal_proceedings"),
+            ("properties_chunks", "properties", "properties"),
         ]
 
         total = len(companies)
@@ -907,53 +886,36 @@ class CompanyIngestionOperations(CompanyCrudOperations):
         for idx, company in enumerate(companies, 1):
             try:
                 if verbose:
-                    print(
-                        f"\n[{idx}/{total}] 🧩 Ingesting chunks for "
-                        f"{company.name} ({company.ticker})"
-                    )
+                    print(f"\n[{idx}/{total}] 🧩 Ingesting chunks & full text for {company.name}")
 
                 for _filing_date, filing in company.filings_10k.items():
-                    for chunk_attr, section_key in SECTION_MAP:
+                    for chunk_attr, text_attr, section_key in SECTION_MAP:
+                        # 1. Get the lists and the full text
                         chunk_list: list = getattr(filing, chunk_attr, [])
-                        if not chunk_list:
+                        full_section_text: str = getattr(filing, text_attr, None)
+                        
+                        if not chunk_list and not full_section_text:
                             continue
 
-                        # Convert CompanyContentChunk objects → dicts
+                        # 2. Convert models to dicts for Neo4j UNWIND
                         chunk_dicts = [c.model_dump() for c in chunk_list]
 
+                        # 3. Call the writer (Now passing full_text)
                         created = self.add_section_chunks(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
                             section_name=section_key,
+                            full_text=full_section_text, # <--- NEW ARGUMENT
                             chunks=chunk_dicts,
                         )
                         stats["chunks_created"] += created
 
-                        if verbose:
-                            print(
-                                f"  ✅ {company.ticker} / {section_key}: "
-                                f"{created} chunks"
-                            )
-
-                if verbose:
-                    print(f"  ✅ Completed {company.ticker}")
+                        if verbose and created > 0:
+                            print(f"  ✅ {company.ticker} / {section_key}: {created} chunks + Full Text")
 
             except Exception as e:
                 stats["errors"] += 1
-                logger.error(
-                    f"Error ingesting chunks for {company.ticker}: {e}",
-                    exc_info=True,
-                )
-                if verbose:
-                    print(f"  ❌ Error for {company.ticker}: {e}")
+                logger.error(f"Error for {company.ticker}: {e}", exc_info=True)
                 continue
-
-        if verbose:
-            print(f"\n{'='*60}")
-            print("🧩 CHUNK INGESTION SUMMARY")
-            print(f"{'='*60}")
-            print(f"SectionChunk nodes created: {stats['chunks_created']}")
-            print(f"Errors: {stats['errors']}")
-            print(f"{'='*60}")
 
         return stats

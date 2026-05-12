@@ -1,4 +1,5 @@
 import sys
+import argparse
 from pathlib import Path
 
 # Setup paths assuming execution from project root
@@ -11,39 +12,90 @@ if str(SRC_DIR) not in sys.path:
 
 from simple_rag.evaluation.benchmark import Text2CypherBenchmark
 
-MODEL = "tomasonjo/llama3-text2cypher-demo:8b_4bit"
+# ── Embedding model aliases ──────────────────────────────────────────────────
+EMBEDDING_MODELS = {
+    "nomic":  "nomic-ai/nomic-embed-text-v1.5",
+    "minilm": "sentence-transformers/all-MiniLM-L6-v2",
+}
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="Run the Text2Cypher benchmark.")
+parser.add_argument(
+    "--backend",
+    choices=["openai", "groq", "ollama"],
+    default="openai",
+    help="LLM backend (default: openai — any OpenAI-compatible server like llama.cpp/LM Studio)",
+)
+parser.add_argument(
+    "--model",
+    default="tomasonjo/llama3-text2cypher-demo:8b_4bit",
+    help="Text2Cypher model name (Ollama tag, Groq model ID, or OpenAI-compat model string)",
+)
+parser.add_argument(
+    "--host",
+    default="localhost",
+    help="Hostname for OpenAI-compatible server (default: localhost)",
+)
+parser.add_argument(
+    "--port",
+    type=int,
+    default=8081,
+    help="Port for OpenAI-compatible server (default: 8081)",
+)
+parser.add_argument(
+    "--few-shot-model",
+    choices=list(EMBEDDING_MODELS.keys()),
+    default="nomic",
+    help="Embedding model for few-shot example retrieval (default: nomic)",
+)
+parser.add_argument(
+    "--no-schema-injection",
+    action="store_true",
+    help="Disable schema slice injection (use full schema for every query)",
+)
+parser.add_argument(
+    "--no-retry",
+    action="store_true",
+    help="Disable the validator retry loop (generate once, no retry prompts)",
+)
+parser.add_argument(
+    "--complexity",
+    nargs="+",
+    choices=["easy", "medium", "hard"],
+    default=None,
+    help="Run only questions of the given complexity level(s)",
+)
+parser.add_argument(
+    "--interactive",
+    action="store_true",
+    help="Pause after each failed query for manual review",
+)
+parser.add_argument(
+    "--test-set",
+    default="./src/simple_rag/evaluation/test_set.json",
+    help="Path to the test set JSON file",
+)
+
+args = parser.parse_args()
 print(f"Current path: {Path.cwd()}")
 
-# Adjusted path for root execution
-PATH = Path("./src/simple_rag/evaluation/test_set.json")
-GROQ_MODEL = "llama-3.3-70b-versatile"
-backend = "openai"  # llama.cpp server
+few_shot_model = EMBEDDING_MODELS[args.few_shot_model]
+print(f"Few-shot embedding model: {few_shot_model}")
 
-# Schema mode:
-#   True  — classifier picks a focused schema slice for each query (default)
-#   False — full DETAILED_SCHEMA is always used (classifier still routes, but no slice injection)
-# Regardless of this setting, retries on failed queries always use the full DETAILED_SCHEMA.
-USE_SCHEMA_INJECTION = True
+benchmark = Text2CypherBenchmark(
+    test_set_path=args.test_set,
+    model_name=args.model,
+    backend=args.backend,
+    interactive=args.interactive,
+    openai_compatible_host=args.host,
+    openai_compatible_port=args.port,
+    use_schema_injection=not args.no_schema_injection,
+    few_shot_embedding_model=few_shot_model,
+    retry_module=not args.no_retry,
+)
 
-if backend == "groq":
-    benchmark = Text2CypherBenchmark(PATH, GROQ_MODEL, backend="groq", use_schema_injection=USE_SCHEMA_INJECTION)
-    try:
-        benchmark.run(complexity_filter=["hard"])
-    except KeyboardInterrupt:
-        print("\nBenchmark stopped by user.")
-        benchmark.cleanup()
-else:
-    benchmark = Text2CypherBenchmark(
-        PATH,
-        MODEL,
-        backend="openai",
-        interactive=False,
-        openai_compatible_host="localhost",
-        openai_compatible_port=8081,
-        use_schema_injection=USE_SCHEMA_INJECTION,
-    )
-    try:
-        benchmark.run()
-    except KeyboardInterrupt:
-        print("\nBenchmark stopped by user.")
-        benchmark.cleanup()
+try:
+    benchmark.run(complexity_filter=args.complexity)
+except KeyboardInterrupt:
+    print("\nBenchmark stopped by user.")
+    benchmark.cleanup()

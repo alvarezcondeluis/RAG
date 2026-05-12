@@ -1,43 +1,86 @@
 import shutil
 import time
 from typing import List, Dict
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 from langchain_community.vectorstores import FAISS
 from pathlib import Path
 import json
 import hashlib
+from simple_rag.embeddings.embedding import EmbedData
+
+
+NOMIC_MODEL = "nomic-ai/nomic-embed-text-v1.5"
+MINILM_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+class NomicEmbeddingsAdapter(Embeddings):
+    """LangChain-compatible adapter for EmbedData (nomic-ai/nomic-embed-text-v1.5)."""
+
+    def __init__(self):
+        self._embedder = EmbedData(model_name=NOMIC_MODEL, batch_size=32)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._embedder.embed(texts, description="Embedding examples")
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embedder.embed([text], show_progress=False)[0]
+
+
+class MiniLMEmbeddingsAdapter(Embeddings):
+    """LangChain-compatible adapter for EmbedData (all-MiniLM-L6-v2)."""
+
+    def __init__(self):
+        self._embedder = EmbedData(model_name=MINILM_MODEL, batch_size=64)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._embedder.embed(texts, description="Embedding examples")
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embedder.embed([text], show_progress=False)[0]
+
+
+def _make_adapter(embedding_model: str) -> Embeddings:
+    """Factory: pick the right LangChain-compatible adapter for the given model name."""
+    if "nomic" in embedding_model.lower():
+        return NomicEmbeddingsAdapter()
+    if "minilm" in embedding_model.lower() or "all-mini" in embedding_model.lower():
+        return MiniLMEmbeddingsAdapter()
+    raise ValueError(
+        f"Unsupported few-shot embedding model: '{embedding_model}'. "
+        f"Use '{NOMIC_MODEL}' or '{MINILM_MODEL}'."
+    )
+
 
 class DynamicFewShotSelector:
     """
     Semantic similarity-based example selector for Cypher query generation.
     Embeds Q&A examples and retrieves the most similar ones for a given query.
     """
-    
-    def __init__(self, embedding_model: str = "all-MiniLM-L6-v2", k: int = 2):
+
+    def __init__(self, embedding_model: str = NOMIC_MODEL, k: int = 2):
         """
         Args:
-            embedding_model: Ollama model to use for embeddings (ensure you have pulled it: `ollama pull all-minilm`)
-            k: Number of similar examples to retrieve (default: 3)
+            embedding_model: Model name for few-shot embeddings. Supported:
+                             - 'nomic-ai/nomic-embed-text-v1.5' (default, 1536d)
+                             - 'sentence-transformers/all-MiniLM-L6-v2' (384d, faster)
+            k: Number of similar examples to retrieve (default: 2)
         """
         self.k = k
         self.embedding_model_name = embedding_model
-        
+
         # 1. Define Paths relative to this file
         base_dir = Path(__file__).parent
         self.examples_path = base_dir / "examples" / "examples.json"
-        self.index_path = base_dir / "examples" / "faiss_index"
+        # Each model gets its own index dir to prevent cross-model cache pollution
+        index_slug = "nomic" if "nomic" in embedding_model.lower() else "minilm"
+        self.index_path = base_dir / "examples" / f"faiss_index_{index_slug}"
         self.hash_file_path = self.index_path / "hash.md5"
 
-        # 2. Setup Embeddings
-        # Note: If you want to use the local HF model as discussed before, 
-        # swap this for HuggingFaceEmbeddings(model_name=embedding_model)
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model,
-            model_kwargs={'device': 'cpu'}
-        )
-        
+        # 2. Pick adapter based on model name
+        self.embeddings = _make_adapter(embedding_model)
+
         self.vector_store = None
-        
+
         # 3. Smart Load: Check hash, then Load or Build
         self._load_or_build_index()
 
@@ -157,18 +200,27 @@ class DynamicFewShotSelector:
 
         return "\n".join(formatted)
 
-    def get_formatted_context(self, query: str) -> str:
+    def get_formatted_context(self, query: str, query_vector: List[float] = None) -> str:
         """
         Retrieves the top-k most relevant examples and formats them into a string.
         Uses similarity search with scores so the prompt can emphasize close matches.
+
+        Args:
+            query:        Natural language query string (used to embed if query_vector is None).
+            query_vector: Pre-computed embedding to skip re-embedding (avoids duplicate inference).
         """
         if not self.vector_store:
             raise RuntimeError("Vector store not initialized. Index loading failed.")
 
         start_time = time.time()
-        docs_and_scores = self.vector_store.similarity_search_with_score(
-            query, k=self.k
-        )
+        if query_vector is not None:
+            docs_and_scores = self.vector_store.similarity_search_with_score_by_vector(
+                query_vector, k=self.k
+            )
+        else:
+            docs_and_scores = self.vector_store.similarity_search_with_score(
+                query, k=self.k
+            )
         search_time = time.time() - start_time
         print(f"⏱ Example search took {search_time:.3f}s")
 
