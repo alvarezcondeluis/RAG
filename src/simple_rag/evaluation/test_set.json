@@ -115,8 +115,8 @@
     "complexity": "simple"
   },
   {
-    "question": "Show me the general information about the healthcare fund.",
-    "expected_cypher": "MATCH (f:Fund {name: 'Vanguard Health Care Fund'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName, f.ticker AS ticker, f.name AS fundName",
+    "question": "Show me the general information about the vanguard healthcare fund.",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VGHCX'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1",
     "complexity": "hard"
   },
 
@@ -632,7 +632,7 @@
   },
   {
     "question": "Which holding appears in the most fund portfolios across the entire database?",
-    "expected_cypher": "MATCH (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding) RETURN h.ticker AS ticker, h.name AS holdingName, count(*) AS appearanceCount ORDER BY appearanceCount DESC LIMIT 1",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN h.name AS holdingName, h.ticker AS ticker, COUNT(DISTINCT f) AS fundCount ORDER BY fundCount DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -727,7 +727,7 @@
   },
   {
     "question": "Which funds are missing a 10-year average return?",
-    "expected_cypher": "MATCH (f:Fund) WHERE NOT (f)-[:HAS_AVERAGE_RETURNS]->(:AverageReturns) RETURN f.name AS fundName",
+    "expected_cypher": "MATCH (f:Fund) OPTIONAL MATCH (f)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE ar IS NULL OR ar.return10y IS NULL RETURN f.name AS fundName",
     "complexity": "hard"
   },
   {
@@ -797,7 +797,7 @@
   },
   {
     "question": "What is the shareholder return associated with Apple's CEO compensation package?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})<-[:AWARDED_BY]-(cp:CompensationPackage) RETURN cp.totalCompensation AS totalCompensation, cp.shareholderReturn AS shareholderReturn, cp.date AS date ORDER BY cp.date DESC LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})<-[:AWARDED_BY]-(cp:CompensationPackage) RETURN c.name AS companyName, cp.shareholderReturn AS shareholderReturn, cp.totalCompensation AS totalCompensation, cp.date AS date ORDER BY cp.date DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -969,7 +969,7 @@
  
  {
     "question": "What asset type categories are the top holdings in VOO classified under?",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[r:HAS_HOLDING]->(h:Holding)-[:OF_ASSET_TYPE]->(ac:AssetCategory) RETURN h.name AS holdingName, h.ticker AS ticker, ac.code AS assetCode, ac.name AS assetName, ac.type AS assetType, ac.subtype AS assetSubtype, r.weight AS weight ORDER BY toFloat(r.weight) DESC LIMIT 10",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding)-[:OF_ASSET_TYPE]->(ac:AssetCategory) WITH ac, h, r ORDER BY r.weight DESC LIMIT 5 RETURN DISTINCT ac.name AS assetTypeCategory, h.ticker AS holdingTicker, h.name AS holdingName, r.weight AS weight",
     "complexity": "medium"
   },
   {

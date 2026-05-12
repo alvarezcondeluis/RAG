@@ -401,7 +401,7 @@
   },
   {
     "question": "Which fund is managed by the highest number of people?",
-    "cypher": "MATCH (f:Fund)-[:MANAGED_BY]->(p:Person) RETURN f.name AS fundName, count(p) AS managerCount ORDER BY managerCount DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[:MANAGED_BY]->(p:Person) RETURN f.name AS fundName, count(DISTINCT p) AS managerCount ORDER BY managerCount DESC LIMIT 1"
   },
   {
     "question": "Find all funds that have a higher 1-year return than VOO.",
@@ -749,7 +749,7 @@
   },
   {
     "question": "Are there any funds in the database that hold Level 3 highly illiquid assets?",
-    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3', 'Level 3'] OPTIONAL MATCH (f)-[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, fh.netAssets AS netAssets, h.name AS holdingName, r.fairValueLevel AS fairValueLevel ORDER BY rel.year DESC LIMIT 1"
+    "cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IN [3, '3', 'Level 3'] OPTIONAL MATCH (f)-[rel:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) RETURN f.ticker AS ticker, f.name AS fundName, h.name AS holdingName, r.fairValueLevel AS fairValueLevel ORDER BY rel.year DESC LIMIT 1"
   },
   {
     "question": "What percentage of VOO's holdings are fair value level 1?",
@@ -761,7 +761,7 @@
   },
   {
     "question": "List all fair value levels present in the VFIAX portfolio",
-    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IS NOT NULL RETURN DISTINCT r.fairValueLevel AS fairValueLevel ORDER BY fairValueLevel"
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE r.fairValueLevel IS NOT NULL  RETURN DISTINCT r.fairValueLevel AS fairValueLevel ORDER BY fairValueLevel"
   },
   {
     "question": "What is the average number of holdings across all Vanguard funds?",
@@ -886,5 +886,25 @@
   {
     "question": "What is all the information available for the BND fund?",
     "cypher": "MATCH (f:Fund {ticker: 'BND'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Show me the per year return evolution of the Vanguard 500 Index from the last three years",
+    "cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'Vanguard 500 Index~') YIELD node AS f, score WITH f ORDER BY score DESC LIMIT 1 MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC LIMIT 3"
+  },
+  {
+    "question": "Show me the annual return history for the last 5 years for VTI",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC LIMIT 5"
+  },
+  {
+    "question": "Show me all insider transactions made by Satya Nadella, the CEO of Microsoft.",
+    "cypher": "MATCH (p:Person)-[:MADE_BY]-(it:InsiderTransaction)<-[:HAS_INSIDER_TRANSACTION]-(c:Company) WHERE toLower(p.name) CONTAINS 'nadella' RETURN c.name AS CompanyName, p.name as person, it.transactionType AS TransactionType, it.shares AS Shares, it.price AS Price, it.transactionDate AS TransactionDate ORDER BY it.transactionDate DESC"
+  },
+  {
+    "question": "What asset type categories are the top holdings in VOO classified under?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding)-[:OF_ASSET_TYPE]->(ac:AssetCategory) WITH ac, h, r ORDER BY r.weight DESC LIMIT 5 RETURN DISTINCT ac.name AS assetTypeCategory, h.ticker AS holdingTicker, h.name AS holdingName, r.weight AS weight"
+  },
+  {
+    "question": "What asset categories do the holdings of VTI belong to?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding)-[:OF_ASSET_TYPE]->(ac:AssetCategory) RETURN DISTINCT ac.name AS assetCategory, count(h) AS holdingCount ORDER BY holdingCount DESC"
   }
 ]

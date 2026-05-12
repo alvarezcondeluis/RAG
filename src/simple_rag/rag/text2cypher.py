@@ -113,7 +113,7 @@ class CypherTranslator:
         self.device = device
         self.temperature = temperature
         self.groq_api_key = None
-        self.selector = DynamicFewShotSelector(k=4, embedding_model=few_shot_embedding_model)
+        self.selector = DynamicFewShotSelector(k=3, embedding_model=few_shot_embedding_model)
         
         # Initialize HuggingFace attributes 
         self.hf_model = None
@@ -160,6 +160,7 @@ class CypherTranslator:
         self.schema = DETAILED_SCHEMA           # may be temporarily replaced by a schema slice
         self.last_initial_prompt: Optional[str] = None  # prompt used on the first LLM call (captured for debugging)
         self.last_validation_failures: list = []  # validator rule tags that fired during the last translate() call
+        self.last_total_prompt_tokens: int = 0  # cumulative token estimate across all LLM calls (initial + retries)
         
         # Use imported prompt templates
         self.prompt = PromptTemplate(
@@ -702,7 +703,10 @@ class CypherTranslator:
             
             # Step 4: Validate + retry loop
             self.last_validation_failures = []
+            self.last_retry_attempts = 0
+            self.last_total_prompt_tokens = len(full_prompt) // 4  # initial call
             for attempt in range(1, self.max_validation_retries + 1):
+                self.last_retry_attempts = attempt
                 validation_result = self.validator.validate(cypher_query)
 
                 if validation_result.is_valid:
@@ -749,7 +753,8 @@ class CypherTranslator:
                 )
 
                 token_est = len(retry_prompt_text) // 4
-                
+                self.last_total_prompt_tokens += token_est
+
                 retry_response = self._invoke_llm(retry_prompt_text)
                 cypher_query = self._clean_cypher(retry_response)
                 
@@ -864,7 +869,25 @@ CORRECT: MATCH (f)-[r:REL]->(n) WHERE node = n RETURN f
          (Define variables in MATCH, use them in WHERE)
 """)
         
-        # Pattern 5: Accessing properties on wrong node/relationship
+        # Pattern 5: Fulltext score not yielded
+        if "score not yielded" in error_lower or (
+            "fulltext" in error_lower and "yield" in error_lower and "score" in error_lower
+        ):
+            examples.append("""
+ERROR PATTERN: CALL db.index.fulltext.queryNodes — 'score' not in YIELD
+When using CALL db.index.fulltext.queryNodes(), every variable you use later must be in YIELD.
+If you reference 'score' in ORDER BY, WHERE, or RETURN, add it to the YIELD clause.
+
+BAD:  CALL db.index.fulltext.queryNodes('fundNameIndex', 'Total Stock Market~') YIELD node ORDER BY score DESC LIMIT 1
+      MATCH (node)-[:DEFINED_BY]->(p:Profile) RETURN node.name, p.summaryProspectus
+      (score is used in ORDER BY but not yielded — causes "Variable `score` not defined")
+
+GOOD: CALL db.index.fulltext.queryNodes('fundNameIndex', 'Total Stock Market~') YIELD node, score ORDER BY score DESC LIMIT 1
+      MATCH (node)-[:DEFINED_BY]->(p:Profile) RETURN node.name, p.summaryProspectus
+      (score is yielded alongside node, so ORDER BY score works correctly)
+""")
+
+        # Pattern 6: Accessing properties on wrong node/relationship
         if "property" in error_lower or "does not exist" in error_lower:
             examples.append("""
 SCHEMA REMINDER:
@@ -901,10 +924,10 @@ CORRECT: MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)
         # Remove any leading/trailing quotes
         query = query.strip('"\'')
         
-        # Remove common prefixes
-        prefixes = ["cypher:", "Cypher:", "CYPHER:", "Query:", "query:"]
+        # Remove common prefixes (including EXPLAIN/PROFILE which the model sometimes adds)
+        prefixes = ["cypher:", "Cypher:", "CYPHER:", "Query:", "query:", "EXPLAIN ", "PROFILE "]
         for prefix in prefixes:
-            if query.startswith(prefix):
+            if query.upper().startswith(prefix.upper()):
                 query = query[len(prefix):].strip()
         
         # === NEW FIX: Repair Syntax Errors ===

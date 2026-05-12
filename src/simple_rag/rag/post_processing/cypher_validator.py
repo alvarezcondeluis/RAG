@@ -241,6 +241,19 @@ class CypherValidator:
             lines = [l for l in lines if not l.strip().startswith("```")]
             query = "\n".join(lines).strip()
 
+        # Step 0: Catch EXPLAIN / PROFILE prefix — the model sometimes adds these debug keywords
+        if re.match(r'^(EXPLAIN|PROFILE)\s+', query, re.IGNORECASE):
+            result.is_valid = False
+            result.triggered_rule = "EXPLAIN_PREFIX"
+            result.syntax_errors.append(
+                "EXPLAIN/PROFILE PREFIX ERROR: Your query starts with EXPLAIN or PROFILE. "
+                "These are Neo4j debug keywords, not valid query prefixes. "
+                "Return ONLY the Cypher query without any prefix. "
+                "BAD:  EXPLAIN MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name "
+                "GOOD: MATCH (f:Fund {ticker: 'VTI'}) RETURN f.name"
+            )
+            return result
+
         # Step 0: Fast pre-check — catch inline math operators inside {} before Neo4j
         inline_math = re.search(r'\{[^}]*(?:[<>]=?|!=)\s*[\d\w\'"]', query)
         if inline_math:
@@ -344,7 +357,32 @@ class CypherValidator:
             )
             return result
 
-        # Step 0e: Catch undefined relationship variables
+        # Step 0e: Catch CALL db.index.fulltext/vector.queryNodes that uses 'score' without yielding it
+        _fulltext_call = re.search(
+            r'\bCALL\s+db\.index\.(fulltext|vector)\.queryNodes\b',
+            query, re.IGNORECASE
+        )
+        if _fulltext_call and re.search(r'\bscore\b', query, re.IGNORECASE):
+            _yield_m = re.search(
+                r'\bYIELD\b\s+(.+?)(?=\s+(?:ORDER\s+BY|WHERE|LIMIT\b|MATCH\b|WITH\b|RETURN\b)|$)',
+                query, re.IGNORECASE
+            )
+            _score_in_yield = bool(_yield_m and re.search(r'\bscore\b', _yield_m.group(1), re.IGNORECASE))
+            if not _score_in_yield:
+                result.is_valid = False
+                result.triggered_rule = "FULLTEXT_SCORE_NOT_YIELDED"
+                result.syntax_errors.append(
+                    "FULLTEXT SCORE NOT YIELDED ERROR: You referenced 'score' (e.g. ORDER BY score DESC) "
+                    "but did not include it in the YIELD clause of your CALL db.index.fulltext.queryNodes() call. "
+                    "Every variable used after YIELD must be explicitly listed there. "
+                    "BAD:  CALL db.index.fulltext.queryNodes('fundNameIndex', 'Vanguard~') YIELD node ORDER BY score DESC LIMIT 1 "
+                    "MATCH (node)-[:DEFINED_BY]->(p:Profile) RETURN node.name, p.summaryProspectus "
+                    "GOOD: CALL db.index.fulltext.queryNodes('fundNameIndex', 'Vanguard~') YIELD node, score ORDER BY score DESC LIMIT 1 "
+                    "MATCH (node)-[:DEFINED_BY]->(p:Profile) RETURN node.name, p.summaryProspectus"
+                )
+                return result
+
+        # Step 0f: Catch undefined relationship variables
         # Find all relationship variable usages (e.g., r.weight, r.year)
         undefined_rel_vars = self._check_undefined_relationship_variables(query)
         if undefined_rel_vars:

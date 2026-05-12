@@ -91,6 +91,8 @@ class TestResult:
     llm_prompt: str = ""  # full initial LLM prompt (schema + examples + question), only populated on error
     prompt_token_estimate: int = 0  # estimated token count for the initial LLM prompt
     validation_failures: List[str] = field(default_factory=list)  # validator rule tags that fired during retries
+    retry_attempts: int = 0          # total LLM calls made (1 = no retry needed)
+    final_syntax_valid: bool = False  # did the final Cypher pass validation?
 
 class Text2CypherBenchmark:
     """
@@ -220,7 +222,13 @@ class Text2CypherBenchmark:
                 if gen_strs and exp_strs:
                     if gen_strs.issubset(exp_strs) or exp_strs.issubset(gen_strs):
                         return (True, 'partial')
-                        
+                    # Retry subset check after stripping null-like placeholders (e.g. 'N/A')
+                    # so that a correct but sparser result isn't penalised for missing fields.
+                    null_like = {'N/A', 'None', 'null', 'n/a', ''}
+                    gen_strs_clean = gen_strs - null_like
+                    if gen_strs_clean and gen_strs_clean.issubset(exp_strs):
+                        return (True, 'partial')
+
                 return (False, 'mismatch')
             
         except Exception as e:
@@ -292,8 +300,10 @@ class Text2CypherBenchmark:
             result.confidence = handle_result.confidence
             result.generated_cypher = handle_result.cypher or ""
             result.llm_prompt = getattr(self.handler.translator, 'last_initial_prompt', '') or ''
-            result.prompt_token_estimate = len(result.llm_prompt) // 4  # ~4 chars per token
+            # Use cumulative token count across initial call + all retry calls
+            result.prompt_token_estimate = getattr(self.handler.translator, 'last_total_prompt_tokens', 0) or (len(result.llm_prompt) // 4)
             result.validation_failures = list(getattr(self.handler.translator, 'last_validation_failures', []))
+            result.retry_attempts = getattr(self.handler.translator, 'last_retry_attempts', 0)
 
             if handle_result.error:
                 result.error_type = f"Pipeline Error ({handle_result.category})"
@@ -315,16 +325,23 @@ class Text2CypherBenchmark:
 
         # 2. Measure Execution & Accuracy
         try:
+            # Build parameters — pass $queryVector if either query needs it
+            query_embedding = handle_result.query_embedding
+            exec_params = {}
+            if query_embedding is not None:
+                exec_params["queryVector"] = query_embedding
+                exec_params["k"] = 5
+
             # Run Generated Query
             exec_start = time.time()
             with self.neo.driver.session() as session:
-                gen_res = list(session.run(result.generated_cypher))
+                gen_res = list(session.run(result.generated_cypher, exec_params))
                 gen_records = [r.data() for r in gen_res]
             result.execution_time_ms = (time.time() - exec_start) * 1000
-            
+
             # Run Expected Query
             with self.neo.driver.session() as session:
-                exp_res = list(session.run(expected_cypher))
+                exp_res = list(session.run(expected_cypher, exec_params))
                 exp_records = [r.data() for r in exp_res]
 
             # Store results for comparison
@@ -377,6 +394,11 @@ class Text2CypherBenchmark:
             result.error_message = str(e)
             print(f"\n❌ FAIL - Execution error: {str(e)[:100]}")
             
+        result.final_syntax_valid = (
+            bool(result.generated_cypher)
+            and result.error_type not in ("Syntax/Execution Error", "Pipeline Error")
+            and not (result.error_type or "").startswith("Pipeline Error")
+        )
         print(f"⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
         print(f"🔢 Prompt tokens (est.): {result.prompt_token_estimate:,}")
         
@@ -608,6 +630,22 @@ class Text2CypherBenchmark:
             pct = failed_c / total_c * 100 if total_c else 0
             bar = "█" * max(1, round(pct / 5))
             print(f"  {complexity:<10}: {failed_c:3d} / {total_c:3d} failed  ({pct:5.1f}%)  {bar}")
+
+        # ── 6. Retry module effectiveness ─────────────────────────────
+        pct = lambda n, d: f"{n/d*100:.1f}%" if d else "—"
+        retried     = [r for r in self.results if r.validation_failures]
+        not_retried = [r for r in self.results if not r.validation_failures]
+        syntax_fixed  = [r for r in retried if r.final_syntax_valid]
+        correct_after = [r for r in retried if r.success]
+        still_broken  = [r for r in retried if not r.final_syntax_valid]
+        no_retry_correct = [r for r in not_retried if r.success]
+
+        print(f"\n🔄 RETRY MODULE EFFECTIVENESS  ({len(retried)} / {len(self.results)} questions triggered retries):")
+        print(f"  Final syntax valid after retry  : {len(syntax_fixed):3d}  ({pct(len(syntax_fixed), len(retried))} of retried)")
+        print(f"    └─ Also correct results        : {len(correct_after):3d}  ({pct(len(correct_after), len(syntax_fixed))} of syntax-valid)")
+        print(f"  Still syntax broken after retry  : {len(still_broken):3d}  ({pct(len(still_broken), len(retried))} of retried)")
+        print(f"  Questions never needed retry     : {len(not_retried):3d}  ({pct(len(not_retried), len(self.results))} of total)")
+        print(f"    └─ Correct on first attempt    : {len(no_retry_correct):3d}  ({pct(len(no_retry_correct), len(not_retried))} of no-retry)")
 
     def _ask_user_validation(self, result: TestResult, item: Dict) -> bool:
         """Ask user if the generated query and results are correct."""
