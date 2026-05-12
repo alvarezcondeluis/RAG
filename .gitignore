@@ -20,6 +20,7 @@ neo4j/plugins/
 src/simple_rag/evaluation/embeddings/reports
 .rag
 example.pdf
+*.pkl
 *.pdf
 /data
 /RAG//notebooks/extracted_content
@@ -107,4 +108,6 @@ Modelfile
 checkpoints/
 src/simple_rag/rag/query/models/query_classifier/
 notebooks/funds_backup.pkl
+src/simple_rag/rag/query/models/query_classifier/model_head.pkl
+src/simple_rag/rag/examples/faiss_index/index.pkl
 src/src/simple_rag/evaluation/query/benchmark_report.txt
