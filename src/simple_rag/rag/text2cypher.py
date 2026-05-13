@@ -946,6 +946,52 @@ CORRECT: MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)
         # 4. Auto-inject DISTINCT when multi-hop traversal could cause duplicate rows
         query = self._auto_distinct(query)
 
+        # 5. Auto-fix undefined relationship variables.
+        # If the query references r.property (or rel.property, h.property, etc.) in
+        # RETURN/WHERE/ORDER BY but the relationship pattern is anonymous (e.g. [:REL_TYPE]),
+        # inject the variable name into the first anonymous relationship pattern.
+        # e.g. -[:HAS_REGION_ALLOCATION]-> with r.weight in RETURN → -[r:HAS_REGION_ALLOCATION]->
+        query = self._fix_undefined_rel_vars(query)
+
+        return query
+
+    def _fix_undefined_rel_vars(self, query: str) -> str:
+        """
+        Detect relationship variables used in RETURN/WHERE/ORDER BY that are not
+        captured in the MATCH pattern, and auto-inject them into the first matching
+        anonymous relationship bracket.
+        """
+        # Find all anonymous relationship patterns: [-[:REL] or -[:REL {
+        anon_rel_pattern = re.compile(r'-\[(\s*):([A-Z_][A-Z_0-9]*)', re.IGNORECASE)
+
+        # Find all var.property usages in RETURN/ORDER BY/WHERE clauses
+        usage_pattern = re.compile(r'\b([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\b')
+
+        # Variables already captured in relationship patterns [varName:REL]
+        defined_rel_vars = set(m.group(1) for m in re.finditer(r'\[\s*([a-zA-Z_]\w*)\s*:', query))
+
+        # Relationship-property names that signal a rel-var usage (not a node property)
+        rel_properties = {'weight', 'year', 'date', 'ceoCompensation', 'ceoActuallyPaid',
+                          'shares', 'marketValue', 'currency', 'fairValueLevel',
+                          'isRestricted', 'payoffProfile'}
+
+        for match in usage_pattern.finditer(query):
+            var_name = match.group(1)
+            prop_name = match.group(2)
+            if prop_name not in rel_properties:
+                continue
+            if var_name in defined_rel_vars:
+                continue
+            # var_name is used but not defined — try to inject it into the first
+            # anonymous relationship pattern in the query
+            if anon_rel_pattern.search(query):
+                query = anon_rel_pattern.sub(
+                    lambda m: f'-[{var_name}:{m.group(2)}',
+                    query,
+                    count=1  # only fix the first anonymous rel to avoid over-injecting
+                )
+                defined_rel_vars.add(var_name)
+
         return query
 
     def _auto_distinct(self, query: str) -> str:

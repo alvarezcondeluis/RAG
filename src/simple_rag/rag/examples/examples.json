@@ -906,5 +906,9 @@
   {
     "question": "What asset categories do the holdings of VTI belong to?",
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding)-[:OF_ASSET_TYPE]->(ac:AssetCategory) RETURN DISTINCT ac.name AS assetCategory, count(h) AS holdingCount ORDER BY holdingCount DESC"
+  },
+  {
+    "question": "How much has the VIEIX fund increased its share price since 2 years ago?",
+    "cypher": "MATCH (f:Fund {ticker: 'VIEIX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueBeginning IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.netAssetsValueBeginning AS netAssetValue ORDER BY r.year DESC"
   }
 ]

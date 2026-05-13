@@ -46,23 +46,37 @@ def load_from_cache(ticker: str, form: str, accession: str):
 def warm_cache_with_persistence(tickers: list):
     """
     Download and cache EDGAR filings with explicit disk persistence.
+    Clears the entire cache directory before downloading to ensure fresh data.
     """
+    import shutil
+
+    # Wipe existing cache so stale 10-K/A amendments are not reused
+    if CACHE_DIR.exists():
+        shutil.rmtree(CACHE_DIR)
+        print(f"🗑️  Cleared existing cache at {CACHE_DIR.absolute()}")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
     print(f"Starting download for {len(tickers)} companies...")
     print(f"Cache directory: {CACHE_DIR.absolute()}")
-    
+
     stats = {
         "downloaded": 0,
         "cached": 0,
         "errors": 0
     }
-    
+
     for ticker in tqdm(tickers, desc="Companies"):
         try:
             company = Company(ticker)
-            
-            # --- Download 10-K ---
-            tenk = company.get_filings(form="10-K").latest()
-            if tenk:
+
+            # --- Download 10-K (original only — skip 10-K/A amendments) ---
+            all_tenk = company.get_filings(form="10-K")
+            original_tenks = [f for f in all_tenk if f.form.upper() == "10-K"]
+            if not original_tenks:
+                print(f"[{ticker}] ⚠️  No original 10-K found (only amendments?) — skipping 10-K")
+                stats["errors"] += 1
+            else:
+                tenk = original_tenks[0]  # newest-first order
                 if is_cached(ticker, "10-K", tenk.accession_number):
                     print(f"[{ticker}] 10-K already cached")
                     stats["cached"] += 1

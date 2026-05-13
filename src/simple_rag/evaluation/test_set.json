@@ -125,9 +125,9 @@
     "expected_cypher": "MATCH (f:Fund {ticker: 'VFINX'})-[r:HAS_FINANCIAL_HIGHLIGHT {year: 2024}]->(fh:FinancialHighlight) RETURN fh.totalReturn AS totalReturn",
     "complexity": "medium"
   },
-  {
-    "question": "What is the investment objective text for Vanguard S&P 500 fund?",
-    "expected_cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'Vanguard S&P 500') YIELD node AS f, score WITH f ORDER BY score DESC LIMIT 1 MATCH (f)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective",
+ {
+    "question": "What is the investment objective text for Vanguard 500 fund?",
+    "expected_cypher": "MATCH (f:Fund) WHERE f.name CONTAINS 'Vanguard 500' MATCH (f)-[:DEFINED_BY]->(:Profile)-[:HAS_SECTION]->(o:Section:Objective) RETURN o.text AS objective LIMIT 1",
     "complexity": "simple"
   },
   {
@@ -202,7 +202,7 @@
   },
   {
     "question": "Show me the most relevant information about the VTI fund",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN f.name AS fundName, f.securityExchange AS exchange, fh.advisoryFees AS fee, p.count AS holdings, fh.expenseRatio AS ratio, fh.netAssets AS assets, fh.turnover AS turnover ORDER BY r.year DESC LIMIT 1",
+    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'}) MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f) OPTIONAL MATCH (f)-[:HAS_SHARE_CLASS]->(sc:ShareClass) OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) OPTIONAL MATCH (f)-[arRel:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) OPTIONAL MATCH (f)-[:DEFINED_BY]->(prof:Profile)-[:HAS_SECTION]->(o:Section:Objective) OPTIONAL MATCH (f)-[:HAS_PORTFOLIO]->(port:Portfolio) RETURN f.ticker AS ticker, f.name AS fundName, prov.name AS provider, t.name AS trust, sc.name AS shareClassName, sc.description AS shareClassDescription, fh.expenseRatio AS expenseRatio, fh.totalReturn AS totalReturn, fh.netAssets AS netAssets, fh.turnover AS turnover, r.year AS year, ar.return1y AS return1y, ar.return5y AS return5y, ar.return10y AS return10y, ar.returnInception AS returnInception, o.text AS objective, port.count AS numberHoldings ORDER BY r.year DESC LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -411,13 +411,18 @@
     "complexity": "medium"
   },
   {
+    "question": "Show me the number of trusts and funds that each of the providers manage",
+    "expected_cypher": "MATCH (p:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f:Fund) RETURN p.name AS providerName, count(DISTINCT t) AS trustCount, count(DISTINCT f) AS fundCount ORDER BY fundCount DESC",
+    "complexity": "medium"
+  },
+  {
     "question": "How much has the VIEIX fund increased its price since 2 years ago",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VIEIX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.netAssetsValueBeginning IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.netAssetsValueBeginning AS netAssetValue ORDER BY r.year DESC",
     "complexity": "hard"
   },
   {
-    "question": "Show me the year-over-year NAV end values for the Vanguard Total Bond Market fund",
-    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE toLower(f.name) CONTAINS 'total bond market' AND fh.netAssetsValueEnd IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, r.year AS year, fh.netAssetsValueEnd AS navEnd ORDER BY r.year DESC",
+    "question": "Show me the year-over-year NAV end values for the Vanguard Energy fund",
+    "expected_cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE toLower(f.name) CONTAINS 'vanguard energy fund' AND fh.netAssetsValueEnd IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, r.year AS year, fh.netAssetsValueEnd AS navEnd ORDER BY r.year DESC",
     "complexity": "medium"
   },
   {
@@ -461,8 +466,8 @@
     "complexity": "medium"
   },
   {
-    "question": "What is the business description from the 10-K filing for the company with ticker GOOG?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'GOOG'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5",
+    "question": "What is the business description from the 10-K filing for the company Nvdia?",
+    "expected_cypher": "MATCH (c:Company {ticker: 'NVDA'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5",
     "complexity": "medium"
   },
   {

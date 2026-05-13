@@ -189,7 +189,14 @@ class TenKParser:
                 company = Company(ticker)
 
                 # --- 10-K ---
-                tenk_filing = company.get_filings(form="10-K").latest()
+                # Exclude 10-K/A amendments — they only contain Part III addenda
+                # and lack the financials and narrative sections we need.
+                all_tenk = company.get_filings(form="10-K")
+                original_tenks = [f for f in all_tenk if f.form.upper() == "10-K"]
+                if not original_tenks:
+                    tqdm.write(f"[{ticker}] ⚠️  No original 10-K found (only amendments?) — skipping")
+                    continue
+                tenk_filing = original_tenks[0]  # filings are ordered newest-first
                 if is_cached(ticker, "10-K", tenk_filing.accession_number):
                     tqdm.write(f"[{ticker}] Loading 10-K from cache...")
                     tenk = load_from_cache(ticker, "10-K", tenk_filing.accession_number)
@@ -236,13 +243,21 @@ class TenKParser:
                     ticker=ticker,
                 )
 
+                # ── Ensure Filing10K node exists before any section access ──
+                if metadata.filing_date not in companies[ticker].filings_10k:
+                    companies[ticker].filings_10k[metadata.filing_date] = Filing10K(
+                        filing_metadata=metadata
+                    )
+
                 # ── Income Statement ─────────────────────────────────────
                 income_statement = tenk.income_statement
-                df = income_statement.to_dataframe()
-                statement_dict = self.extract_income_statement_dict(df)
-                self.process_income_statement_dict(
-                    companies[ticker], statement_dict, metadata, str(income_statement)
-                )
+                if income_statement is not None:
+
+                    df = income_statement.to_dataframe()
+                    statement_dict = self.extract_income_statement_dict(df)
+                    self.process_income_statement_dict(
+                        companies[ticker], statement_dict, metadata, str(income_statement)
+                    )
 
                 # ── 10-K Narrative Sections ──────────────────────────────
                 filing_10k = companies[ticker].filings_10k[metadata.filing_date]
@@ -325,6 +340,45 @@ class TenKParser:
                 traceback.print_exc()
 
         return list(companies.values())
+
+    def debug_def14a(self, ticker: str) -> None:
+        """
+        Fetch the DEF 14A for a single ticker and print its raw content plus
+        all attributes exposed by the edgar proxy object, so that the correct
+        CEO-name attribute can be identified.
+        """
+        from edgar import Company
+        company = Company(ticker)
+        filings = company.get_filings(form="DEF 14A")
+        filing = filings.latest() if filings else None
+
+        if not filing:
+            print(f"[{ticker}] No DEF 14A found.")
+            return
+
+        print(f"\n{'='*70}")
+        print(f"DEF 14A DEBUG — {ticker}  ({filing.accession_number})")
+        print(f"URL: {filing.url}")
+        print(f"{'='*70}")
+
+        obj = filing.obj()
+
+        # ── All attributes on the proxy object ──────────────────────────
+        print("\n📋 Available attributes (non-private):")
+        for attr in sorted(dir(obj)):
+            if attr.startswith("_"):
+                continue
+            try:
+                val = getattr(obj, attr)
+                if callable(val):
+                    continue
+                print(f"  {attr}: {repr(val)[:200]}")
+            except Exception as e:
+                print(f"  {attr}: <error: {e}>")
+
+        # ── Raw string representation ────────────────────────────────────
+        print(f"\n📄 str(obj) (first 3000 chars):")
+        print(str(obj)[:3000])
 
     # ------------------------------------------------------------------
     # Income Statement Extraction (10-K / XBRL)
@@ -416,6 +470,17 @@ class TenKParser:
                             axis_name = "Other"
 
                     axis_name = str(axis_name)
+
+                    # Skip accounting/equity axes that are not business segments
+                    _NOISE_AXIS_FRAGMENTS = (
+                        "ReclassificationOutOfAccumulatedOtherComprehensiveIncome",
+                        "StatementEquityComponents",
+                        "AdjustmentsForNewAccountingPronouncements",
+                        "StatementScenario",
+                    )
+                    if any(frag in axis_name for frag in _NOISE_AXIS_FRAGMENTS):
+                        continue
+
                     item["segments"].setdefault(axis_name, []).append(seg_obj)
 
             final_items.append(item)
@@ -533,6 +598,16 @@ class TenKParser:
                         f"  ⊘ SKIPPED (already set): {concept} → {property_name} "
                         f"(existing: ${existing_metric.value:,.2f})"
                     )
+
+            # Compute GrossProfit if not extracted but components are available
+            if (income_stmt.gross_profit is None
+                    and income_stmt.revenue and income_stmt.revenue.value
+                    and income_stmt.cost_of_sales and income_stmt.cost_of_sales.value):
+                income_stmt.gross_profit = FinancialMetric(
+                    value=income_stmt.revenue.value - income_stmt.cost_of_sales.value,
+                    label="Gross Profit (computed)"
+                )
+                logger.debug(f"  ✓ COMPUTED: GrossProfit = ${income_stmt.gross_profit.value:,.2f}")
 
             filing_10k.income_statements[period_date] = income_stmt
             logger.debug(

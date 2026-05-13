@@ -145,21 +145,23 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         self,
         company_ticker: str,
         filing_date: date,
-        risk_factors_text: str
+        risk_factors_text: str,
+        report_period_end: Optional[date] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Add Risk Factors section to a 10-K filing.
-        
+
         Args:
             company_ticker: Company ticker symbol
             filing_date: Date of the filing
             risk_factors_text: Full text of the risk factors section
-            
+            report_period_end: End of the fiscal reporting period (used to resolve year)
+
         Returns:
             Created RiskFactor section node or None if failed
         """
         try:
-            year = filing_date.year
+            year = (report_period_end or filing_date).year
             
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
@@ -191,11 +193,12 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         self,
         company_ticker: str,
         filing_date: date,
-        business_info_text: str
+        business_info_text: str,
+        report_period_end: Optional[date] = None,
     ) -> Optional[Dict[str, Any]]:
         """Add Business Information section to a 10-K filing."""
         try:
-            year = filing_date.year
+            year = (report_period_end or filing_date).year
             
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
@@ -227,11 +230,12 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         self,
         company_ticker: str,
         filing_date: date,
-        legal_proceedings_text: str
+        legal_proceedings_text: str,
+        report_period_end: Optional[date] = None,
     ) -> Optional[Dict[str, Any]]:
         """Add Legal Proceedings section to a 10-K filing."""
         try:
-            year = filing_date.year
+            year = (report_period_end or filing_date).year
             
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
@@ -263,11 +267,12 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         self,
         company_ticker: str,
         filing_date: date,
-        mda_text: str
+        mda_text: str,
+        report_period_end: Optional[date] = None,
     ) -> Optional[Dict[str, Any]]:
         """Add Management Discussion & Analysis section to a 10-K filing."""
         try:
-            year = filing_date.year
+            year = (report_period_end or filing_date).year
             
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
@@ -299,11 +304,12 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         self,
         company_ticker: str,
         filing_date: date,
-        properties_text: str
+        properties_text: str,
+        report_period_end: Optional[date] = None,
     ) -> Optional[Dict[str, Any]]:
         """Add Properties section to a 10-K filing."""
         try:
-            year = filing_date.year
+            year = (report_period_end or filing_date).year
             
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
@@ -355,8 +361,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             Created Financials section node or None if failed
         """
         try:
-            year = filing_date.year
-            
+            year = fiscal_year
+
             query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
             MERGE (f)-[:HAS_FINANCIALS]->(fin:Section:Financials)
@@ -425,8 +431,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             )
         """
         try:
-            year = filing_date.year
-            
+            year = fiscal_year
+
             # Create FinancialMetric node
             metric_query = """
             MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
@@ -484,7 +490,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         shareholder_return: Optional[float] = None,
         accession_number: Optional[str] = None,
         filing_url: Optional[str] = None,
-        filing_date: Optional[date] = None
+        filing_date: Optional[date] = None,
+        fiscal_year_end: Optional[date] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Add CEO and compensation package information to a company.
@@ -562,20 +569,22 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 MERGE (p)-[:RECEIVED_COMPENSATION]->(cp:CompensationPackage)
                 SET cp.totalCompensation = $total_compensation,
                     cp.shareholderReturn = $shareholder_return,
-                    cp.date = $date
-                
+                    cp.date = $date,
+                    cp.fiscalYearEnd = $fiscal_year_end
+
                 MERGE (c)<-[:AWARDED_BY]-(cp)
                 MERGE (cp)-[:DISCLOSED_IN]->(doc)
                 RETURN cp
                 """
-                
+
                 result = self._execute_write(comp_query, {
                     "ticker": company_ticker,
                     "ceo_name": ceo_name,
                     "accession_number": accession_number,
                     "total_compensation": ceo_compensation,
                     "shareholder_return": shareholder_return,
-                    "date": filing_date or date.today()
+                    "date": filing_date or date.today(),
+                    "fiscal_year_end": str(fiscal_year_end) if fiscal_year_end else None,
                 })
                 
                 if result:
@@ -703,7 +712,8 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         filing_date: date,
         section_name: str,
         full_text: str,
-        chunks: List[Dict[str, Any]]
+        chunks: List[Dict[str, Any]],
+        report_period_end: Optional[date] = None,
     ) -> int:
         """
         Batch-create SectionChunk nodes linked to their parent Section node.
@@ -727,13 +737,28 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         Returns:
             Number of SectionChunk nodes created/updated
         """
-        if not chunks:
-            return 0
-
-        year = filing_date.year
+        year = (report_period_end or filing_date).year
 
         try:
-            # Prepare chunk data list for UNWIND
+            # Step 1: Always write full_text onto the Section node, regardless of chunks.
+            if full_text:
+                full_text_query = """
+                MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
+                      -[:HAS_SECTION]->(sec:Section {sectionType: $section_type})
+                SET sec.fullText = $full_text
+                RETURN sec
+                """
+                self._execute_write(full_text_query, {
+                    "ticker": company_ticker,
+                    "year": year,
+                    "section_type": section_name,
+                    "full_text": full_text,
+                })
+
+            if not chunks:
+                return 0
+
+            # Step 2: Ingest individual chunks
             chunk_list = []
             for c in chunks:
                 chunk_list.append({
@@ -753,7 +778,6 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             UNWIND $chunks AS chunk
             MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk:SectionChunk {text: chunk.text})
             SET sc.title        = chunk.title,
-                sec.fullText     = $full_text,
                 sc.embedding    = chunk.embedding,
                 sc.chunkType    = chunk.sectionType,
                 sc.subsection   = chunk.subsection,
@@ -765,7 +789,6 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             result = self._execute_write(query, {
                 "ticker": company_ticker,
                 "year": year,
-                "full_text": full_text,
                 "section_type": section_name,
                 "chunks": chunk_list,
             })

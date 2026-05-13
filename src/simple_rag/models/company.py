@@ -139,6 +139,7 @@ class ExecutiveCompensation(BaseModel):
     ceo_compensation: Optional[float] = Field(None, description="The compensation of the CEO")
     ceo_actually_paid: Optional[float] = Field(None, description="The actually paid of the CEO")
     shareholder_return: Optional[float] = Field(None, description="The shareholder return of the CEO")
+    fiscal_year_end: Optional[date] = Field(None, description="The fiscal year end date for the most recent compensation period")
 
 
 class Filing10K(BaseModel):

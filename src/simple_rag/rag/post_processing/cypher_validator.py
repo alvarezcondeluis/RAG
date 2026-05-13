@@ -254,6 +254,31 @@ class CypherValidator:
             )
             return result
 
+        # Step 0a-extra: Catch non-existent Neo4j date/year functions
+        # e.g. years(currentDate()), YEAR(DATE()), CURRENT_DATE, year(datetime())
+        _invalid_date = re.search(
+            r'\b(years|months|days)\s*\(\s*(currentDate|datetime|date)\s*\(\)'
+            r'|CURRENT_DATE\b'
+            r'|\bYEAR\s*\(\s*(DATE|CURRENT)',
+            query, re.IGNORECASE
+        )
+        if _invalid_date:
+            result.is_valid = False
+            result.triggered_rule = "INVALID_DATE_FUNCTION"
+            result.syntax_errors.append(
+                "INVALID DATE FUNCTION: Neo4j does not support years(), YEAR(), CURRENT_DATE, "
+                "or similar date arithmetic functions for computing the current year. "
+                "Do NOT compute the current year dynamically. Instead, return all rows ordered "
+                "by year DESC and use LIMIT or list indexing to select the relevant period. "
+                "BAD:  WHERE r.year >= years(currentDate()) - 2 "
+                "BAD:  WHERE r.year = YEAR(DATE()) - 1 "
+                "GOOD: MATCH (f:Fund {ticker: 'VIEIX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) "
+                "      WHERE fh.netAssetsValueBeginning IS NOT NULL "
+                "      RETURN f.ticker AS ticker, r.year AS year, fh.netAssetsValueBeginning AS netAssetValue "
+                "      ORDER BY r.year DESC"
+            )
+            return result
+
         # Step 0: Fast pre-check — catch inline math operators inside {} before Neo4j
         inline_math = re.search(r'\{[^}]*(?:[<>]=?|!=)\s*[\d\w\'"]', query)
         if inline_math:

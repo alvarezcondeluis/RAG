@@ -626,44 +626,51 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                     )
                     stats['filings_10k'] += 1
                     
-                    # Add sections
+                    # Add sections — pass report_period_end so year resolution uses
+                    # the fiscal year, not the calendar year of the filing date.
+                    rpe = filing.filing_metadata.report_period_end
                     if filing.risk_factors:
                         self.add_risk_factors_section(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
-                            risk_factors_text=filing.risk_factors
+                            risk_factors_text=filing.risk_factors,
+                            report_period_end=rpe,
                         )
                         stats['sections'] += 1
-                    
+
                     if filing.business_information:
                         self.add_business_information_section(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
-                            business_info_text=filing.business_information
+                            business_info_text=filing.business_information,
+                            report_period_end=rpe,
                         )
                         stats['sections'] += 1
-                    
+
                     if filing.legal_proceedings:
                         self.add_legal_proceedings_section(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
-                            legal_proceedings_text=filing.legal_proceedings
+                            legal_proceedings_text=filing.legal_proceedings,
+                            report_period_end=rpe,
                         )
                         stats['sections'] += 1
-                    
+
                     if filing.management_discussion_and_analysis:
                         self.add_management_discussion_section(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
-                            mda_text=filing.management_discussion_and_analysis
+                            mda_text=filing.management_discussion_and_analysis,
+                            report_period_end=rpe,
                         )
                         stats['sections'] += 1
-                    
+
                     if filing.properties:
                         self.add_properties_section(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
-                            properties_text=filing.properties
+                            properties_text=filing.properties,
+                            report_period_end=rpe,
                         )
                         stats['sections'] += 1
                     
@@ -799,9 +806,10 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                         ceo_compensation=exec_comp.ceo_compensation,
                         ceo_actually_paid=exec_comp.ceo_actually_paid,
                         shareholder_return=exec_comp.shareholder_return,
-                        accession_number=accession_num,  # <--- FIXED! Now passes the actual ID
+                        accession_number=accession_num,
                         filing_url=exec_comp.url,
-                        filing_date=exec_filing_date
+                        filing_date=exec_filing_date,
+                        fiscal_year_end=exec_comp.fiscal_year_end,
                     )
                     stats['compensation_packages'] += 1
                     
@@ -893,20 +901,21 @@ class CompanyIngestionOperations(CompanyCrudOperations):
                         # 1. Get the lists and the full text
                         chunk_list: list = getattr(filing, chunk_attr, [])
                         full_section_text: str = getattr(filing, text_attr, None)
-                        
+
                         if not chunk_list and not full_section_text:
                             continue
 
                         # 2. Convert models to dicts for Neo4j UNWIND
                         chunk_dicts = [c.model_dump() for c in chunk_list]
 
-                        # 3. Call the writer (Now passing full_text)
+                        # 3. Call the writer — pass report_period_end for correct year matching
                         created = self.add_section_chunks(
                             company_ticker=company.ticker,
                             filing_date=filing.filing_metadata.filing_date,
                             section_name=section_key,
-                            full_text=full_section_text, # <--- NEW ARGUMENT
+                            full_text=full_section_text,
                             chunks=chunk_dicts,
+                            report_period_end=filing.filing_metadata.report_period_end,
                         )
                         stats["chunks_created"] += created
 
