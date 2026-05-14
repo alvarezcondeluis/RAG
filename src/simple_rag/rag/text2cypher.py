@@ -16,7 +16,7 @@ from simple_rag.rag.entity_resolver import EntityResolver
 from simple_rag.rag.groq_wrapper import GroqWrapper
 from simple_rag.rag.post_processing.cypher_validator import CypherValidator
 from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
-from simple_rag.rag.prompt_templates import CYPHER_GENERATION_TEMPLATE, CYPHER_RETRY_TEMPLATE
+from simple_rag.rag.prompt_templates import CYPHER_GENERATION_TEMPLATE, CYPHER_RETRY_TEMPLATE, CYPHER_RETRY_TEMPLATE_LEAN
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ class CypherTranslator:
         llama_cpp_host: Optional[str] = None,
         llama_cpp_port: Optional[int] = None,
         few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
+        retry_strategy: str = "full",
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -168,10 +169,19 @@ class CypherTranslator:
             template=CYPHER_GENERATION_TEMPLATE
         )
         
-        self.retry_prompt = PromptTemplate(
-            input_variables=["schema", "entity_context", "question", "failed_query", "validation_errors"],
-            template=CYPHER_RETRY_TEMPLATE
-        )
+        self.retry_strategy = retry_strategy
+        if retry_strategy == "lean":
+            self.retry_prompt = PromptTemplate(
+                input_variables=["failed_query", "validation_errors", "error_examples"],
+                template=CYPHER_RETRY_TEMPLATE_LEAN,
+            )
+            print(f"✓ Retry strategy: lean (no schema, ~400 tokens per retry)")
+        else:
+            self.retry_prompt = PromptTemplate(
+                input_variables=["schema", "entity_context", "question", "failed_query", "validation_errors", "error_examples"],
+                template=CYPHER_RETRY_TEMPLATE,
+            )
+            print(f"✓ Retry strategy: full (schema injected, ~3k tokens per retry)")
         
         # Initialize based on backend
         if self.backend == "ollama":
@@ -743,14 +753,21 @@ class CypherTranslator:
                 if error_specific_examples:
                     print(f"💡 Injecting error-specific examples for retry attempt {attempt + 1}")
                 
-                retry_prompt_text = self.retry_prompt.format(
-                    schema=self.detailed_schema,
-                    entity_context=entity_context,
-                    question=processed_query,
-                    failed_query=cypher_query,
-                    validation_errors=error_summary,
-                    error_examples=error_specific_examples
-                )
+                if self.retry_strategy == "lean":
+                    retry_prompt_text = self.retry_prompt.format(
+                        failed_query=cypher_query,
+                        validation_errors=error_summary,
+                        error_examples=error_specific_examples,
+                    )
+                else:
+                    retry_prompt_text = self.retry_prompt.format(
+                        schema=self.detailed_schema,
+                        entity_context=entity_context,
+                        question=processed_query,
+                        failed_query=cypher_query,
+                        validation_errors=error_summary,
+                        error_examples=error_specific_examples,
+                    )
 
                 token_est = len(retry_prompt_text) // 4
                 self.last_total_prompt_tokens += token_est

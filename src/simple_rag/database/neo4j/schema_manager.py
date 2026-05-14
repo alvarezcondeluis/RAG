@@ -225,6 +225,31 @@ class SchemaManager(Neo4jDatabaseBase):
                 `vector.similarity_function`: 'cosine'
             }}}}
             """,
+            # Named aliases used by query_handler VECTOR code path and test set
+            f"""
+            CREATE VECTOR INDEX filing10kChunkIndex IF NOT EXISTS
+            FOR (n:Chunk) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """,
+            f"""
+            CREATE VECTOR INDEX profileChunkIndex IF NOT EXISTS
+            FOR (n:Chunk) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """,
+            f"""
+            CREATE VECTOR INDEX profileObjectiveIndex IF NOT EXISTS
+            FOR (n:Section) ON (n.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}}}
+            """,
         ]
 
         # 2. RANGE / LOOKUP INDEXES 

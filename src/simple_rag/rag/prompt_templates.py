@@ -4,7 +4,34 @@ Prompt Templates for Text2Cypher Translation.
 This module contains the LLM prompt templates used for generating and
 correcting Cypher queries from natural language.
 """
+
 CYPHER_GENERATION_TEMPLATE = """You are a Neo4j Cypher expert. Convert the question below to a valid Cypher query using the schema strictly.
+
+Schema:
+{schema}
+
+Examples:
+{examples}
+
+{entity_context}
+
+CRITICAL RULES:
+1. OUTPUT FORMAT: Output ONLY the raw Cypher query. No explanations, no markdown formatting, no ```cypher blocks.
+2. UNIQUE VARIABLES (FATAL ERROR PREVENTION): NEVER use the same variable name for both a relationship and a node. For example, `-[p:HAS_PORTFOLIO]->(p:Portfolio)` is invalid and will crash. Always use distinct names like `-[rel:HAS_PORTFOLIO]->(p:Portfolio)`.
+3. SUBQUERY SYNTAX: Do NOT use SQL-style subqueries like `ticker IN (MATCH...)`. To filter based on a sub-pattern, use `WHERE EXISTS {{ MATCH ... }}` or use a `WITH` clause.
+4. AGGREGATIONS & GROUPING: If the question asks for a global calculation (e.g., highest, average, total across all nodes), DO NOT include row-specific identifiers (like ticker, name, or year) in the RETURN clause. Doing so triggers an implicit GROUP BY and ruins the calculation.
+5. EXTRA PROPERTIES: For standard lists/queries (NOT aggregations), always return extra identifying properties (ticker, name) and relationship properties beyond what was asked.
+6. SCHEMA STRICTNESS: Use property names EXACTLY as they appear in the provided schema. Do not hallucinate properties like `.text` if the schema specifies `.summaryProspectus`.
+7. FILTERING: Use CONTAINS or regex for text searches; use >, <, =, etc., for numeric comparisons. WHERE clauses must follow MATCH or WITH, never RETURN.
+8. DUPLICATES: If a MATCH traverses nodes not included in the RETURN, use RETURN DISTINCT.
+9. CONTEXT MATCHING: If entity names appear in Entity Context, use them EXACTLY as written.
+10. FEW-SHOT REPLICATION: If an example is marked [★ VERY SIMILAR], strictly replicate its structural logic — only swap the specific entity names or target properties.
+
+Question: {question}
+
+Cypher Query:"""
+
+CYPHER_GENERATION_TEMPLATE2 = """You are a Neo4j Cypher expert. Convert the question below to a valid Cypher query using the schema strictly.
 
 Schema:
 {schema}
@@ -28,6 +55,22 @@ Rules:
 Question: {question}
 
 Cypher Query:"""
+
+CYPHER_RETRY_TEMPLATE_LEAN = """You are a Neo4j Cypher expert. Fix the invalid Cypher query below.
+
+Failed query:
+{failed_query}
+
+Validation error:
+{validation_errors}
+{error_examples}
+
+Rules:
+1. Output ONLY the corrected Cypher — no explanations, no markdown
+2. Fix ALL errors listed above
+3. Do NOT use MERGE, CREATE, SET, DELETE
+
+Corrected Cypher Query:"""
 
 CYPHER_RETRY_TEMPLATE = """You are a Neo4j Cypher expert. Your previous Cypher query had errors. Fix them.
 

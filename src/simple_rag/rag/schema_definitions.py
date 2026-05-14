@@ -29,8 +29,8 @@ DETAILED_SCHEMA = """
 # === FUND RELATIONSHIPS ===
 # Share Classes
 (:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name, description})
-# Document node — MERGE key is accession_number
-(:Fund)-[:EXTRACTED_FROM]->(:Document {accession_number, url, form, filing_date, reporting_date})
+# Document node — MERGE key is accessionNumber
+(:Fund)-[:EXTRACTED_FROM]->(:Document {accessionNumber, url, form, filingDate, reportingDate})
 # Profile (versioned by year)
 (:Fund)-[:DEFINED_BY {year}]->(:Profile {summaryProspectus}) # Contains the whole text content of the prospectus
 # Profile sections use multi-labeled Section nodes (filter by label, not property)

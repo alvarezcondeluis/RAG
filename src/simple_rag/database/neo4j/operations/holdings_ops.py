@@ -6,9 +6,8 @@ from typing import Optional, List, Dict, Any
 from datetime import date
 import logging
 import numpy as np
-import re
 from ..base import Neo4jDatabaseBase
-from simple_rag.models.asset_categories import ASSET_CATEGORY_MAP
+from src.simple_rag.models.asset_categories import ASSET_CATEGORY_MAP
 
 logger = logging.getLogger(__name__)
 

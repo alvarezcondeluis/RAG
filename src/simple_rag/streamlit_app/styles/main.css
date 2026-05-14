@@ -577,6 +577,117 @@ hr, .stDivider {
 }
 
 /* ============================================================
+   CONFIG PAGE — section titles, provider status, launch button
+   ============================================================ */
+.config-section-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--amber);
+    margin: 1.5rem 0 0.75rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Configuring status pill (amber instead of green) */
+.status-pill-config {
+    background: var(--amber-dim) !important;
+    border: 1px solid rgba(232,168,32,.35) !important;
+    color: var(--amber) !important;
+}
+.status-pill-config::before {
+    background: var(--amber) !important;
+}
+
+/* Provider API key status dots */
+.provider-status {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+.status-ok      { background: var(--green); }
+.status-missing { background: var(--red); }
+.status-na      { background: var(--amber); }
+
+/* Primary / launch button override */
+.stButton > button[kind="primary"],
+button[data-testid="stBaseButton-primary"] {
+    background: var(--amber-dim) !important;
+    color: var(--amber) !important;
+    border: 1px solid var(--amber) !important;
+    font-size: 1rem !important;
+    padding: 0.8rem 1.5rem !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 700 !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+}
+button[data-testid="stBaseButton-primary"]:hover {
+    background: rgba(232,168,32,.3) !important;
+    box-shadow: 0 0 20px var(--amber-dim) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ============================================================
+   THINKING / STATUS WIDGET — override Streamlit's st.status
+   ============================================================ */
+[data-testid="stStatusWidget"] {
+    background: var(--surface-2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+}
+
+[data-testid="stStatusWidget"] summary {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.8rem !important;
+    color: var(--text-2) !important;
+    letter-spacing: 0.5px !important;
+}
+
+[data-testid="stStatusWidget"] [data-testid="stMarkdownContainer"] {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 0.78rem !important;
+    color: var(--text-2) !important;
+}
+
+/* Cypher code in status widget */
+[data-testid="stStatusWidget"] code {
+    background: var(--surface-1) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--amber) !important;
+    font-size: 0.75rem !important;
+}
+
+/* ============================================================
+   TOGGLE SWITCHES
+   ============================================================ */
+[data-testid="stToggle"] label span {
+    font-family: 'DM Sans', sans-serif !important;
+    color: var(--text-1) !important;
+}
+
+/* ============================================================
+   PIPELINE INFO (sidebar)
+   ============================================================ */
+.pipeline-info {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-2);
+    line-height: 1.8;
+    padding: 0.5rem 0;
+}
+
+.pipeline-info strong {
+    color: var(--amber);
+    font-weight: 700;
+}
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 768px) {

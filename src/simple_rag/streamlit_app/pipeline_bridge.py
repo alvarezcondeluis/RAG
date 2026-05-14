@@ -1,0 +1,274 @@
+"""
+Pipeline bridge — wraps the RAG orchestrator for Streamlit consumption.
+
+Provides non-interactive initialization and query processing that Streamlit
+can drive through session_state.
+"""
+
+import time
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Iterator, Optional
+
+import neo4j as neo4j_lib
+
+from simple_rag.database.neo4j.config import settings
+from simple_rag.rag.orchestrator import PipelineConfig, TEXT2CYPHER_BACKENDS
+from simple_rag.rag.llm_providers.base import LLMProvider, ModelInfo
+from simple_rag.rag.llm_providers.registry import ProviderRegistry
+from simple_rag.rag.answer_generation.result_classifier import ResultClassifier, ResultType
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PipelineState:
+    """Holds initialized pipeline objects for persistence in session_state."""
+    config: PipelineConfig
+    handler: Any  # QueryHandler
+    answer_provider: LLMProvider
+    driver: neo4j_lib.Driver
+    classifier: ResultClassifier = field(default_factory=ResultClassifier)
+
+
+@dataclass
+class QueryStepUpdate:
+    """Progress update emitted during query processing."""
+    step: str
+    detail: str
+    elapsed: float = 0.0
+
+
+@dataclass
+class PipelineQueryResult:
+    """Complete result from pipeline query processing."""
+    category: str
+    confidence: float
+    cypher: Optional[str]
+    data: Any
+    result_type: ResultType
+    enrichment_text: str
+    provenance_text: str
+    token_stream: Iterator[str]
+    charts: list = field(default_factory=list)
+    tabular: list = field(default_factory=list)
+    error: Optional[str] = None
+
+
+# ── Registry singleton ───────────────────────────────────────────────────────
+
+_registry: Optional[ProviderRegistry] = None
+
+
+def _get_registry() -> ProviderRegistry:
+    global _registry
+    if _registry is None:
+        _registry = ProviderRegistry()
+    return _registry
+
+
+# ── Provider / model helpers ─────────────────────────────────────────────────
+
+def get_available_providers() -> list[dict]:
+    """Return providers with API key status."""
+    return _get_registry().available_providers()
+
+
+def list_models_for_provider(provider_name: str) -> list[ModelInfo]:
+    """Fetch models from a provider. Returns empty list on failure."""
+    try:
+        provider = _get_registry().get_provider(provider_name)
+        return provider.list_models()
+    except Exception as e:
+        logger.warning("Failed to list models for %s: %s", provider_name, e)
+        return []
+
+
+def get_text2cypher_backends() -> list[tuple[str, str, str]]:
+    """Return the TEXT2CYPHER_BACKENDS list from the orchestrator."""
+    return list(TEXT2CYPHER_BACKENDS)
+
+
+# ── Pipeline lifecycle ───────────────────────────────────────────────────────
+
+def init_pipeline(config: PipelineConfig) -> PipelineState:
+    """Initialize the full RAG pipeline from config.
+
+    Raises on failure (Neo4j unreachable, invalid provider, etc.).
+    """
+    from simple_rag.rag.query_handler import QueryHandler
+
+    # Neo4j driver
+    driver = neo4j_lib.GraphDatabase.driver(
+        settings.NEO4J_URI,
+        auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+    )
+    driver.verify_connectivity()
+
+    # QueryHandler
+    cypher_kwargs = {}
+    if not config.enable_entity_resolution:
+        cypher_kwargs["use_entity_resolution"] = False
+    if not config.enable_few_shot:
+        cypher_kwargs["use_few_shot"] = False
+
+    handler = QueryHandler(
+        neo4j_driver=driver,
+        cypher_backend=config.cypher_backend,
+        cypher_model=config.cypher_model,
+        **cypher_kwargs,
+    )
+
+    # Answer LLM provider
+    registry = _get_registry()
+    answer_provider = registry.get_provider(
+        config.answer_provider_name, model_id=config.answer_model
+    )
+
+    return PipelineState(
+        config=config,
+        handler=handler,
+        answer_provider=answer_provider,
+        driver=driver,
+    )
+
+
+def shutdown_pipeline(pipeline: PipelineState) -> None:
+    """Close the Neo4j driver and clean up."""
+    try:
+        pipeline.driver.close()
+    except Exception:
+        pass
+
+
+def verify_connection(pipeline: PipelineState) -> bool:
+    """Check if Neo4j is still reachable."""
+    try:
+        pipeline.driver.verify_connectivity()
+        return True
+    except Exception:
+        return False
+
+
+# ── Query processing ─────────────────────────────────────────────────────────
+
+def process_query(
+    query: str,
+    pipeline: PipelineState,
+) -> tuple[list[QueryStepUpdate], PipelineQueryResult]:
+    """Run the full RAG pipeline for a user query.
+
+    Returns:
+        (steps, result) where steps is a list of progress updates and
+        result contains the data + token stream for the answer.
+    """
+    from simple_rag.rag.answer_generation.prompt_templates import (
+        ANSWER_SYSTEM_PROMPT,
+        build_answer_prompt,
+    )
+    from simple_rag.rag.context_enrichment import (
+        format_enrichment_context,
+        resolve_document_provenance,
+    )
+
+    steps: list[QueryStepUpdate] = []
+    config = pipeline.config
+
+    # Step 1: Text2Cypher + Execute
+    t0 = time.time()
+    result = pipeline.handler.handle(
+        query,
+        execute=True,
+        use_schema_injection=config.use_schema_injection,
+    )
+    cypher_time = time.time() - t0
+
+    steps.append(QueryStepUpdate(
+        step="cypher",
+        detail=f"Category: {result.category} ({result.confidence:.0%})",
+        elapsed=cypher_time,
+    ))
+
+    if result.error:
+        return steps, PipelineQueryResult(
+            category=result.category,
+            confidence=result.confidence,
+            cypher=result.cypher,
+            data=None,
+            result_type=ResultType.EMPTY,
+            enrichment_text="",
+            provenance_text="",
+            token_stream=iter([]),
+            error=result.error,
+        )
+
+    if result.data is None:
+        return steps, PipelineQueryResult(
+            category=result.category,
+            confidence=result.confidence,
+            cypher=result.cypher,
+            data=None,
+            result_type=ResultType.EMPTY,
+            enrichment_text="",
+            provenance_text="",
+            token_stream=iter([]),
+            error="No results returned from the database.",
+        )
+
+    # Step 2: Classify result type
+    result_type = pipeline.classifier.classify(result.data, result.category)
+
+    # Step 3: Enrichment + provenance
+    t1 = time.time()
+    enrichment_text = format_enrichment_context(result.enrichment)
+    provenance_text = resolve_document_provenance(
+        cypher=result.cypher or "",
+        neo4j_driver=pipeline.driver,
+        main_results=result.data,
+    )
+    enrich_time = time.time() - t1
+
+    steps.append(QueryStepUpdate(
+        step="enrich",
+        detail=f"{len(result.data)} records, type: {result_type.value}",
+        elapsed=enrich_time,
+    ))
+
+    # Step 4: Build prompt
+    user_prompt = build_answer_prompt(
+        user_query=query,
+        neo4j_results=result.data,
+        result_type=result_type,
+        query_category=result.category,
+        enrichment_context=enrichment_text,
+        provenance_context=provenance_text,
+    )
+
+    messages = [
+        {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    # Create token stream (lazy — streamed by Streamlit)
+    token_stream = pipeline.answer_provider.stream(messages, temperature=0.1)
+
+    # Extract charts / tabular data
+    charts = []
+    tabular = []
+    if result_type == ResultType.CHART_SVG:
+        charts = pipeline.classifier.extract_svg_data(result.data) or []
+    if result_type == ResultType.HOLDINGS_TABLE and len(result.data) > 0:
+        tabular = pipeline.classifier.extract_tabular_data(result.data) or []
+
+    return steps, PipelineQueryResult(
+        category=result.category,
+        confidence=result.confidence,
+        cypher=result.cypher,
+        data=result.data,
+        result_type=result_type,
+        enrichment_text=enrichment_text,
+        provenance_text=provenance_text,
+        token_stream=token_stream,
+        charts=charts,
+        tabular=tabular,
+    )

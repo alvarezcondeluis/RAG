@@ -254,6 +254,54 @@ class CypherValidator:
             )
             return result
 
+        # Step 0a-extra: Catch variable collision — same name used for rel and node
+        # e.g. MATCH (f:Fund)-[p:HAS_PORTFOLIO]->(p:Portfolio) — fatal Cypher error
+        _rel_vars = set(re.findall(r'\[\s*([a-zA-Z_]\w*)\s*:[A-Z_]', query))
+        _node_vars = set(re.findall(r'\(\s*([a-zA-Z_]\w*)\s*:[A-Za-z_]', query))
+        _collisions = _rel_vars & _node_vars
+        if _collisions:
+            _collision_var = next(iter(_collisions))
+            result.is_valid = False
+            result.triggered_rule = "VARIABLE_COLLISION"
+            result.syntax_errors.append(
+                f"VARIABLE COLLISION ERROR: The variable '{_collision_var}' is used for both a "
+                f"relationship and a node in the same query. This is invalid Cypher and will crash. "
+                f"Use distinct variable names: use 'rel' or a prefixed name for the relationship. "
+                f"BAD:  MATCH (f:Fund)-[p:HAS_PORTFOLIO]->(p:Portfolio) "
+                f"GOOD: MATCH (f:Fund)-[rel:HAS_PORTFOLIO]->(p:Portfolio)"
+            )
+            return result
+
+        # Step 0a-extra2: Catch invalid Neo4j function calls: year(), month(), day()
+        # Neo4j does not have these as standalone functions.
+        # To extract a date part, use field accessor: date(prop).year
+        _invalid_fn = re.search(r'\b(year|month|day)\b\s*\(', query, re.IGNORECASE)
+        if _invalid_fn:
+            _fn_name = _invalid_fn.group(1).lower()
+            result.is_valid = False
+            result.triggered_rule = "INVALID_DATE_FUNCTION_CALL"
+            result.syntax_errors.append(
+                f"INVALID FUNCTION ERROR: Neo4j has no '{_fn_name}()' function. "
+                f"To extract a date part from a date property, use field accessor syntax: "
+                f"date(prop).year, date(prop).month, date(prop).day. "
+                f"BAD:  WHERE year(it.transactionDate) = 2023 "
+                f"GOOD: WHERE date(it.transactionDate).year = 2023"
+            )
+            return result
+
+        # Step 0a-extra3: Catch contains() used as a function (it is a keyword operator, not a function)
+        _contains_fn = re.search(r'\bcontains\s*\(', query, re.IGNORECASE)
+        if _contains_fn:
+            result.is_valid = False
+            result.triggered_rule = "INVALID_CONTAINS_FUNCTION"
+            result.syntax_errors.append(
+                "INVALID FUNCTION ERROR: 'contains()' is not a valid Neo4j function. "
+                "Use the CONTAINS keyword as a string operator instead. "
+                "BAD:  WHERE contains(f.name, 'Vanguard') "
+                "GOOD: WHERE f.name CONTAINS 'Vanguard'"
+            )
+            return result
+
         # Step 0a-extra: Catch non-existent Neo4j date/year functions
         # e.g. years(currentDate()), YEAR(DATE()), CURRENT_DATE, year(datetime())
         _invalid_date = re.search(

@@ -203,14 +203,20 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 #   Traverse: objective <-[:HAS_SECTION]-(p:Profile) <-[:DEFINED_BY]-(f:Fund)
 
 (:Profile)-[:EXTRACTED_FROM]->(:Document {
-    accession_number,    # SEC accession number
+    accessionNumber,     # SEC accession number
     url,                 # SEC EDGAR URL
-    filing_date,         # Filing date
+    filingDate,          # Filing date
     reportingDate        # Reporting date
 })
 
 QUERY RULES:
-- These nodes have embeddings — prefer vector search for semantic queries.
+- MANDATORY: For any question about the CONTENT of a fund's strategy, risks, or objectives
+  (e.g., "what risks", "describe the strategy", "which funds focus on..."), you MUST use
+  a vector index — NOT a plain MATCH pattern.
+  - Questions about strategy/risk content → profileChunkIndex
+  - Questions about investment objectives → profileObjectiveIndex
+- Plain MATCH is ONLY allowed when retrieving the full summaryProspectus text from Profile
+  or when filtering by year/structure (not by content meaning).
 - ALWAYS return ticker and name alongside the requested data.
 - Do NOT attempt to extract netAssets or numerical performance from these text nodes.
 """,
@@ -230,11 +236,11 @@ QUERY RULES:
 (:Company)-[:REPORTS_IN {year}]->(:Filing10K)
 
 (:Filing10K)-[:EXTRACTED_FROM]->(:Document {
-    accession_number,    # SEC accession number
+    accessionNumber,     # SEC accession number
     url,                 # SEC EDGAR URL
     form,                # Form type (10-K)
-    filing_date,         # Filing date
-    reporting_date       # Reporting period
+    filingDate,          # Filing date
+    reportingDate        # Reporting period
 })
 
 # === SECTIONS (text + title only — NO embeddings here) ===
@@ -279,6 +285,15 @@ QUERY RULES:
 })
 
 QUERY RULES:
+- MANDATORY: For any question about the CONTENT of a 10-K section (e.g., "what does Apple say
+  about...", "describe how Microsoft...", "find risk factors related to..."), you MUST use
+  filing10kChunkIndex — NOT a plain MATCH pattern.
+  Pattern: CALL db.index.vector.queryNodes('filing10kChunkIndex', $k, $queryVector)
+           YIELD node AS chunk, score
+           MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:SectionLabel)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company)
+  Filter by company ticker or section label as needed.
+- Plain MATCH on Section.text is ONLY allowed when retrieving full section text by exact structural
+  filter (e.g., retrieve the entire Properties section text, not a semantic search within it).
 - Company ticker is a stock ticker like 'AAPL', 'MSFT'.
 - The MD&A section label is 'ManagemetDiscussion' (one 't' — typo preserved from source data).
 - The financials relationship is HAS_FINANCIALS (also exists as HAS_FINACIALS with one 'N' — use HAS_FINANCIALS).
@@ -316,7 +331,7 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 })
 (:CompensationPackage)-[:AWARDED_BY]->(:Company)
 (:CompensationPackage)-[:DISCLOSED_IN]->(:Document {
-    accession_number, filing_date, url
+    accessionNumber, filingDate, url
 })
 
 # Insider transactions
@@ -331,7 +346,7 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 })
 (:InsiderTransaction)-[:MADE_BY]->(:Person {name})
 (:InsiderTransaction)-[:EXTRACTED_FROM]->(:Document {
-    accession_number, filing_date, url
+    accessionNumber, filingDate, url
 })
 
 QUERY RULES:

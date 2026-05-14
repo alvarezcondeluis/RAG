@@ -69,6 +69,47 @@ class _BenchmarkLogger:
 # Import your existing modules
 from simple_rag.rag.query_handler import QueryHandler, QueryResult
 from simple_rag.database.neo4j.neo4j import Neo4jDatabase
+from simple_rag.rag.text2cypher import CypherTranslator
+
+
+@dataclass
+class _CallRecord:
+    """Metrics for a single LLM call (initial or retry)."""
+    call_index: int          # 0 = initial, 1+ = retry N
+    prompt_text: str
+    token_estimate: int
+    latency_ms: float
+    response: str
+
+
+class _InstrumentedTranslator(CypherTranslator):
+    """
+    Thin subclass that wraps _invoke_llm to record per-call metrics.
+    Used only when validator_mode=True.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.call_log: List[_CallRecord] = []
+        self._call_counter: int = 0
+
+    def reset_call_log(self) -> None:
+        self.call_log = []
+        self._call_counter = 0
+
+    def _invoke_llm(self, prompt_text: str) -> str:
+        t0 = time.time()
+        response = super()._invoke_llm(prompt_text)
+        latency_ms = (time.time() - t0) * 1000
+        self.call_log.append(_CallRecord(
+            call_index=self._call_counter,
+            prompt_text=prompt_text,
+            token_estimate=len(prompt_text) // 4,
+            latency_ms=latency_ms,
+            response=response,
+        ))
+        self._call_counter += 1
+        return response
 
 @dataclass
 class TestResult:
@@ -110,10 +151,14 @@ class Text2CypherBenchmark:
         use_schema_injection: bool = True,
         few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
         retry_module: bool = True,
+        validator_mode: bool = False,
+        retry_strategy: str = "full",
+        embed_vector_queries: bool = False,
     ):
         self.test_path = Path(test_set_path)
         self.neo = Neo4jDatabase()
         self.retry_module = retry_module
+        self.embed_vector_queries = embed_vector_queries
 
         # Build extra kwargs for CypherTranslator (forwarded via QueryHandler **cypher_kwargs)
         extra_kwargs = {}
@@ -125,14 +170,19 @@ class Text2CypherBenchmark:
         # because the loop breaks immediately after the first failed attempt.
         if not retry_module:
             extra_kwargs["max_validation_retries"] = 1
+        extra_kwargs["retry_strategy"] = retry_strategy
 
         # Initialize the QueryHandler (Classification → Schema Slice → Cypher)
+        # Only load the Nomic query embedder when embed_vector_queries=True.
+        # Loading it unconditionally was causing the Jupyter cell to hang at the end
+        # because HuggingFaceEmbedding keeps background threads alive that block cleanup.
         self.handler = QueryHandler(
             neo4j_driver=self.neo.driver,
             cypher_model=model_name,
             cypher_backend=backend,
             use_entity_resolver=True,
             few_shot_embedding_model=few_shot_embedding_model,
+            enable_query_embedding=embed_vector_queries,
             **extra_kwargs,
         )
 
@@ -141,6 +191,16 @@ class Text2CypherBenchmark:
         self.interactive = interactive
         self.incorrect_queries: List[Dict[str, Any]] = []
         self.use_schema_injection = use_schema_injection
+        self.validator_mode = validator_mode
+
+        # Upgrade the translator in-place when validator_mode is on.
+        # Reassigning __class__ is safe here: _InstrumentedTranslator only adds
+        # new instance attributes and overrides one method; the memory layout
+        # of the base class is fully compatible.
+        if validator_mode:
+            self.handler.translator.__class__ = _InstrumentedTranslator
+            self.handler.translator.call_log = []
+            self.handler.translator._call_counter = 0
 
         
     def load_tests(self) -> List[Dict]:
@@ -292,6 +352,8 @@ class Text2CypherBenchmark:
         
         # 1. Measure Pipeline (Classification + Translation)
         try:
+            if self.validator_mode:
+                self.handler.translator.reset_call_log()
             gen_start = time.time()
             handle_result = self.handler.handle(question, use_schema_injection=self.use_schema_injection)
             result.generation_time_ms = (time.time() - gen_start) * 1000
@@ -325,8 +387,19 @@ class Text2CypherBenchmark:
 
         # 2. Measure Execution & Accuracy
         try:
-            # Build parameters — pass $queryVector if either query needs it
+            # Build parameters — pass $queryVector if either query needs it.
+            # handle() is called with execute=False so query_embedding is None by default.
+            # When embed_vector_queries=True, we compute it on-demand for any query
+            # whose generated or expected Cypher references $queryVector.
             query_embedding = handle_result.query_embedding
+            needs_vector = (
+                "$queryVector" in result.generated_cypher
+                or "$queryVector" in (expected_cypher or "")
+            )
+            if query_embedding is None and needs_vector and self.embed_vector_queries:
+                query_embedding = self.handler._embed_query(question)
+                if query_embedding is None:
+                    print("⚠️  embed_vector_queries=True but embedder returned None — skipping vector param")
             exec_params = {}
             if query_embedding is not None:
                 exec_params["queryVector"] = query_embedding
@@ -401,7 +474,10 @@ class Text2CypherBenchmark:
         )
         print(f"⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
         print(f"🔢 Prompt tokens (est.): {result.prompt_token_estimate:,}")
-        
+
+        if self.validator_mode:
+            self._print_validator_question_detail(result)
+
         if self.interactive:
             user_validation = self._ask_user_validation(result, item)
             if not user_validation:
@@ -435,22 +511,185 @@ class Text2CypherBenchmark:
         schema_mode_label = "slice (classifier-injected)" if self.use_schema_injection else "full DETAILED_SCHEMA"
         retry_label = (f"ENABLED ({self.handler.translator.max_validation_retries} attempts)"
                        if self.retry_module else "DISABLED (1 attempt, no retry prompts)")
+        retry_strategy_label = self.handler.translator.retry_strategy
+        vector_label = "ON (Nomic embedder active)" if self.embed_vector_queries else "OFF (vector queries skip $queryVector)"
         print(f"📊 Total Questions: {len(test_data)}")
         print(f"🤖 Code Model: {self.handler.translator.model_name}")
         print(f"🏷️  Classifier: SetFit (9 categories)")
         print(f"📐 Schema Mode:  {schema_mode_label} | retries always use full schema")
-        print(f"🔄 Retry Module: {retry_label}")
+        print(f"🔄 Retry Module: {retry_label} | strategy: {retry_strategy_label}")
+        print(f"🧬 Vector Embed: {vector_label}")
         print(f"📁 Report: {report_path}")
         print(f"{'='*80}\n")
+
+        self._validator_call_logs: List[List[_CallRecord]] = []
 
         for i, item in enumerate(test_data, 1):
             res = self.evaluate_single_question(i, item)
             self.results.append(res)
+            # Snapshot call log right after each question (before next reset)
+            if self.validator_mode:
+                self._validator_call_logs.append(
+                    list(getattr(self.handler.translator, 'call_log', []))
+                )
 
         self.print_report()
         benchmark_logger.close()
-        print(f"\n✅ Report saved → {report_path}")
+        # Close Neo4j and LLM resources before writing reports — avoids Jupyter
+        # hanging on HuggingFace background threads during file I/O.
         self.cleanup()
+        print(f"\n✅ Report saved → {report_path}")
+        details_path = self._save_details_report(reports_dir, timestamp, model_slug)
+        print(f"📄 Details saved → {details_path}")
+        if self.validator_mode:
+            validator_path = self._save_validator_report(reports_dir, timestamp, model_slug)
+            print(f"🔬 Validator report → {validator_path}")
+
+    def _print_validator_question_detail(self, result: TestResult) -> None:
+        """Print per-call retry detail for one question (validator_mode only)."""
+        translator = self.handler.translator
+        call_log: List[_CallRecord] = getattr(translator, 'call_log', [])
+        if not call_log:
+            return
+        print(f"\n  🔬 VALIDATOR DETAIL — {len(call_log)} LLM call(s)")
+        for rec in call_log:
+            label = "initial" if rec.call_index == 0 else f"retry {rec.call_index}"
+            print(f"  ┌─ Call {rec.call_index} ({label})  |  {rec.token_estimate:,} tokens  |  {rec.latency_ms:.0f} ms")
+            # Show first 300 chars of prompt so it's readable without flooding output
+            prompt_snippet = rec.prompt_text[:300].replace('\n', ' ')
+            print(f"  │  Prompt snippet : {prompt_snippet}{'…' if len(rec.prompt_text) > 300 else ''}")
+            print(f"  └─ Cypher out     : {rec.response[:200].strip()}")
+
+    def _save_validator_report(self, reports_dir: Path, timestamp: str, model_slug: str) -> Path:
+        """Write full per-call detail to reports/validator/."""
+        validator_dir = reports_dir / "validator"
+        validator_dir.mkdir(parents=True, exist_ok=True)
+        path = validator_dir / f"validator_{timestamp}_{model_slug}.txt"
+
+        total = len(self.results)
+        passed = sum(1 for r in self.results if r.success)
+        all_vf = [rule for r in self.results for rule in r.validation_failures]
+
+        # Collect per-question call logs stored on TestResult (we piggyback on
+        # validation_failures order; the raw call logs are on the translator and
+        # are overwritten each question, so we serialise them into the report file
+        # by re-reading the translator's last state — but since we print live we
+        # instead rely on the _call_log_store we build below in run()).
+        call_logs: List[List[_CallRecord]] = getattr(self, '_validator_call_logs', [])
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"VALIDATOR / RETRY MODULE REPORT — {timestamp} — {model_slug}\n")
+            f.write(f"Total: {total}  |  Passed: {passed}  |  Failed: {total-passed}  |  Accuracy: {passed/total*100:.2f}%\n")
+            f.write("=" * 80 + "\n")
+            f.write("Only questions that triggered at least one retry are shown below.\n")
+            f.write("=" * 80 + "\n\n")
+
+            for i, r in enumerate(self.results):
+                log = call_logs[i] if i < len(call_logs) else []
+                # Skip questions that never needed a retry (only 1 LLM call = initial)
+                if len(log) <= 1:
+                    continue
+                status = "PASS" if r.success else "FAIL"
+                retry_log = [rec for rec in log if rec.call_index > 0]
+                total_q_tokens = sum(c.token_estimate for c in log)
+                total_q_ms = sum(c.latency_ms for c in log)
+                f.write(f"[{status}] Q{r.question_id} [{r.complexity.upper()}] — {r.category} ({r.confidence:.1%})\n")
+                f.write(f"Question    : {r.question}\n")
+                f.write(f"LLM calls   : {len(log)} ({len(retry_log)} retr{'y' if len(retry_log)==1 else 'ies'})  |  Total tokens: {total_q_tokens:,}  |  Total latency: {total_q_ms:.0f} ms\n")
+                if r.validation_failures:
+                    f.write(f"Rules fired : {', '.join(r.validation_failures)}\n")
+                for rec in log:
+                    label = "initial" if rec.call_index == 0 else f"retry {rec.call_index}"
+                    f.write(f"\n  --- Call {rec.call_index} ({label}) ---\n")
+                    f.write(f"  Tokens   : {rec.token_estimate:,}\n")
+                    f.write(f"  Latency  : {rec.latency_ms:.0f} ms\n")
+                    f.write(f"  Cypher   : {rec.response.strip()[:400]}\n")
+                    f.write(f"  Full prompt:\n")
+                    for line in rec.prompt_text.splitlines():
+                        f.write(f"    {line}\n")
+                f.write("-" * 80 + "\n\n")
+
+            # Aggregate section
+            f.write("=" * 80 + "\n")
+            f.write("AGGREGATE VALIDATOR STATS\n")
+            f.write("=" * 80 + "\n")
+
+            never_retried = [r for r in self.results if not r.validation_failures]
+            retried       = [r for r in self.results if r.validation_failures]
+            fixed         = [r for r in retried if r.final_syntax_valid]
+            still_broken  = [r for r in retried if not r.final_syntax_valid]
+
+            pct = lambda n, d: f"{n/d*100:.1f}%" if d else "—"
+            f.write(f"\nQuestions never needing retry : {len(never_retried):3d}  ({pct(len(never_retried), total)})\n")
+            f.write(f"Questions that triggered retry : {len(retried):3d}  ({pct(len(retried), total)})\n")
+            f.write(f"  Fixed by retry               : {len(fixed):3d}  ({pct(len(fixed), len(retried))} of retried)\n")
+            f.write(f"  Still invalid after retry    : {len(still_broken):3d}  ({pct(len(still_broken), len(retried))} of retried)\n")
+
+            if all_vf:
+                vf_counts = Counter(all_vf)
+                f.write(f"\nRule violation frequency ({len(all_vf)} total triggers):\n")
+                for rule, count in vf_counts.most_common():
+                    bar = "█" * max(1, round(count / len(all_vf) * 20))
+                    f.write(f"  {rule:<40} {count:3d}  {bar}\n")
+
+            all_logs_flat = [rec for log in call_logs for rec in log]
+            initial_calls = [rec for rec in all_logs_flat if rec.call_index == 0]
+            retry_calls   = [rec for rec in all_logs_flat if rec.call_index > 0]
+
+            if initial_calls:
+                f.write(f"\nInitial call latency  — avg: {statistics.mean(c.latency_ms for c in initial_calls):.0f} ms"
+                        f"  |  max: {max(c.latency_ms for c in initial_calls):.0f} ms\n")
+                f.write(f"Initial call tokens   — avg: {statistics.mean(c.token_estimate for c in initial_calls):,.0f}"
+                        f"  |  max: {max(c.token_estimate for c in initial_calls):,}\n")
+            if retry_calls:
+                f.write(f"\nRetry call latency    — avg: {statistics.mean(c.latency_ms for c in retry_calls):.0f} ms"
+                        f"  |  max: {max(c.latency_ms for c in retry_calls):.0f} ms\n")
+                f.write(f"Retry call tokens     — avg: {statistics.mean(c.token_estimate for c in retry_calls):,.0f}"
+                        f"  |  max: {max(c.token_estimate for c in retry_calls):,}\n")
+                f.write(f"Total retry tokens    : {sum(c.token_estimate for c in retry_calls):,}\n")
+
+        return path
+
+    def _save_details_report(self, reports_dir: Path, timestamp: str, model_slug: str) -> Path:
+        """Saves a per-question detail file to reports/details/."""
+        details_dir = reports_dir / "details"
+        details_dir.mkdir(parents=True, exist_ok=True)
+        details_path = details_dir / f"details_{timestamp}_{model_slug}.txt"
+
+        with open(details_path, "w", encoding="utf-8") as f:
+            total = len(self.results)
+            passed = sum(1 for r in self.results if r.success)
+            f.write(f"BENCHMARK DETAILS — {timestamp} — {model_slug}\n")
+            f.write(f"Total: {total}  |  Passed: {passed}  |  Failed: {total - passed}  |  Accuracy: {passed/total*100:.2f}%\n")
+            f.write("=" * 80 + "\n\n")
+
+            for r in self.results:
+                status = "✅ PASS" if r.success else "❌ FAIL"
+                f.write(f"{status}  Q{r.question_id} [{r.complexity.upper()}] — {r.category} ({r.confidence:.1%})\n")
+                f.write(f"Question : {r.question}\n")
+                f.write(f"Generated: {r.generated_cypher or '(none)'}\n")
+                f.write(f"Expected : {r.expected_cypher or '(none)'}\n")
+
+                # Generated results
+                f.write(f"Gen Results ({len(r.generated_results)} records):\n")
+                for i, rec in enumerate(r.generated_results[:10]):
+                    f.write(f"  [{i+1}] {rec}\n")
+                if len(r.generated_results) > 10:
+                    f.write(f"  ... and {len(r.generated_results) - 10} more\n")
+
+                # Expected results
+                f.write(f"Exp Results ({len(r.expected_results)} records):\n")
+                for i, rec in enumerate(r.expected_results[:10]):
+                    f.write(f"  [{i+1}] {rec}\n")
+                if len(r.expected_results) > 10:
+                    f.write(f"  ... and {len(r.expected_results) - 10} more\n")
+
+                if not r.success and r.error_type:
+                    f.write(f"Error    : {r.error_type} — {r.error_message}\n")
+
+                f.write("-" * 80 + "\n\n")
+
+        return details_path
 
     def print_report(self):
         """Generates and prints the final metrics report."""
