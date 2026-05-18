@@ -39,19 +39,23 @@ class EnrichmentRule:
 ENRICHMENT_RULES: list[EnrichmentRule] = [
     EnrichmentRule(
         name="fund_overview",
-        description="Full fund details with provider and trust",
+        description="Full fund details with provider, trust, and latest financial highlights",
         categories=["fund_basic", "fund_portfolio", "fund_profile"],
         param_type="fund_ticker",
         priority=10,
         cypher_template="""
             MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->(f:Fund)
             WHERE f.ticker = $ticker
+            OPTIONAL MATCH (f)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
             RETURN f.ticker AS ticker, f.name AS fundName,
-                   f.expenseRatio AS expenseRatio, f.netAssets AS netAssets,
-                   f.turnoverRate AS turnoverRate, f.advisoryFees AS advisoryFees,
-                   f.numberHoldings AS numberHoldings, f.costsPer10k AS costsPer10k,
                    f.securityExchange AS exchange,
-                   prov.name AS provider, t.name AS trust
+                   prov.name AS provider, t.name AS trust,
+                   fh.expenseRatio AS expenseRatio, fh.netAssets AS netAssets,
+                   fh.turnover AS turnover, fh.advisoryFees AS advisoryFees,
+                   fh.totalReturn AS totalReturn, fh.netIncomeRatio AS netIncomeRatio,
+                   r.year AS year
+            ORDER BY r.year DESC
+            LIMIT 1
         """,
     ),
     

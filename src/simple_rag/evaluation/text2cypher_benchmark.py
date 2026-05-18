@@ -725,6 +725,88 @@ class Text2CypherBenchmark:
             print(f"   Avg LLM calls per query: {statistics.mean([r.attempt_count for r in results if r.attempt_count > 0]):.2f}")
         print("=" * 110)
 
+    def quick_eval(
+        self,
+        question: str,
+        use_schema_injection: bool = True,
+        n: int = 1,
+        verbose: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Run a single question through the Text2Cypher pipeline N times and return
+        avg timings + last result. Designed for notebook cells.
+
+        Usage:
+            bench = Text2CypherBenchmark(test_set_path=..., model_name=..., backend=...)
+            result = bench.quick_eval("What is the expense ratio of VTI?", n=3)
+            print(result)
+
+        Returns a dict with:
+            question, use_schema_injection, n,
+            avg_generation_ms, avg_execution_ms, avg_total_ms,
+            avg_attempts, avg_prompt_tokens,
+            last_cypher, last_records (up to 5), category, schema_name, success
+        """
+        item = {"question": question, "expected_cypher": None, "ground_truth_answer": None, "complexity": "unknown"}
+
+        gen_times, exec_times, attempts, tokens = [], [], [], []
+        last_result = None
+
+        for i in range(n):
+            if verbose and n > 1:
+                print(f"\n--- Run {i+1}/{n} ---")
+            res = self.evaluate_single_question(index=i + 1, item=item, use_schema_injection=use_schema_injection)
+            last_result = res
+            if res.generation_time_ms > 0:
+                gen_times.append(res.generation_time_ms)
+            if res.execution_time_ms > 0:
+                exec_times.append(res.execution_time_ms)
+            if res.attempt_count > 0:
+                attempts.append(res.attempt_count)
+            if res.prompt_token_estimate > 0:
+                tokens.append(res.prompt_token_estimate)
+
+        avg_gen = statistics.mean(gen_times) if gen_times else 0.0
+        avg_exec = statistics.mean(exec_times) if exec_times else 0.0
+        avg_total = avg_gen + avg_exec
+        avg_att = statistics.mean(attempts) if attempts else 0.0
+        avg_tok = statistics.mean(tokens) if tokens else 0.0
+
+        summary = {
+            "question": question,
+            "use_schema_injection": use_schema_injection,
+            "n": n,
+            "avg_generation_ms": round(avg_gen, 1),
+            "avg_execution_ms": round(avg_exec, 1),
+            "avg_total_ms": round(avg_total, 1),
+            "avg_attempts": round(avg_att, 2),
+            "avg_prompt_tokens": round(avg_tok, 0),
+            "category": last_result.category if last_result else "",
+            "schema_name": last_result.schema_name if last_result else "",
+            "last_cypher": last_result.generated_cypher if last_result else "",
+            "last_records": (last_result.generated_results[:5] if last_result else []),
+            "success": last_result.success if last_result else False,
+            "error": last_result.error_message if last_result and last_result.error_message else None,
+        }
+
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"QUICK EVAL SUMMARY ({n} run{'s' if n > 1 else ''})")
+            print(f"{'='*60}")
+            print(f"  Schema mode    : {'SLICED' if use_schema_injection else 'DETAILED'}")
+            print(f"  Category       : {summary['category']}")
+            print(f"  Schema slice   : {summary['schema_name'] or '—'}")
+            print(f"  Avg gen time   : {summary['avg_generation_ms']:.1f} ms")
+            print(f"  Avg exec time  : {summary['avg_execution_ms']:.1f} ms")
+            print(f"  Avg total time : {summary['avg_total_ms']:.1f} ms")
+            print(f"  Avg LLM calls  : {summary['avg_attempts']:.2f}")
+            print(f"  Avg tokens     : {summary['avg_prompt_tokens']:.0f}")
+            print(f"  Last cypher    : {summary['last_cypher']}")
+            print(f"  Last records   : {summary['last_records']}")
+            print(f"{'='*60}")
+
+        return summary
+
     def cleanup(self):
         try:
             self.handler.translator.stop_ollama_server()

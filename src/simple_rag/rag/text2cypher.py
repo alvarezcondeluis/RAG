@@ -1,3 +1,4 @@
+import os
 import subprocess
 import time
 import requests
@@ -63,6 +64,8 @@ class CypherTranslator:
         llama_cpp_port: Optional[int] = None,
         few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
         retry_strategy: str = "full",
+        use_few_shot: bool = True,
+        use_groq_fallback: bool = True,
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -114,6 +117,7 @@ class CypherTranslator:
         self.device = device
         self.temperature = temperature
         self.groq_api_key = None
+        self.use_few_shot = use_few_shot
         self.selector = DynamicFewShotSelector(k=3, embedding_model=few_shot_embedding_model)
         
         # Initialize HuggingFace attributes 
@@ -151,6 +155,30 @@ class CypherTranslator:
         # Initialize Cypher validator
         self.validator = CypherValidator(neo4j_driver=neo4j_driver, block_writes=True)
         print("✓ CypherValidator initialized")
+
+        # Groq 70B fallback LLM — used as last resort when all retries are exhausted
+        self.fallback_llm = None
+        if use_groq_fallback:
+            _fallback_key = os.environ.get("GROQ_API_KEY")
+            _is_already_groq70b = (
+                backend == "groq" and "70b" in model_name.lower()
+            )
+            if _fallback_key and not _is_already_groq70b:
+                try:
+                    from langchain_groq import ChatGroq
+                    self.fallback_llm = ChatGroq(
+                        model="llama-3.3-70b-versatile",
+                        api_key=_fallback_key,
+                        temperature=0.1,
+                        max_tokens=512,
+                    )
+                    print("✓ Groq 70B fallback initialized (last-resort after retries)")
+                except Exception as e:
+                    print(f"⚠ Groq 70B fallback unavailable: {e}")
+            elif _is_already_groq70b:
+                print("ℹ  Primary model is already Groq 70B — fallback disabled")
+            else:
+                print("⚠ GROQ_API_KEY not set — Groq 70B fallback disabled")
 
         # LangChain components
         self.llm = None
@@ -539,6 +567,12 @@ class CypherTranslator:
             self.groq_reset_time = datetime.now() + timedelta(days=1)
             print("✓ Groq usage counters reset")
     
+    def _invoke_with_llm(self, llm, prompt_text: str) -> str:
+        """Invoke an arbitrary LangChain LLM instance with a pre-formatted prompt."""
+        from langchain_core.messages import HumanMessage
+        response = llm.invoke([HumanMessage(content=prompt_text)])
+        return response.content if hasattr(response, "content") else str(response)
+
     def _invoke_llm(self, prompt_text: str) -> str:
         """
         Invoke the LLM with a pre-formatted prompt string.
@@ -639,13 +673,17 @@ class CypherTranslator:
                 print(f"🔍 Entities: {entity_summary}")
         
         # Step 2: Get few-shot examples (reuse pre-computed vector to avoid duplicate Nomic inference)
-        examples_str = self.selector.get_formatted_context(user_query, query_vector=query_vector)
-        n_examples = len(examples_str.split('Example'))-1
-        print(f"📚 Examples: {n_examples} retrieved")
-        if examples_str.strip():
-            print("--- Retrieved Examples ---")
-            print(examples_str.strip())
-            print("--------------------------")
+        if self.use_few_shot:
+            examples_str = self.selector.get_formatted_context(user_query, query_vector=query_vector)
+            n_examples = len(examples_str.split('Example'))-1
+            print(f"📚 Examples: {n_examples} retrieved")
+            if examples_str.strip():
+                print("--- Retrieved Examples ---")
+                print(examples_str.strip())
+                print("--------------------------")
+        else:
+            examples_str = ""
+            print("📚 Examples: disabled")
         
         try:
             # Update temperature if provided
@@ -781,10 +819,38 @@ class CypherTranslator:
                 
                 print(f"✓ Generated Cypher (attempt {attempt + 1}): {cypher_query}")
             
+            # Groq 70B fallback — fires only if retries were exhausted and query is still invalid
+            if self.fallback_llm is not None and not validation_result.is_valid:
+                print("🆘 All retries exhausted — escalating to Groq 70B fallback...")
+                try:
+                    from simple_rag.rag.prompt_templates import CYPHER_RETRY_TEMPLATE
+                    from langchain_core.prompts import PromptTemplate
+                    _full_retry_prompt = PromptTemplate(
+                        input_variables=["schema", "entity_context", "question", "failed_query", "validation_errors", "error_examples"],
+                        template=CYPHER_RETRY_TEMPLATE,
+                    )
+                    fallback_prompt = _full_retry_prompt.format(
+                        schema=self.detailed_schema,
+                        entity_context=entity_context,
+                        question=processed_query,
+                        failed_query=cypher_query,
+                        validation_errors=error_summary,
+                        error_examples="",
+                    )
+                    fallback_response = self._invoke_with_llm(self.fallback_llm, fallback_prompt)
+                    fallback_cypher = self._clean_cypher(fallback_response)
+                    if fallback_cypher:
+                        fallback_validation = self.validator.validate(fallback_cypher)
+                        status = "✅ valid" if fallback_validation.is_valid else "⚠ still invalid"
+                        print(f"🆘 Groq 70B fallback result ({status}): {fallback_cypher}")
+                        cypher_query = fallback_cypher
+                except Exception as e:
+                    print(f"⚠ Groq 70B fallback failed: {e}")
+
             # Restore original temperature
             if temperature is not None and self.backend in ["ollama", "groq"]:
                 self.llm.temperature = self.temperature
-            
+
             return cypher_query
             
         except Exception as e:
@@ -921,6 +987,27 @@ CORRECT: MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)
          RETURN p.count AS holdingsCount
 """)
         
+        # Pattern 7: Relationship direction written as -<[:REL] instead of <-[:REL]
+        if "-<[" in error_summary or "invalid input '-'" in error_lower:
+            examples.append("""
+ERROR PATTERN: Reversed Relationship Direction Syntax
+The arrow for an incoming relationship is <-[:REL]- NOT -<[:REL]-.
+The dash and angle-bracket must be: <- before the bracket, or -> after it.
+
+WRONG: MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)-<[:HAS_SECTION]-(f:Filing10K)
+       (The -< is not valid Cypher syntax)
+
+CORRECT: MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)<-[:HAS_SECTION]-(f:Filing10K)
+         (Use <- before the bracket for incoming relationships)
+
+CORRECT pattern for vector search traversal:
+  CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score
+  MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'})
+  RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5
+
+RULE: Every incoming relationship arrow must be written as <-[:TYPE]- never as -<[:TYPE]-.
+""")
+
         # Return formatted examples or empty string
         if examples:
             return "\n" + "="*60 + "\nRELEVANT EXAMPLES TO FIX YOUR ERROR:\n" + "="*60 + "\n".join(examples)
@@ -1046,6 +1133,15 @@ CORRECT: MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)
 
         return query
     
+    def refresh_entity_cache(self) -> None:
+        """Reload the entity resolver cache from Neo4j. Call this if the database
+        was updated after the translator was initialized."""
+        if self.entity_resolver:
+            self.entity_resolver._refresh_cache()
+            print("✓ Entity cache refreshed")
+        else:
+            print("⚠ Entity resolver is not enabled")
+
     def stop_ollama_server(self) -> None:
         """Stop the Ollama server if it was started by this instance. No-op for other backends."""
         if self.backend != "ollama":

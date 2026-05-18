@@ -26,15 +26,19 @@ def render_sidebar() -> Dict[str, Any]:
         if pipeline:
             cfg = pipeline.config
             st.markdown("### Pipeline")
+            server = f" ({cfg.openai_compatible_host}:{cfg.openai_compatible_port})" if cfg.cypher_backend == "openai" else ""
             st.markdown(
                 f"""<div class="pipeline-info">
-                <strong>Text2Cypher:</strong> {cfg.cypher_backend} / {cfg.cypher_model}<br>
+                <strong>Text2Cypher:</strong> {cfg.cypher_backend}{server} / {cfg.cypher_model}<br>
                 <strong>Answer LLM:</strong> {cfg.answer_provider_name} / {cfg.answer_model}<br>
                 <strong>Schema:</strong> {'ON' if cfg.use_schema_injection else 'OFF'}
                 &nbsp;&middot;&nbsp;
                 <strong>Entity Res:</strong> {'ON' if cfg.enable_entity_resolution else 'OFF'}
                 &nbsp;&middot;&nbsp;
-                <strong>Few-Shot:</strong> {'ON' if cfg.enable_few_shot else 'OFF'}
+                <strong>Few-Shot:</strong> {'ON' if cfg.enable_few_shot else 'OFF'}<br>
+                <strong>Retry:</strong> {'ON' if cfg.retry_module else 'OFF'} ({cfg.retry_strategy})
+                &nbsp;&middot;&nbsp;
+                <strong>VecEmbed:</strong> {'ON' if cfg.embed_vector_queries else 'OFF'}
                 </div>""",
                 unsafe_allow_html=True,
             )

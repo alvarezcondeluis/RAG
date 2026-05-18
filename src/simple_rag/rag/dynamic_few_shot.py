@@ -6,7 +6,7 @@ from langchain_community.vectorstores import FAISS
 from pathlib import Path
 import json
 import hashlib
-from simple_rag.embeddings.embedding import EmbedData
+from src.simple_rag.embeddings.embedding import EmbedData
 
 
 NOMIC_MODEL = "nomic-ai/nomic-embed-text-v1.5"

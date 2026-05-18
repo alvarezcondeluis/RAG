@@ -28,8 +28,8 @@ GUIDELINES:
 12. If the query is about a specific fund, never mention other funds unless explicitly asked.
 13. Be complete in your answers.
 14. IMPORTANT: NEVER ASNWER WITH INFORMATION THAT IS NOT PROVIDED IN THE CONTEXT.
-15. If many numerical data is given show it first in a markdown table format and then comment the data."""
-
+15. If many numerical data is given show it first in a markdown table format and then comment the data.
+16. Entity names or tickers show them in bold."""
 
 # ── Schema context descriptions ──────────────────────────────────────────────
 

@@ -33,8 +33,10 @@ load_dotenv(_project_root / ".env")
 class PipelineConfig:
     """Holds all user-selected pipeline options."""
     # Text2Cypher
-    cypher_backend: str = "ollama"
-    cypher_model: str = "llama3.1:8b"
+    cypher_backend: str = "openai"
+    cypher_model: str = "qwen2.5-coder"
+    openai_compatible_host: str = "localhost"
+    openai_compatible_port: int = 1234
 
     # Answer generation
     answer_provider_name: str = "groq"
@@ -46,13 +48,19 @@ class PipelineConfig:
     enable_few_shot: bool = True
     verbose: bool = False
 
+    # Advanced
+    few_shot_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    retry_module: bool = True
+    retry_strategy: str = "full"
+    embed_vector_queries: bool = False
+
 
 # ── Interactive setup ────────────────────────────────────────────────────────
 
 TEXT2CYPHER_BACKENDS = [
-    ("ollama", "Ollama (local)", "tomasonjo/llama3-text2cypher-demo:8b_4bit"),
+    ("openai", "OpenAI-compatible (LM Studio / llama.cpp)", "qwen2.5-coder"),
     ("groq", "Groq", "llama-3.3-70b-versatile"),
-    ("openai", "OpenAI-compatible (llama.cpp / LM Studio)", ""),
+    ("ollama", "Ollama (local)", "tomasonjo/llama3-text2cypher-demo:8b_4bit"),
 ]
 
 

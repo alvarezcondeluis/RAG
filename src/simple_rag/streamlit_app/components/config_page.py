@@ -156,6 +156,20 @@ def render_config_page() -> None:
                 help="Could not fetch models. Enter model name manually.",
             )
 
+    # ── OpenAI-compatible server settings (shown only for openai backend) ────
+    openai_host = "localhost"
+    openai_port = 1234
+    if cypher_backend == "openai":
+        st.markdown(
+            '<div class="config-section-title">OpenAI-Compatible Server</div>',
+            unsafe_allow_html=True,
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            openai_host = st.text_input("Host", value="localhost", key="_openai_host")
+        with col2:
+            openai_port = st.number_input("Port", value=1234, min_value=1, max_value=65535, step=1, key="_openai_port")
+
     # ── Pipeline Options ─────────────────────────────────────────────────────
     st.markdown(
         '<div class="config-section-title">Pipeline Options</div>',
@@ -163,7 +177,6 @@ def render_config_page() -> None:
     )
 
     col1, col2, col3, col4 = st.columns(4)
-
     with col1:
         use_schema_injection = st.toggle("Schema Injection", value=True, key="_schema_toggle")
     with col2:
@@ -173,17 +186,44 @@ def render_config_page() -> None:
     with col4:
         verbose = st.toggle("Verbose Mode", value=False, key="_verbose_toggle")
 
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        retry_module = st.toggle("Retry on Error", value=True, key="_retry_toggle")
+    with col2:
+        embed_vector_queries = st.toggle("Embed Vector Queries", value=False, key="_embed_toggle")
+    with col3:
+        retry_strategy = st.selectbox(
+            "Retry Strategy",
+            options=["full", "lean"],
+            index=0,
+            key="_retry_strategy_select",
+        )
+    with col4:
+        few_shot_model = st.selectbox(
+            "Few-Shot Model",
+            options=[
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "nomic-ai/nomic-embed-text-v1.5",
+            ],
+            index=0,
+            key="_fewshot_model_select",
+        )
+
     # ── Summary ──────────────────────────────────────────────────────────────
     st.markdown("---")
 
+    server_info = f"`{openai_host}:{openai_port}`" if cypher_backend == "openai" else "—"
     summary_md = f"""
 | Setting | Value |
 |---|---|
 | **Text2Cypher** | `{backend_options.get(cypher_backend, cypher_backend)}` / `{cypher_model}` |
+| **Server** | {server_info} |
 | **Answer LLM** | `{answer_provider_name}` / `{answer_model}` |
 | **Schema Injection** | {'ON' if use_schema_injection else 'OFF'} |
 | **Entity Resolution** | {'ON' if enable_entity_resolution else 'OFF'} |
-| **Few-Shot** | {'ON' if enable_few_shot else 'OFF'} |
+| **Few-Shot** | {'ON' if enable_few_shot else 'OFF'} (`{few_shot_model.split('/')[-1]}`) |
+| **Retry on Error** | {'ON' if retry_module else 'OFF'} (`{retry_strategy}`) |
+| **Embed Vector Queries** | {'ON' if embed_vector_queries else 'OFF'} |
 | **Verbose** | {'ON' if verbose else 'OFF'} |
 """
     st.markdown(summary_md)
@@ -195,12 +235,18 @@ def render_config_page() -> None:
         config = PipelineConfig(
             cypher_backend=cypher_backend,
             cypher_model=cypher_model,
+            openai_compatible_host=openai_host,
+            openai_compatible_port=int(openai_port),
             answer_provider_name=answer_provider_name,
             answer_model=answer_model,
             use_schema_injection=use_schema_injection,
             enable_entity_resolution=enable_entity_resolution,
             enable_few_shot=enable_few_shot,
             verbose=verbose,
+            few_shot_embedding_model=few_shot_model,
+            retry_module=retry_module,
+            retry_strategy=retry_strategy,
+            embed_vector_queries=embed_vector_queries,
         )
 
         with st.spinner("Initializing pipeline... Connecting to Neo4j and loading models."):

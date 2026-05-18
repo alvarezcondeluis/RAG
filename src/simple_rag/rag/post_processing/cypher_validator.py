@@ -95,8 +95,8 @@ class CypherValidator:
                                "netIncomeRatio", "numberHoldings", "advisoryFees", "costsPer10k"},
         "Company": {"ticker", "name", "cik"},
         "CompensationPackage": {"totalCompensation", "shareholderReturn", "date"},
-        "InsiderTransaction": {"position", "transactionType", "shares", "price",
-                               "value", "remainingShares"},
+        "InsiderTransaction": {"transactionDate", "position", "transactionType", "shares",
+                               "price", "value", "remainingShares"},
         "Chunk": {"title", "text", "embedding", "chunkType", "chunkIndex",
                   "subsection", "sectionType", "sectionName", "ticker", "filingDate",
                   "wordCount"},
@@ -397,7 +397,7 @@ class CypherValidator:
         # Strip {} blocks first to avoid false-positives from EXISTS{} subqueries and literal maps
         _query_no_braces = re.sub(r'\{[^{}]*\}', '', query)
         where_agg = re.search(
-            r'\bWHERE\b[^;]*?\b(COUNT|SUM|AVG|MIN|MAX)\s*\(',
+            r'\bWHERE\b(?:(?!\b(?:RETURN|WITH|OPTIONAL\s+MATCH|MATCH|ORDER\s+BY|LIMIT|SKIP|UNION)\b).)*?\b(COUNT|SUM|AVG|MIN|MAX)\s*\(',
             _query_no_braces, re.IGNORECASE
         )
         if where_agg:
@@ -586,6 +586,10 @@ class CypherValidator:
         for match in rel_def_pattern.finditer(query):
             defined_rel_vars.add(match.group(1))
 
+        # Extract all node variables defined in MATCH patterns: (varName:Label)
+        # If a variable is bound to a node, it should never be flagged as an undefined rel var
+        defined_node_vars = set(re.findall(r'\(\s*([a-zA-Z_]\w*)\s*:[A-Za-z_]', query))
+
         # Extract all relationship variable usages: r.property, r.year, etc.
         # Look in RETURN, WHERE, ORDER BY, WITH clauses
         used_rel_vars = {}
@@ -595,17 +599,19 @@ class CypherValidator:
             var_name = match.group(1)
             property_name = match.group(2)
 
-            # Skip node variables (f, g, h, p, c, etc.) - these are typically single letters
-            # We're looking for relationship variables that are used but not defined
-            # Check if this variable is used in a context that suggests it's a relationship variable
-            # (i.e., used for properties that are typically on relationships like weight, year)
+            # Only flag properties that are exclusively on relationships (not nodes)
             if property_name in {'weight', 'year', 'date', 'ceoCompensation', 'ceoActuallyPaid',
-                                'shares', 'marketValue', 'currency', 'fairValueLevel',
+                                'marketValue', 'currency', 'fairValueLevel',
                                 'isRestricted', 'payoffProfile'}:
-                if var_name not in defined_rel_vars:
-                    if var_name not in used_rel_vars:
-                        used_rel_vars[var_name] = []
-                    used_rel_vars[var_name].append(property_name)
+                # Skip if already defined as a relationship variable
+                if var_name in defined_rel_vars:
+                    continue
+                # Skip if the variable is bound to a node — it's a node property access, not a rel var
+                if var_name in defined_node_vars:
+                    continue
+                if var_name not in used_rel_vars:
+                    used_rel_vars[var_name] = []
+                used_rel_vars[var_name].append(property_name)
 
         return used_rel_vars
 

@@ -258,10 +258,174 @@ class QueryClassifierBenchmark:
         self.mlb = MultiLabelBinarizer(classes=self.LABELS)
         self.mlb.fit([self.LABELS])
 
+    @staticmethod
+    def _get_labels(item: Dict[str, Any]) -> List[str]:
+        """
+        Read expected labels from a data item regardless of key name.
+        Handles 'labels' (list), 'label' (string or list), and missing key.
+        After the training_data.json normalisation pass all items should
+        have 'labels' (list), but this stays defensive.
+        """
+        raw = item.get("labels") or item.get("label", [])
+        if isinstance(raw, str):
+            return [raw]
+        return list(raw)
+
+    @staticmethod
+    def _infer_labels_from_cypher(cypher: str) -> List[str]:
+        """
+        Infer classification labels from expected Cypher query patterns.
+        Patterns are derived directly from schema_slices.py — one block per slice.
+        """
+        labels: set = set()
+
+        # ── company_people ──────────────────────────────────────────────────────
+        # Schema nodes/rels: MANAGED_BY, HAS_CEO, InsiderTransaction,
+        #   CompensationPackage, RECEIVED_COMPENSATION, AWARDED_BY, MADE_BY
+        # Properties unique to this slice: ceoCompensation, ceoActuallyPaid,
+        #   shareholderReturn, remainingShares, transactionType
+        # Index: personNameIndex
+        if any(p in cypher for p in [
+            "MANAGED_BY", "HAS_CEO",
+            "InsiderTransaction", "CompensationPackage",
+            "RECEIVED_COMPENSATION", "AWARDED_BY", "MADE_BY",
+            "ceoCompensation", "ceoActuallyPaid",
+            "shareholderReturn", "remainingShares", "transactionType",
+            "personNameIndex",
+        ]):
+            labels.add("company_people")
+
+        # ── company_filing ──────────────────────────────────────────────────────
+        # Schema nodes/rels: Filing10K, REPORTS_IN, HAS_FINANCIALS,
+        #   FinancialMetric, Segment
+        # Section labels (only in 10-K): BusinessInformation, LegalProceeding,
+        #   ManagementDiscussion, Properties, Financials
+        # Vector index: chunkEmbeddingIndex
+        # Properties unique to this slice: incomeStatement, balanceSheet,
+        #   cashFlow, fiscalYear
+        if any(p in cypher for p in [
+            "Filing10K", "REPORTS_IN", "HAS_FINANCIALS", "HAS_FINACIALS",
+            "FinancialMetric", ":Segment",
+            "BusinessInformation", "LegalProceeding", "ManagementDiscussion",
+            ":Properties", ":Financials",
+            "chunkEmbeddingIndex",
+            "incomeStatement", "balanceSheet", "cashFlow", "fiscalYear",
+        ]):
+            labels.add("company_filing")
+
+        # ── fund_portfolio ──────────────────────────────────────────────────────
+        # Schema nodes/rels: HAS_PORTFOLIO, HAS_HOLDING, HAS_SECTOR_ALLOCATION,
+        #   HAS_REGION_ALLOCATION, OF_ASSET_TYPE, REPRESENTS
+        # Node labels: Portfolio, Holding, Sector, Region, AssetCategory
+        if any(p in cypher for p in [
+            "HAS_HOLDING", "HAS_PORTFOLIO",
+            "HAS_SECTOR_ALLOCATION", "HAS_REGION_ALLOCATION",
+            "OF_ASSET_TYPE", "REPRESENTS",
+            ":Portfolio", ":Holding",
+            ":Sector", ":Region", ":AssetCategory",
+        ]):
+            labels.add("fund_portfolio")
+
+        # ── fund_profile ────────────────────────────────────────────────────────
+        # Schema nodes/rels: DEFINED_BY, Profile, summaryProspectus
+        # Section labels (only in Profile): Objective, PerformanceCommentary,
+        #   Strategy (Strategy also has chunks)
+        # Vector indexes: chunkEmbeddingIndex (shared with 10K), profileObjectiveIndex
+        # Note: RiskFactor is shared with company_filing — handled separately below
+        if any(p in cypher for p in [
+            "DEFINED_BY", ":Profile", "summaryProspectus",
+            ":Objective", ":PerformanceCommentary", ":Strategy",
+            "profileObjectiveIndex",
+        ]) or ("Profile" in cypher and "HAS_SECTION" in cypher):
+            labels.add("fund_profile")
+
+        # RiskFactor appears in both slices.
+        # If company_filing already matched → 10-K context.
+        # Otherwise → fund profile context.
+        if ":RiskFactor" in cypher and "company_filing" not in labels:
+            labels.add("fund_profile")
+
+        # ── fund_basic ──────────────────────────────────────────────────────────
+        # Schema nodes/rels: HAS_FINANCIAL_HIGHLIGHT, FinancialHighlight,
+        #   HAS_AVERAGE_RETURNS, AverageReturns, HAS_CHART, HAS_TABLE,
+        #   HAS_SHARE_CLASS, ShareClass
+        # Fund properties unique to this slice: expenseRatio, advisoryFees,
+        #   costsPer10k, netIncomeRatio, netAssetsValueBeginning, netAssetsValueEnd,
+        #   return1y, return5y, return10y, returnInception, totalReturn, turnover
+        # Indexes: fundNameIndex, providerNameIndex, trustNameIndex
+        if any(p in cypher for p in [
+            "HAS_FINANCIAL_HIGHLIGHT", "FinancialHighlight",
+            "HAS_AVERAGE_RETURNS", "AverageReturns",
+            "HAS_CHART", "HAS_TABLE",
+            "HAS_SHARE_CLASS", ":ShareClass",
+            "fundNameIndex", "providerNameIndex", "trustNameIndex",
+            "expenseRatio", "advisoryFees", "costsPer10k",
+            "netIncomeRatio", "netAssetsValueBeginning", "netAssetsValueEnd",
+            "return1y", "return5y", "return10y", "returnInception",
+            "totalReturn", "turnover",
+        ]):
+            labels.add("fund_basic")
+
+        # ── Fallbacks ────────────────────────────────────────────────────────────
+        # Fund / Provider / Trust node with no more specific match → fund_basic
+        if not labels and any(p in cypher for p in [":Fund", "Fund {", ":Provider", ":Trust"]):
+            labels.add("fund_basic")
+
+        # Company node alone (no filing/people context yet) → company_filing
+        if not labels and ":Company" in cypher:
+            labels.add("company_filing")
+
+        # Last resort
+        if not labels:
+            labels.add("fund_basic")
+
+        return sorted(labels)
+
     def load_test_set(self):
-        """Load test set from JSON file."""
+        """
+        Load test set from JSON file.
+
+        Supports two formats:
+        - Old format: [{"text": "...", "labels": ["fund_basic", ...]}, ...]
+        - test_set.json format: [{"question": "...", "expected_cypher": "...", "complexity": "..."}, ...]
+          Labels are automatically inferred from the expected Cypher query.
+        """
         with open(self.test_set_path, "r") as f:
-            self.test_data = json.load(f)
+            raw_data = json.load(f)
+
+        # training_data.json wraps splits under "train"/"test" keys — unwrap test split
+        if isinstance(raw_data, dict):
+            raw_data = raw_data.get("test", raw_data.get("train", []))
+
+        if not raw_data:
+            self.test_data = []
+            print("✓ Loaded 0 test queries")
+            return
+
+        first = raw_data[0]
+        if "text" in first or "labels" in first:
+            # Already in canonical format
+            self.test_data = raw_data
+        else:
+            # test_set.json format — normalize and infer labels
+            self.test_data = []
+            label_dist: Counter = Counter()
+            for item in raw_data:
+                cypher = item.get("expected_cypher", "")
+                labels = self._infer_labels_from_cypher(cypher)
+                for l in labels:
+                    label_dist[l] += 1
+                self.test_data.append({
+                    "text": item["question"],
+                    "labels": labels,
+                    # Keep originals for reference
+                    "_expected_cypher": cypher,
+                    "_complexity": item.get("complexity", ""),
+                })
+
+            print(f"  Format: test_set.json (labels inferred from expected Cypher)")
+            print(f"  Label distribution: {dict(label_dist.most_common())}")
+
         print(f"✓ Loaded {len(self.test_data)} test queries")
 
     def run_setfit_benchmark(self) -> BenchmarkStats:
@@ -275,7 +439,7 @@ class QueryClassifierBenchmark:
 
         for i, item in enumerate(self.test_data, 1):
             query = item["text"]
-            expected_labels = item.get("labels", [])
+            expected_labels = self._get_labels(item)
 
             try:
                 start = time.time()
@@ -326,7 +490,7 @@ class QueryClassifierBenchmark:
 
         for i, item in enumerate(self.test_data, 1):
             query = item["text"]
-            expected_labels = item.get("labels", [])
+            expected_labels = self._get_labels(item)
 
             try:
                 start = time.time()
@@ -383,7 +547,13 @@ class QueryClassifierBenchmark:
         stats.correct_exact_match = sum(
             1 for r in successful if set(r.expected_labels) == set(r.predicted_labels)
         )
-        stats.accuracy = stats.correct_exact_match / len(successful)
+        # Superset match: predicted contains ALL expected labels (may have extras).
+        # Treated as correct because retrieving more categories still satisfies the query.
+        correct_superset = sum(
+            1 for r in successful
+            if set(r.expected_labels).issubset(set(r.predicted_labels))
+        )
+        stats.accuracy = correct_superset / len(successful)
 
         # Hamming loss
         stats.hamming_loss = hamming_loss(y_true, y_pred)
@@ -424,118 +594,204 @@ class QueryClassifierBenchmark:
 
         return stats
 
-    def generate_report(self, setfit_stats: BenchmarkStats, llm_stats: BenchmarkStats, output_file: Optional[str] = None):
-        """Generate comprehensive comparison report."""
+    def generate_report(
+        self,
+        setfit_stats: BenchmarkStats,
+        llm_stats: Optional[BenchmarkStats] = None,
+        output_file: Optional[str] = None,
+    ):
+        """
+        Generate comprehensive report.
+
+        When llm_stats is None or has total_queries==0, a single-column
+        SetFit-only report is produced.
+        """
+        setfit_only = llm_stats is None or llm_stats.total_queries == 0
         report_lines = []
 
-        report_lines.append("=" * 100)
-        report_lines.append("QUERY CLASSIFIER BENCHMARK REPORT")
-        report_lines.append("=" * 100)
+        report_lines.append("=" * 80)
+        title = "SETFIT QUERY CLASSIFIER REPORT" if setfit_only else "QUERY CLASSIFIER BENCHMARK REPORT (SetFit vs LLM)"
+        report_lines.append(title)
+        report_lines.append("=" * 80)
         report_lines.append("")
 
-        # Summary comparison
-        report_lines.append("📊 SUMMARY COMPARISON")
-        report_lines.append("-" * 100)
-        report_lines.append(f"{'Metric':<30} {'SetFit':<30} {'LLM':<30}")
-        report_lines.append("-" * 100)
-        report_lines.append(f"{'Total Queries':<30} {setfit_stats.total_queries:<30} {llm_stats.total_queries:<30}")
-        report_lines.append(f"{'Successful':<30} {setfit_stats.total_queries - setfit_stats.error_count:<30} {llm_stats.total_queries - llm_stats.error_count:<30}")
-        report_lines.append(f"{'Failed/Errors':<30} {setfit_stats.error_count:<30} {llm_stats.error_count:<30}")
+        # ── Summary ──────────────────────────────────────────────────────────
+        report_lines.append("📊 SUMMARY")
+        report_lines.append("-" * 80)
+        if setfit_only:
+            report_lines.append(f"  Total Queries   : {setfit_stats.total_queries}")
+            report_lines.append(f"  Successful      : {setfit_stats.total_queries - setfit_stats.error_count}")
+            report_lines.append(f"  Errors          : {setfit_stats.error_count}")
+        else:
+            report_lines.append(f"{'Metric':<30} {'SetFit':<25} {'LLM':<25}")
+            report_lines.append("-" * 80)
+            report_lines.append(f"{'Total Queries':<30} {setfit_stats.total_queries:<25} {llm_stats.total_queries:<25}")
+            report_lines.append(f"{'Successful':<30} {setfit_stats.total_queries - setfit_stats.error_count:<25} {llm_stats.total_queries - llm_stats.error_count:<25}")
+            report_lines.append(f"{'Errors':<30} {setfit_stats.error_count:<25} {llm_stats.error_count:<25}")
         report_lines.append("")
 
-        # Accuracy
+        # ── Accuracy ─────────────────────────────────────────────────────────
         report_lines.append("🎯 ACCURACY METRICS")
-        report_lines.append("-" * 100)
-        report_lines.append(f"{'Exact Match Accuracy':<30} {setfit_stats.accuracy*100:>28.2f}% {llm_stats.accuracy*100:>28.2f}%")
-        report_lines.append(f"{'Correct Queries':<30} {setfit_stats.correct_exact_match:>30} {llm_stats.correct_exact_match:>30}")
-        report_lines.append(f"{'Hamming Loss':<30} {setfit_stats.hamming_loss:>30.4f} {llm_stats.hamming_loss:>30.4f}")
+        report_lines.append("-" * 80)
+        n_sf = setfit_stats.total_queries - setfit_stats.error_count
+        if setfit_only:
+            report_lines.append(f"  Superset Match Accuracy : {setfit_stats.accuracy*100:.2f}%  (predicted ⊇ expected)")
+            report_lines.append(f"  Exact  Match Accuracy   : {setfit_stats.correct_exact_match / n_sf * 100 if n_sf else 0:.2f}%  (predicted == expected)")
+            report_lines.append(f"  Correct (superset)      : {round(setfit_stats.accuracy * n_sf)} / {n_sf}")
+            report_lines.append(f"  Correct (exact)         : {setfit_stats.correct_exact_match} / {n_sf}")
+            report_lines.append(f"  Hamming Loss            : {setfit_stats.hamming_loss:.4f}")
+        else:
+            n_lm = llm_stats.total_queries - llm_stats.error_count
+            report_lines.append(f"{'Superset Match Acc.':<30} {setfit_stats.accuracy*100:>23.2f}% {llm_stats.accuracy*100:>23.2f}%")
+            sf_exact = setfit_stats.correct_exact_match / n_sf * 100 if n_sf else 0
+            lm_exact = llm_stats.correct_exact_match / n_lm * 100 if n_lm else 0
+            report_lines.append(f"{'Exact Match Acc.':<30} {sf_exact:>23.2f}% {lm_exact:>23.2f}%")
+            report_lines.append(f"{'Correct (exact)':<30} {setfit_stats.correct_exact_match:>25} {llm_stats.correct_exact_match:>25}")
+            report_lines.append(f"{'Hamming Loss':<30} {setfit_stats.hamming_loss:>25.4f} {llm_stats.hamming_loss:>25.4f}")
         report_lines.append("")
 
-        # F1 Scores
+        # ── F1 Scores ────────────────────────────────────────────────────────
         report_lines.append("📈 F1 SCORES (Multi-Label)")
-        report_lines.append("-" * 100)
-        report_lines.append(f"{'F1 (Macro)':<30} {setfit_stats.f1_macro:>30.4f} {llm_stats.f1_macro:>30.4f}")
-        report_lines.append(f"{'F1 (Weighted)':<30} {setfit_stats.f1_weighted:>30.4f} {llm_stats.f1_weighted:>30.4f}")
-        report_lines.append(f"{'Precision (Macro)':<30} {setfit_stats.precision_macro:>30.4f} {llm_stats.precision_macro:>30.4f}")
-        report_lines.append(f"{'Recall (Macro)':<30} {setfit_stats.recall_macro:>30.4f} {llm_stats.recall_macro:>30.4f}")
+        report_lines.append("-" * 80)
+        if setfit_only:
+            report_lines.append(f"  F1 (Macro)         : {setfit_stats.f1_macro:.4f}")
+            report_lines.append(f"  F1 (Weighted)      : {setfit_stats.f1_weighted:.4f}")
+            report_lines.append(f"  Precision (Macro)  : {setfit_stats.precision_macro:.4f}")
+            report_lines.append(f"  Recall (Macro)     : {setfit_stats.recall_macro:.4f}")
+        else:
+            report_lines.append(f"{'F1 (Macro)':<30} {setfit_stats.f1_macro:>25.4f} {llm_stats.f1_macro:>25.4f}")
+            report_lines.append(f"{'F1 (Weighted)':<30} {setfit_stats.f1_weighted:>25.4f} {llm_stats.f1_weighted:>25.4f}")
+            report_lines.append(f"{'Precision (Macro)':<30} {setfit_stats.precision_macro:>25.4f} {llm_stats.precision_macro:>25.4f}")
+            report_lines.append(f"{'Recall (Macro)':<30} {setfit_stats.recall_macro:>25.4f} {llm_stats.recall_macro:>25.4f}")
         report_lines.append("")
 
-        # Performance/Latency
+        # ── Latency ──────────────────────────────────────────────────────────
         report_lines.append("⚡ PERFORMANCE (Response Time)")
-        report_lines.append("-" * 100)
-        report_lines.append(f"{'Average Latency':<30} {setfit_stats.avg_time_ms:>28.2f} ms {llm_stats.avg_time_ms:>28.2f} ms")
-        report_lines.append(f"{'Median Latency':<30} {setfit_stats.median_time_ms:>28.2f} ms {llm_stats.median_time_ms:>28.2f} ms")
-        report_lines.append(f"{'Min Latency':<30} {setfit_stats.min_time_ms:>28.2f} ms {llm_stats.min_time_ms:>28.2f} ms")
-        report_lines.append(f"{'Max Latency':<30} {setfit_stats.max_time_ms:>28.2f} ms {llm_stats.max_time_ms:>28.2f} ms")
-
-        speedup = setfit_stats.avg_time_ms / llm_stats.avg_time_ms if llm_stats.avg_time_ms > 0 else float('inf')
-        if speedup < 1:
-            report_lines.append(f"{'Speed Differential':<30} {'LLM is ' + f'{1/speedup:.1f}x slower':<30} {'(baseline)':<30}")
+        report_lines.append("-" * 80)
+        if setfit_only:
+            report_lines.append(f"  Avg Latency    : {setfit_stats.avg_time_ms:.2f} ms")
+            report_lines.append(f"  Median Latency : {setfit_stats.median_time_ms:.2f} ms")
+            report_lines.append(f"  Min / Max      : {setfit_stats.min_time_ms:.2f} ms / {setfit_stats.max_time_ms:.2f} ms")
         else:
-            report_lines.append(f"{'Speed Differential':<30} {'(baseline)':<30} {'SetFit is ' + f'{speedup:.1f}x faster':<30}")
+            report_lines.append(f"{'Average Latency':<30} {setfit_stats.avg_time_ms:>23.2f} ms {llm_stats.avg_time_ms:>23.2f} ms")
+            report_lines.append(f"{'Median Latency':<30} {setfit_stats.median_time_ms:>23.2f} ms {llm_stats.median_time_ms:>23.2f} ms")
+            report_lines.append(f"{'Min Latency':<30} {setfit_stats.min_time_ms:>23.2f} ms {llm_stats.min_time_ms:>23.2f} ms")
+            report_lines.append(f"{'Max Latency':<30} {setfit_stats.max_time_ms:>23.2f} ms {llm_stats.max_time_ms:>23.2f} ms")
+            if llm_stats.avg_time_ms > 0:
+                speedup = llm_stats.avg_time_ms / setfit_stats.avg_time_ms
+                report_lines.append(f"  → SetFit is {speedup:.1f}x faster than LLM")
         report_lines.append("")
 
-        # Per-label breakdown
+        # ── Per-label breakdown ───────────────────────────────────────────────
         report_lines.append("🏷️  PER-LABEL METRICS")
-        report_lines.append("-" * 100)
+        report_lines.append("-" * 80)
 
-        if llm_stats.per_label_metrics:
-            report_lines.append(f"{'Label':<20} {'Metric':<12} {'SetFit':<15} {'LLM':<15} {'Support':<10}")
+        has_llm_labels = not setfit_only and llm_stats.per_label_metrics
+        if has_llm_labels:
+            report_lines.append(f"{'Label':<22} {'Metric':<12} {'SetFit':>10} {'LLM':>10} {'Support':>8}")
         else:
-            report_lines.append(f"{'Label':<20} {'Metric':<12} {'SetFit':<15} {'Support':<10}")
-
-        report_lines.append("-" * 100)
+            report_lines.append(f"{'Label':<22} {'Metric':<12} {'SetFit':>10} {'Support':>8}")
+        report_lines.append("-" * 80)
 
         for label in self.LABELS:
             if label not in setfit_stats.per_label_metrics:
                 continue
-
             support = setfit_stats.per_label_metrics[label]["support"]
-            if support > 0:
-                setfit_f1 = setfit_stats.per_label_metrics[label]["f1"]
-                setfit_p = setfit_stats.per_label_metrics[label]["precision"]
-                setfit_r = setfit_stats.per_label_metrics[label]["recall"]
+            if support == 0:
+                continue
 
-                if llm_stats.per_label_metrics and label in llm_stats.per_label_metrics:
-                    llm_f1 = llm_stats.per_label_metrics[label]["f1"]
-                    llm_p = llm_stats.per_label_metrics[label]["precision"]
-                    llm_r = llm_stats.per_label_metrics[label]["recall"]
-                    report_lines.append(f"{label:<20} {'F1':<12} {setfit_f1:>14.4f} {llm_f1:>14.4f} {support:>9}")
-                    report_lines.append(f"{'':<20} {'Precision':<12} {setfit_p:>14.4f} {llm_p:>14.4f}")
-                    report_lines.append(f"{'':<20} {'Recall':<12} {setfit_r:>14.4f} {llm_r:>14.4f}")
-                else:
-                    report_lines.append(f"{label:<20} {'F1':<12} {setfit_f1:>14.4f} {support:>9}")
-                    report_lines.append(f"{'':<20} {'Precision':<12} {setfit_p:>14.4f}")
-                    report_lines.append(f"{'':<20} {'Recall':<12} {setfit_r:>14.4f}")
+            sf_f1 = setfit_stats.per_label_metrics[label]["f1"]
+            sf_p  = setfit_stats.per_label_metrics[label]["precision"]
+            sf_r  = setfit_stats.per_label_metrics[label]["recall"]
+
+            if has_llm_labels and label in llm_stats.per_label_metrics:
+                lm_f1 = llm_stats.per_label_metrics[label]["f1"]
+                lm_p  = llm_stats.per_label_metrics[label]["precision"]
+                lm_r  = llm_stats.per_label_metrics[label]["recall"]
+                report_lines.append(f"{label:<22} {'F1':<12} {sf_f1:>10.4f} {lm_f1:>10.4f} {support:>8}")
+                report_lines.append(f"{'':<22} {'Precision':<12} {sf_p:>10.4f} {lm_p:>10.4f}")
+                report_lines.append(f"{'':<22} {'Recall':<12} {sf_r:>10.4f} {lm_r:>10.4f}")
+            else:
+                report_lines.append(f"{label:<22} {'F1':<12} {sf_f1:>10.4f} {support:>8}")
+                report_lines.append(f"{'':<22} {'Precision':<12} {sf_p:>10.4f}")
+                report_lines.append(f"{'':<22} {'Recall':<12} {sf_r:>10.4f}")
+            report_lines.append("")
+
+        # ── Misclassified examples ────────────────────────────────────────────
+        # Superset matches (predicted ⊇ expected) are treated as correct — exclude them.
+        # Only show true failures: expected labels NOT fully covered by predicted.
+        truly_wrong = [
+            r for r in self.setfit_results
+            if r.error is None and not set(r.expected_labels).issubset(set(r.predicted_labels))
+        ]
+        superset_only = [
+            r for r in self.setfit_results
+            if r.error is None
+            and set(r.expected_labels).issubset(set(r.predicted_labels))
+            and set(r.expected_labels) != set(r.predicted_labels)
+        ]
+        if truly_wrong or superset_only:
+            report_lines.append("=" * 80)
+            if truly_wrong:
+                report_lines.append(f"❌ TRUE FAILURES ({len(truly_wrong)} — expected labels missing from prediction)")
+                report_lines.append("-" * 80)
+                for r in truly_wrong[:30]:
+                    report_lines.append(f"  Q{r.query_id}: {r.query[:70]}")
+                    report_lines.append(f"    Expected : {r.expected_labels}")
+                    report_lines.append(f"    Predicted: {r.predicted_labels}  ({r.confidence_score:.2f})")
+                if len(truly_wrong) > 30:
+                    report_lines.append(f"  ... and {len(truly_wrong) - 30} more")
                 report_lines.append("")
-
-        # Overall assessment
-        report_lines.append("=" * 100)
-        report_lines.append("📋 ASSESSMENT")
-        report_lines.append("=" * 100)
-
-        if setfit_stats.accuracy > llm_stats.accuracy:
-            report_lines.append(f"✅ SetFit has better accuracy: {setfit_stats.accuracy*100:.1f}% vs {llm_stats.accuracy*100:.1f}%")
-        else:
-            report_lines.append(f"✅ LLM has better accuracy: {llm_stats.accuracy*100:.1f}% vs {setfit_stats.accuracy*100:.1f}%")
-
-        if setfit_stats.avg_time_ms < llm_stats.avg_time_ms:
-            speedup = llm_stats.avg_time_ms / setfit_stats.avg_time_ms
-            report_lines.append(f"⚡ SetFit is {speedup:.1f}x faster than LLM ({setfit_stats.avg_time_ms:.1f}ms vs {llm_stats.avg_time_ms:.1f}ms)")
-        else:
-            speedup = setfit_stats.avg_time_ms / llm_stats.avg_time_ms
-            report_lines.append(f"⚡ LLM is {speedup:.1f}x faster than SetFit ({llm_stats.avg_time_ms:.1f}ms vs {setfit_stats.avg_time_ms:.1f}ms)")
-
+            if superset_only:
+                report_lines.append(f"⚠️  SUPERSET PREDICTIONS ({len(superset_only)} — predicted extra labels, counted as correct)")
+                report_lines.append("-" * 80)
+                for r in superset_only[:20]:
+                    extra = sorted(set(r.predicted_labels) - set(r.expected_labels))
+                    report_lines.append(f"  Q{r.query_id}: {r.query[:70]}")
+                    report_lines.append(f"    Expected : {r.expected_labels}  →  extra: {extra}")
+                if len(superset_only) > 20:
+                    report_lines.append(f"  ... and {len(superset_only) - 20} more")
         report_lines.append("")
-        report_lines.append("RECOMMENDATION:")
-        if setfit_stats.accuracy > 0.85 and setfit_stats.avg_time_ms < 150:
-            report_lines.append("  → SetFit is the superior choice: high accuracy with minimal latency")
-        elif llm_stats.accuracy > setfit_stats.accuracy and llm_stats.avg_time_ms < 5000:
-            report_lines.append("  → LLM provides better accuracy despite higher latency (acceptable for batch processing)")
-        else:
-            report_lines.append("  → Hybrid approach: Use SetFit for real-time, LLM for accuracy-critical tasks")
 
-        report_lines.append("=" * 100)
+        # ── Overall assessment ────────────────────────────────────────────────
+        report_lines.append("=" * 80)
+        report_lines.append("📋 ASSESSMENT")
+        report_lines.append("=" * 80)
+
+        if setfit_only:
+            acc = setfit_stats.accuracy * 100  # superset match
+            n_sf = setfit_stats.total_queries - setfit_stats.error_count
+            exact_acc = setfit_stats.correct_exact_match / n_sf * 100 if n_sf else 0
+            if acc >= 85:
+                report_lines.append(f"✅ SetFit superset accuracy: {acc:.1f}% (exact: {exact_acc:.1f}%) — suitable for production use")
+            elif acc >= 70:
+                report_lines.append(f"⚠️  SetFit superset accuracy: {acc:.1f}% (exact: {exact_acc:.1f}%) — consider more training data")
+            else:
+                report_lines.append(f"❌ SetFit superset accuracy: {acc:.1f}% (exact: {exact_acc:.1f}%) — model needs improvement")
+            report_lines.append(f"⚡ Avg latency: {setfit_stats.avg_time_ms:.1f} ms/query")
+        else:
+            if setfit_stats.accuracy > llm_stats.accuracy:
+                report_lines.append(f"✅ SetFit has better accuracy: {setfit_stats.accuracy*100:.1f}% vs {llm_stats.accuracy*100:.1f}%")
+            else:
+                report_lines.append(f"✅ LLM has better accuracy: {llm_stats.accuracy*100:.1f}% vs {setfit_stats.accuracy*100:.1f}%")
+
+            if setfit_stats.avg_time_ms < llm_stats.avg_time_ms:
+                speedup = llm_stats.avg_time_ms / setfit_stats.avg_time_ms
+                report_lines.append(f"⚡ SetFit is {speedup:.1f}x faster ({setfit_stats.avg_time_ms:.1f} ms vs {llm_stats.avg_time_ms:.1f} ms)")
+            else:
+                speedup = setfit_stats.avg_time_ms / llm_stats.avg_time_ms
+                report_lines.append(f"⚡ LLM is {speedup:.1f}x faster ({llm_stats.avg_time_ms:.1f} ms vs {setfit_stats.avg_time_ms:.1f} ms)")
+
+            report_lines.append("")
+            report_lines.append("RECOMMENDATION:")
+            if setfit_stats.accuracy > 0.85 and setfit_stats.avg_time_ms < 150:
+                report_lines.append("  → SetFit is the superior choice: high accuracy with minimal latency")
+            elif llm_stats.accuracy > setfit_stats.accuracy and llm_stats.avg_time_ms < 5000:
+                report_lines.append("  → LLM provides better accuracy (acceptable for batch processing)")
+            else:
+                report_lines.append("  → Hybrid: Use SetFit for real-time, LLM for accuracy-critical tasks")
+
+        report_lines.append("=" * 80)
 
         # Print to console
         report_text = "\n".join(report_lines)
@@ -572,8 +828,8 @@ def main():
     parser.add_argument(
         "--test-set",
         type=str,
-        default="simple_rag/rag/query/classification_test_set.json",
-        help="Path to test set JSON",
+        default=str(SCRIPT_DIR.parent / "test_set.json"),
+        help="Path to test set JSON (supports both classification_test_set.json and test_set.json formats)",
     )
     parser.add_argument(
         "--provider",
@@ -614,8 +870,10 @@ def main():
     )
     parser.add_argument(
         "--skip-llm",
+        "--setfit-only",
+        dest="skip_llm",
         action="store_true",
-        help="Skip LLM benchmark (SetFit only)",
+        help="Skip LLM benchmark — run SetFit only and produce a single-column report",
     )
 
     args = parser.parse_args()
@@ -629,8 +887,8 @@ def main():
 
     # Run LLM benchmark
     if args.skip_llm:
-        print("\n⏭️  Skipping LLM benchmark (--skip-llm set)")
-        llm_stats = BenchmarkStats(classifier_name="LLM (skipped)")
+        print("\n⏭️  Skipping LLM benchmark (--setfit-only / --skip-llm set)")
+        llm_stats = None
     else:
         # Check if local LM Studio is available
         if args.provider == "local":
@@ -662,7 +920,7 @@ def main():
             raise
 
     # Generate report
-    benchmark.generate_report(setfit_stats, llm_stats, output_file=args.output)
+    benchmark.generate_report(setfit_stats, llm_stats=llm_stats, output_file=args.output)
 
 
 if __name__ == "__main__":

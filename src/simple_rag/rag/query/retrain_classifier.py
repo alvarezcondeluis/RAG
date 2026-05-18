@@ -82,7 +82,7 @@ def main():
         trained_model = train_model(
             train_dataset=train_dataset,
             output_dir=str(model_save_path),
-            num_epochs=3,
+            num_epochs=1,   # SetFit converges in 1 epoch; 3 epochs = 3× the pair generation cost
             batch_size=16,
             learning_rate=2e-5
         )

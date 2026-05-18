@@ -154,6 +154,8 @@ class Text2CypherBenchmark:
         validator_mode: bool = False,
         retry_strategy: str = "full",
         embed_vector_queries: bool = False,
+        use_few_shot: bool = True,
+        use_entity_resolver: bool = True,
     ):
         self.test_path = Path(test_set_path)
         self.neo = Neo4jDatabase()
@@ -171,6 +173,7 @@ class Text2CypherBenchmark:
         if not retry_module:
             extra_kwargs["max_validation_retries"] = 1
         extra_kwargs["retry_strategy"] = retry_strategy
+        extra_kwargs["use_few_shot"] = use_few_shot
 
         # Initialize the QueryHandler (Classification → Schema Slice → Cypher)
         # Only load the Nomic query embedder when embed_vector_queries=True.
@@ -180,7 +183,7 @@ class Text2CypherBenchmark:
             neo4j_driver=self.neo.driver,
             cypher_model=model_name,
             cypher_backend=backend,
-            use_entity_resolver=True,
+            use_entity_resolver=use_entity_resolver,
             few_shot_embedding_model=few_shot_embedding_model,
             enable_query_embedding=embed_vector_queries,
             **extra_kwargs,
@@ -405,16 +408,22 @@ class Text2CypherBenchmark:
                 exec_params["queryVector"] = query_embedding
                 exec_params["k"] = 5
 
-            # Run Generated Query
+            # Run Generated Query (30s timeout to avoid hanging on expensive queries)
             exec_start = time.time()
             with self.neo.driver.session() as session:
-                gen_res = list(session.run(result.generated_cypher, exec_params))
+                gen_res = list(session.run(
+                    result.generated_cypher, exec_params,
+                    timeout=10,
+                ))
                 gen_records = [r.data() for r in gen_res]
             result.execution_time_ms = (time.time() - exec_start) * 1000
 
-            # Run Expected Query
+            # Run Expected Query (30s timeout)
             with self.neo.driver.session() as session:
-                exp_res = list(session.run(expected_cypher, exec_params))
+                exp_res = list(session.run(
+                    expected_cypher, exec_params,
+                    timeout=10,
+                ))
                 exp_records = [r.data() for r in exp_res]
 
             # Store results for comparison
@@ -487,6 +496,10 @@ class Text2CypherBenchmark:
 
     def run(self, complexity_filter: Optional[List[str]] = None):
         """Main execution loop. Saves full output to reports/ folder."""
+        # Refresh entity cache so any DB changes made after initialization are picked up
+        if hasattr(self.handler, 'translator') and self.handler.translator:
+            self.handler.translator.refresh_entity_cache()
+
         test_data = self.load_tests()
 
         if complexity_filter is None and self.backend == "groq":
@@ -513,12 +526,14 @@ class Text2CypherBenchmark:
                        if self.retry_module else "DISABLED (1 attempt, no retry prompts)")
         retry_strategy_label = self.handler.translator.retry_strategy
         vector_label = "ON (Nomic embedder active)" if self.embed_vector_queries else "OFF (vector queries skip $queryVector)"
+        few_shot_label = "ON" if self.handler.translator.use_few_shot else "OFF (no examples injected)"
         print(f"📊 Total Questions: {len(test_data)}")
         print(f"🤖 Code Model: {self.handler.translator.model_name}")
-        print(f"🏷️  Classifier: SetFit (9 categories)")
+        print(f"🏷️  Classifier: SetFit (6 categories)")
         print(f"📐 Schema Mode:  {schema_mode_label} | retries always use full schema")
         print(f"🔄 Retry Module: {retry_label} | strategy: {retry_strategy_label}")
         print(f"🧬 Vector Embed: {vector_label}")
+        print(f"📚 Few-Shot:     {few_shot_label}")
         print(f"📁 Report: {report_path}")
         print(f"{'='*80}\n")
 

@@ -1,5 +1,5 @@
-from neo4j import GraphDatabase
-from rapidfuzz import process, fuzz, utils
+
+from rapidfuzz import process, fuzz
 from typing import Dict, List, Optional
 
 
@@ -19,18 +19,30 @@ class EntityResolver:
     def _refresh_cache(self):
         """Loads all entities from Neo4j into memory (Fast for <10k items)"""
         print("Loading Entity Cache...")
+        # Reset before reload so a refresh doesn't accumulate duplicates
+        self.providers = []
+        self.trusts = []
+        self.funds = {}
+        self.tickers = []
+
         with self.driver.session() as session:
             # 1. Load Providers & Trusts (Simple Lists)
             self.providers = [r["name"] for r in session.run("MATCH (n:Provider) RETURN n.name as name")]
             self.trusts = [r["name"] for r in session.run("MATCH (n:Trust) RETURN n.name as name")]
-            
+
             # 2. Load Funds (Map Name to Ticker for easy lookup later)
             fund_res = session.run("MATCH (f:Fund) RETURN f.name as name, f.ticker as ticker")
             for record in fund_res:
                 self.funds[record["name"]] = record["ticker"]
                 if record["ticker"]:
                     self.tickers.append(record["ticker"])
-        print(f"Cache Loaded: {len(self.funds)} Funds, {len(self.providers)} Providers")
+
+        print(f"✓ Entity cache loaded:")
+        print(f"  Funds     : {len(self.funds):>5}  ({len(self.tickers)} with tickers)")
+        print(f"  Providers : {len(self.providers):>5}")
+        print(f"  Trusts    : {len(self.trusts):>5}")
+        if not self.funds:
+            print("  ⚠️  WARNING: No funds loaded — entity resolver will not resolve fund/ticker queries.")
 
 
     def _normalize_text(self, text: str) -> str:
@@ -81,7 +93,7 @@ class EntityResolver:
         
         # A. Check Providers (Use token_sort_ratio for better typo tolerance)
         if search_providers:
-            match = process.extractOne(query, self.providers, scorer=fuzz.WRatio, score_cutoff=25)
+            match = process.extractOne(query, self.providers, scorer=fuzz.WRatio, score_cutoff=60)
             if self.debug:
                 print(f"\nProvider Search:")
                 print(f"  Match: {match}")
@@ -185,26 +197,19 @@ class EntityResolver:
                     print(f"\nTop score {top_score:.1f} below threshold {score_threshold}, no matches returned")
             
         # D. Check Tickers (Always check - they're fast and specific)
+        # Strip punctuation from each word so "VTI?" and "VTI," both match "VTI"
         if search_tickers:
-            # Exact word match
-            query_words = set(query.split())
-            for ticker in self.tickers:
-                if ticker in query_words:
-                    # Don't overwrite if already added from fund matching
-                    if ticker not in resolved:
-                        resolved[ticker] = {
-                            "type": "Ticker",
-                            "score": 100.0  # Exact match
-                        }
-            
-            # Case-insensitive ticker check — word boundary only to avoid
-            # matching tickers as substrings (e.g. "EXI" inside "exist")
-            query_upper_words = set(query.upper().split())
+            import re as _re
+            query_upper_words = set(
+                _re.sub(r'[^A-Z0-9]', '', w) for w in query.upper().split()
+            )
+            query_upper_words.discard("")  # remove empty strings from all-punctuation tokens
+
             for ticker in self.tickers:
                 if ticker in query_upper_words and ticker not in resolved:
                     resolved[ticker] = {
                         "type": "Ticker",
-                        "score": 100.0  # Exact match
+                        "score": 100.0,
                     }
 
         return resolved

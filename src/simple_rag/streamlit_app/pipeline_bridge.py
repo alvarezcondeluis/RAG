@@ -106,16 +106,23 @@ def init_pipeline(config: PipelineConfig) -> PipelineState:
     driver.verify_connectivity()
 
     # QueryHandler
-    cypher_kwargs = {}
-    if not config.enable_entity_resolution:
-        cypher_kwargs["use_entity_resolution"] = False
-    if not config.enable_few_shot:
-        cypher_kwargs["use_few_shot"] = False
+    cypher_kwargs: dict = {
+        "use_entity_resolver": config.enable_entity_resolution,
+        "use_few_shot": config.enable_few_shot,
+        "retry_strategy": config.retry_strategy,
+        "few_shot_embedding_model": config.few_shot_embedding_model,
+    }
+    if not config.retry_module:
+        cypher_kwargs["max_validation_retries"] = 1
+    if config.cypher_backend == "openai":
+        cypher_kwargs["openai_compatible_host"] = config.openai_compatible_host
+        cypher_kwargs["openai_compatible_port"] = config.openai_compatible_port
 
     handler = QueryHandler(
         neo4j_driver=driver,
         cypher_backend=config.cypher_backend,
         cypher_model=config.cypher_model,
+        enable_query_embedding=config.embed_vector_queries,
         **cypher_kwargs,
     )
 

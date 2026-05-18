@@ -110,7 +110,7 @@
     "complexity": "medium"
   },
   {
-    "question": "Who are the managers of the Vanguard Mid Cap Growth fund?",
+    "question": "Who are the managers of the Vanguard Mid Cap Growth index fund?",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VMGRX'})-[:MANAGED_BY]->(p:Person) RETURN p.name AS managerName, f.ticker AS ticker, f.name AS fundName",
     "complexity": "simple"
   },
@@ -547,7 +547,7 @@
   },
   {
     "question": "Has anyone sold shares of Tesla recently?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'Sell' RETURN p.name, it.transactionDate AS date, it.shares, it.price, it.value ORDER BY it.transactionDate DESC",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE it.transactionType = 'SELL' RETURN p.name, it.transactionDate AS date, it.shares, it.price, it.value ORDER BY it.transactionDate DESC",
     "complexity": "medium"
   },
   {
@@ -647,7 +647,7 @@
   },
   {
     "question": "What does the management discussion say about Tesla's outlook in its latest 10-K?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(md:Section:ManagemetDiscussion) RETURN md.text AS managementDiscussion LIMIT 5",
+    "expected_cypher": "MATCH (c:Company {ticker: 'TSLA'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(md:Section:ManagementDiscussion) RETURN md.text AS managementDiscussion LIMIT 5",
     "complexity": "medium"
   },
   {
@@ -707,7 +707,7 @@
   },
   {
     "question": "Which funds hold shares of companies where an insider sold more than 10,000 shares recently?",
-    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction) WHERE it.transactionType = 'Sell' AND it.shares > 10000 RETURN DISTINCT f.name AS fundName, c.name AS companyName",
+    "expected_cypher": "MATCH (f:Fund)-[:HAS_PORTFOLIO]->(:Portfolio)-[:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction) WHERE it.transactionType = 'SELL' AND it.shares > 10000 RETURN DISTINCT f.name AS fundName, c.name AS companyName",
     "complexity": "hard"
   },
   {
@@ -1000,7 +1000,7 @@
   },
   {
     "question": "What does Microsoft's 10-K management discussion say?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagemetDiscussion) RETURN s.title AS sectionTitle, s.text AS sectionText LIMIT 1",
+    "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS sectionTitle, s.text AS sectionText LIMIT 1",
     "complexity": "medium"
   },
   {
@@ -1046,21 +1046,10 @@
   },
 
   {
-    "question": "How many shares does an insider still hold after transactions in Apple?",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_INSIDER_TRANSACTION]->(t:InsiderTransaction)-[:MADE_BY]->(p:Person) RETURN p.name AS insiderName, t.position AS position, t.transactionType AS transactionType, t.shares AS shares, t.remainingShares AS remainingShares, t.transactionDate AS transactionDate ORDER BY t.transactionDate DESC LIMIT 10",
-    "complexity": "medium"
-  },
-  {
     "question": "Which insiders at Microsoft sold shares and how many shares do they have remaining?",
     "expected_cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:HAS_INSIDER_TRANSACTION]->(t:InsiderTransaction)-[:MADE_BY]->(p:Person) WHERE toLower(t.transactionType) CONTAINS 'sell' OR toLower(t.transactionType) CONTAINS 'sale' RETURN p.name AS insiderName, t.position AS position, t.shares AS sharesSold, t.remainingShares AS remainingShares, t.transactionDate AS date ORDER BY t.transactionDate DESC",
     "complexity": "medium"
   },
-  {
-    "question": "Show the insider transactions for Apple extracted from documents, including the document URLs.",
-    "expected_cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:HAS_INSIDER_TRANSACTION]->(t:InsiderTransaction)-[:EXTRACTED_FROM]->(d:Document) MATCH (t)-[:MADE_BY]->(p:Person) RETURN p.name AS insiderName, t.transactionType AS transactionType, t.shares AS shares, t.price AS price, t.value AS value, t.remainingShares AS remainingShares, d.url AS documentUrl ORDER BY t.transactionDate DESC",
-    "complexity": "hard"
-  },
-
   {
     "question": "What is the summary prospectus of the VTI fund?",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:DEFINED_BY]->(profile:Profile) RETURN profile.summaryProspectus AS summaryProspectus, r.year AS year ORDER BY r.year DESC LIMIT 1",
@@ -1080,11 +1069,6 @@
   {
     "question": "Which holdings in VOO have no corresponding company node in the database?",
     "expected_cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[r:HAS_HOLDING]->(h:Holding) WHERE NOT (h)-[:REPRESENTS]->(:Company) RETURN h.name AS holdingName, h.ticker AS ticker, r.weight AS weight ORDER BY toFloat(r.weight) DESC LIMIT 20",
-    "complexity": "hard"
-  },
-  {
-    "question": "Which companies held by VTI have filed 10-K reports? Show their financial highlights.",
-    "expected_cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[r:HAS_HOLDING]->(h:Holding)-[:REPRESENTS]->(c:Company)-[:REPORTS_IN]->(filing:Filing10K) RETURN c.name AS companyName, c.ticker AS ticker, r.weight AS weight ORDER BY toFloat(r.weight) DESC LIMIT 10",
     "complexity": "hard"
   },
   {
@@ -1150,62 +1134,62 @@
   },
   {
     "question": "Search Apple's corporate filings for information regarding their property, facilities, and data centers.",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, s.title AS sectionTitle, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, s.title AS sectionTitle, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "hard"
   },
   {
     "question": "What does Apple say about supply chain risks in their 10-K filings?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, s.title AS sectionTitle, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, s.title AS sectionTitle, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "Describe how Microsoft positions its business in artificial intelligence.",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'MSFT'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'MSFT'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "What does Apple's management discussion say about climate change?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:ManagemetDiscussion)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:ManagementDiscussion)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "Find risk factors related to cybersecurity across all 10-K filings.",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company) RETURN chunk.text AS text, c.ticker AS ticker, c.name AS company, r.year AS year, score ORDER BY score DESC LIMIT 10",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company) RETURN chunk.text AS text, c.ticker AS ticker, c.name AS company, r.year AS year, score ORDER BY score DESC LIMIT 10",
     "complexity": "vector"
   },
   {
     "question": "What legal proceedings does Apple disclose in its 10-K filings?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "Describe Apple's data centers and properties from their 10-K.",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "What did Apple say about AI in their 2023 10-K business description?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN {year: 2023}]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN {year: 2023}]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "What is the investment strategy of VTI regarding international equities?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('profileChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VTI'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VTI'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "What risks are described in the Vanguard 500 Index Fund prospectus?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('profileChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {name: 'Vanguard 500 Index Fund'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {name: 'Vanguard 500 Index Fund'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
     "question": "Which fund prospectuses discuss high-yield bond strategies?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('profileChunkIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, chunk.text AS excerpt, score ORDER BY score DESC LIMIT 10",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, chunk.text AS excerpt, score ORDER BY score DESC LIMIT 10",
     "complexity": "vector"
   },
   {
     "question": "Describe how VFINX manages market volatility risk.",
-    "expected_cypher": "CALL db.index.vector.queryNodes('profileChunkIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VFINX'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VFINX'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
@@ -1220,7 +1204,7 @@
   },
   {
     "question": "What does Apple say about competitive pressures in both their business description and risk factors?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('filing10kChunkIndex', 20, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) WHERE 'BusinessInformation' IN labels(s) OR 'RiskFactor' IN labels(s) RETURN chunk.text AS text, [l IN labels(s) WHERE l <> 'Section'][0] AS sectionType, r.year AS year, score ORDER BY score DESC LIMIT 8",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 20, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) WHERE 'BusinessInformation' IN labels(s) OR 'RiskFactor' IN labels(s) RETURN chunk.text AS text, [l IN labels(s) WHERE l <> 'Section'][0] AS sectionType, r.year AS year, score ORDER BY score DESC LIMIT 8",
     "complexity": "vector"
   },
   {

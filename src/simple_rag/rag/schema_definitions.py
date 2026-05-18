@@ -36,8 +36,8 @@ DETAILED_SCHEMA = """
 # Profile sections use multi-labeled Section nodes (filter by label, not property)
 # IMPORTANT — embeddings on Profile sections:
 #   - :Section:Objective       → embedding ON THE SECTION (no chunks). Use profileObjectiveIndex.
-#   - :Section:Strategy        → no embedding on section; child :Chunk has embedding. Use profileChunkIndex.
-#   - :Section:RiskFactor      → no embedding on section; child :Chunk has embedding. Use profileChunkIndex.
+#   - :Section:Strategy        → no embedding on section; child :Chunk has embedding. Use chunkEmbeddingIndex.
+#   - :Section:RiskFactor      → no embedding on section; child :Chunk has embedding. Use chunkEmbeddingIndex.
 #   - :Section:PerformanceCommentary → no embedding anywhere; only structural retrieval.
 (:Profile)-[:HAS_SECTION]->(:Section:Objective {text, title, embedding})
 (:Profile)-[:HAS_SECTION]->(:Section:PerformanceCommentary {text, title})
@@ -103,11 +103,10 @@ DETAILED_SCHEMA = """
 (:Filing10K)-[:EXTRACTED_FROM]->(:Document)
 
 # 10-K Section Types — sections store {text, title}; embeddings live on the child :Chunk nodes.
-# Note: 'ManagemetDiscussion' is intentionally misspelled (matches actual label in DB).
 (:Filing10K)-[:HAS_SECTION]->(:Section:RiskFactor {text, title})
 (:Filing10K)-[:HAS_SECTION]->(:Section:BusinessInformation {text, title})
 (:Filing10K)-[:HAS_SECTION]->(:Section:LegalProceeding {text, title})
-(:Filing10K)-[:HAS_SECTION]->(:Section:ManagemetDiscussion {text, title})
+(:Filing10K)-[:HAS_SECTION]->(:Section:ManagementDiscussion {text, title})
 (:Filing10K)-[:HAS_SECTION]->(:Section:Properties {text, title})
 
 # Section chunks for fine-grained retrieval — these are the embedded units.
@@ -115,7 +114,7 @@ DETAILED_SCHEMA = """
 (:Section:RiskFactor)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 (:Section:BusinessInformation)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 (:Section:LegalProceeding)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
-(:Section:ManagemetDiscussion)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
+(:Section:ManagementDiscussion)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 (:Section:Properties)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 # === FINANCIAL METRICS & SEGMENTS ===
 (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
@@ -140,14 +139,14 @@ DETAILED_SCHEMA = """
 # Use these when the question asks about MEANING / TOPIC / CONCEPT of narrative
 # text. Pattern: CALL db.index.vector.queryNodes('<indexName>', $k, $queryVector)
 #
-#   filing10kChunkIndex
+#   chunkEmbeddingIndex
 #     → :Chunk under any 10-K section (RiskFactor, BusinessInformation,
-#       LegalProceeding, ManagemetDiscussion, Properties).
+#       LegalProceeding, ManagementDiscussion, Properties).
 #     Returns Chunk nodes — traverse <-[:HAS_CHUNK]-(:Section) to get the
 #     parent Section, and <-[:HAS_SECTION]-(:Filing10K)<-[:REPORTS_IN]-(:Company)
 #     to get the company. Filter by Section label (e.g. :RiskFactor) inside MATCH.
 #
-#   profileChunkIndex
+#   chunkEmbeddingIndex (also used for Profile chunks — same physical index)
 #     → :Chunk under :Section:Strategy or :Section:RiskFactor (Profile side).
 #     Traverse <-[:HAS_CHUNK]-(:Section) <-[:HAS_SECTION]-(:Profile) <-[:DEFINED_BY]-(:Fund).
 #

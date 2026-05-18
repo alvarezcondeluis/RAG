@@ -205,37 +205,15 @@ class SchemaManager(Neo4jDatabaseBase):
         print("⚙️  Initializing Graph Schema & Indexes...")
 
         # 1. VECTOR INDEXES (Similarity Search)
-        # Profile/Filing10K chunks live on (:Chunk {embedding}).
-        # Section:Objective and Section:BusinessInformation store embedding
-        # directly on the Section node per the schema.
+        # Two named indexes used by the query pipeline:
+        #   - chunkEmbeddingIndex   → all :Chunk nodes (10-K AND Profile sections share this;
+        #                             differentiation is done via Cypher traversal path)
+        #   - profileObjectiveIndex → :Section nodes (only Objective sections have embeddings)
         vector_queries = [
+            # Migration: drop the old misleading name if it still exists from a previous setup
+            "DROP INDEX filing10kChunkIndex IF EXISTS",
             f"""
-            CREATE VECTOR INDEX chunk_vector_index IF NOT EXISTS
-            FOR (n:Chunk) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """,
-            f"""
-            CREATE VECTOR INDEX section_vector_index IF NOT EXISTS
-            FOR (n:Section) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """,
-            # Named aliases used by query_handler VECTOR code path and test set
-            f"""
-            CREATE VECTOR INDEX filing10kChunkIndex IF NOT EXISTS
-            FOR (n:Chunk) ON (n.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {dimensions},
-                `vector.similarity_function`: 'cosine'
-            }}}}
-            """,
-            f"""
-            CREATE VECTOR INDEX profileChunkIndex IF NOT EXISTS
+            CREATE VECTOR INDEX chunkEmbeddingIndex IF NOT EXISTS
             FOR (n:Chunk) ON (n.embedding)
             OPTIONS {{ indexConfig: {{
                 `vector.dimensions`: {dimensions},

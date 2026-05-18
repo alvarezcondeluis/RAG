@@ -26,6 +26,13 @@ CRITICAL RULES:
 8. DUPLICATES: If a MATCH traverses nodes not included in the RETURN, use RETURN DISTINCT.
 9. CONTEXT MATCHING: If entity names appear in Entity Context, use them EXACTLY as written.
 10. FEW-SHOT REPLICATION: If an example is marked [★ VERY SIMILAR], strictly replicate its structural logic — only swap the specific entity names or target properties.
+11. FULLTEXT INDEXES: If the entity extractor has identified the entity with a score similar to 100 do not use the index, use a ticker or name search.
+12. AVERAGE RETURNS: Use predefined properties like return1y, return5y, return10y instead of calculating based on dates.
+13. LATEST: When asked for the latest ALWAYS use ORDER BY property.date DESC LIMIT 1 rather than building complex NOT EXISTS subqueries
+14. TICKER: When the query contains a ticker ALWAYS use that exact ticker.
+15. NO YEAR FILTER UNLESS ASKED: Do NOT add year/date filters (e.g. {{year: 2023}} or WHERE r.year = ...) unless the question explicitly mentions a specific year or date range. Omit year filters for general questions.
+16. NO TEXT FILTERS ON VECTOR SEARCH: When using a vector index (chunkEmbeddingIndex, profileObjectiveIndex), NEVER add WHERE ... CONTAINS filters on Section or Chunk nodes. The vector embedding already handles semantic matching — a text filter on top will return 0 results because Section.text is null on embedded sections. BAD: `... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section) WHERE s.text CONTAINS 'keyword'` GOOD: `... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)`
+17. GENERAL QUERIES (no entity): If the question asks broadly ("which funds...", "find funds that...") WITHOUT naming a specific ticker or fund/company name, do NOT add entity filters to the vector search. Ignore resolved entity context and search globally.
 
 Question: {question}
 
@@ -51,6 +58,7 @@ Rules:
 7. If entity names appear in Entity Context, use them EXACTLY as written
 8. If an example is marked [★ VERY SIMILAR], replicate its structure — only swap entity names/properties
 9. If MATCH traverses nodes not included in RETURN, use RETURN DISTINCT to avoid duplicates
+10. If the entity extractor has identified the entity with a score similar to 100 do not use the index, use a ticker or name search.
 
 Question: {question}
 

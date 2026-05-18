@@ -108,6 +108,8 @@ Modelfile
 checkpoints/
 src/simple_rag/rag/query/models/query_classifier/
 notebooks/funds_backup.pkl
+notebooks/edgar_cache/funds/funds_total.pkl
+notebooks/edgar_cache/companies/companies.pkl
 src/simple_rag/rag/query/models/query_classifier/model_head.pkl
 src/simple_rag/rag/examples/faiss_index/index.pkl
 src/src/simple_rag/evaluation/query/benchmark_report.txt
