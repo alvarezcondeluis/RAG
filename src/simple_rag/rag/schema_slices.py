@@ -274,10 +274,14 @@ QUERY RULES:
 - NEVER access Section.text on Strategy or RiskFactor sections — those sections store content
   in Chunk nodes only. Always traverse via [:HAS_CHUNK] and use chunkEmbeddingIndex.
 - NO TEXT FILTERS ON VECTOR SEARCH: When using a vector index (chunkEmbeddingIndex,
-  profileObjectiveIndex), NEVER add WHERE CONTAINS or WHERE text CONTAINS filters on the
-  Section or Chunk nodes. The vector embedding already handles semantic matching — adding a
-  text filter on top will return 0 results because Section.text is null on these nodes.
-  BAD:  ... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy) WHERE s.text CONTAINS 'small-cap'
+  profileObjectiveIndex), NEVER add any property filter on Section or Chunk nodes after the
+  vector YIELD — not WHERE s.text CONTAINS, not WHERE s.title CONTAINS, not WHERE chunk.title
+  CONTAINS, and not inline {title: '...'} filters in the MATCH node pattern. The vector
+  already ranks by semantic relevance — any additional filter on text, title, or any other
+  Section/Chunk property will silently return 0 results because section titles are generic
+  strings ('Risk Factors', 'Strategy') that will never match topic-specific phrases.
+  BAD:  ... YIELD node AS chunk MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy) WHERE s.title CONTAINS 'small-cap'
+  BAD:  ... YIELD node AS chunk MATCH (chunk:Chunk {title: 'Small Cap Strategy'})<-[:HAS_CHUNK]-(s:Section)
   GOOD: ... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)
 - GENERAL QUERIES (no specific entity): If the question uses broad language ("which funds...",
   "find funds...", "show me funds that...") WITHOUT naming a specific ticker or fund name,
@@ -298,7 +302,7 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 9. TICKER: When the query contains a ticker ALWAYS use that exact ticker.
 10. LATEST: When asked for the latest profile/year, use ORDER BY year DESC LIMIT 1.
 11. NO YEAR FILTER UNLESS ASKED: Do NOT add year/date filters (e.g. {{year: 2023}} or WHERE r.year = ...) unless the question explicitly mentions a specific year or date range.
-12. NO TEXT FILTERS ON VECTOR SEARCH: When using chunkEmbeddingIndex or profileObjectiveIndex, NEVER add WHERE ... CONTAINS on Section or Chunk nodes. The vector handles semantic matching — a text filter returns 0 because Section.text is null. BAD: `WHERE s.text CONTAINS 'keyword'` after a vector YIELD. GOOD: remove it entirely.
+12. NO TEXT FILTERS ON VECTOR SEARCH: When using chunkEmbeddingIndex or profileObjectiveIndex, NEVER add any property filter on Section or Chunk nodes — not WHERE s.text CONTAINS, not WHERE s.title CONTAINS, not WHERE chunk.title CONTAINS, and not inline {title: '...'} in the MATCH pattern. Section titles are generic strings ('Risk Factors', 'Strategy') — they will never match topic phrases, so the filter silently returns 0. The vector already handles relevance. BAD: `WHERE s.title CONTAINS 'keyword'` BAD: `(chunk:Chunk {title: 'topic'})` GOOD: remove all filters on Section/Chunk after the vector YIELD.
 13. GENERAL QUERIES (no entity): If the question asks broadly ("which funds...", "find funds that...") WITHOUT a specific ticker or name, do NOT add entity filters. Search globally.
 """,
 
@@ -376,10 +380,14 @@ QUERY RULES:
   Filter by company ticker or section label as needed.
 - Plain MATCH on Section.text is ONLY allowed when retrieving full section text by exact structural
   filter (e.g., retrieve the entire Properties section text, not a semantic search within it).
-- NO TEXT FILTERS ON VECTOR SEARCH: When using chunkEmbeddingIndex, NEVER add WHERE CONTAINS
-  filters on Section or Chunk nodes. The vector embedding handles semantic matching — a text
-  filter on top will silently return 0 results.
-  BAD:  ... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor) WHERE s.text CONTAINS 'interest rate'
+- NO TEXT FILTERS ON VECTOR SEARCH: When using chunkEmbeddingIndex, NEVER add any property
+  filter on Section or Chunk nodes after the vector YIELD — not WHERE s.text CONTAINS, not
+  WHERE s.title CONTAINS, not WHERE chunk.title CONTAINS, and not inline {title: '...'} in
+  the MATCH node pattern. Section titles are short generic strings ('Risk Factors', 'Item 1A',
+  'Business') — they will never match topic-specific phrases, so the filter silently returns 0.
+  The vector already ranks by semantic relevance — remove ALL filters on Section/Chunk after YIELD.
+  BAD:  ... YIELD node AS chunk MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor) WHERE s.title CONTAINS 'cybersecurity'
+  BAD:  ... YIELD node AS chunk MATCH (chunk:Chunk {title: 'Cybersecurity Risk'})<-[:HAS_CHUNK]-(s:Section)
   GOOD: ... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)
 - GENERAL QUERIES (no specific entity): If the question uses broad language ("find risk factors
   across all companies", "which companies disclose...") WITHOUT naming a specific company ticker
@@ -404,7 +412,7 @@ CRITICAL CYPHER SYNTAX & LOGIC RULES:
 12. LATEST: When asked for the latest ALWAYS use ORDER BY property.date DESC LIMIT 1 rather than building complex NOT EXISTS subqueries.
 13. TICKER: When the query contains a ticker ALWAYS use that exact ticker.
 14. NO YEAR FILTER UNLESS ASKED: Do NOT add year/date filters (e.g. {{year: 2023}} or WHERE r.year = ...) unless the question explicitly mentions a specific year or date range.
-15. NO TEXT FILTERS ON VECTOR SEARCH: When using chunkEmbeddingIndex, NEVER add WHERE ... CONTAINS on Section or Chunk nodes after the vector YIELD. The vector handles semantic matching — a text filter returns 0 because Section.text is null. BAD: `WHERE s.text CONTAINS 'keyword'` after a vector YIELD. GOOD: remove it entirely.
+15. NO TEXT FILTERS ON VECTOR SEARCH: When using chunkEmbeddingIndex, NEVER add any property filter on Section or Chunk nodes — not WHERE s.text CONTAINS, not WHERE s.title CONTAINS, not WHERE chunk.title CONTAINS, and not inline {title: '...'} in the MATCH pattern. Section titles are generic strings ('Risk Factors', 'Item 1A') — they will never match topic phrases, so the filter silently returns 0. The vector already handles relevance. BAD: `WHERE s.title CONTAINS 'cybersecurity'` BAD: `(chunk:Chunk {title: 'Cybersecurity'})` GOOD: remove all filters on Section/Chunk after the vector YIELD.
 16. GENERAL QUERIES (no entity): If the question asks broadly ("which companies...", "find companies that...") WITHOUT a specific ticker or company name, do NOT add entity filters. Search globally.
 """,
 

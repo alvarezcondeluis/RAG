@@ -1055,7 +1055,7 @@
   },
   {
     "question": "Find risk factors related to interest rates across all company 10-K filings.",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company) WHERE chunk.text CONTAINS 'cybersecurity' RETURN chunk.text AS text, c.ticker AS ticker, c.name AS company, r.year AS year, score ORDER BY score DESC LIMIT 10"
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company) RETURN chunk.text AS text, c.ticker AS ticker, c.name AS company, r.year AS year, score ORDER BY score DESC LIMIT 10"
   },
   {
     "question": "What did Apple say about artificial intelligence in their 2023 10-K business description?",
@@ -1094,5 +1094,62 @@
   {
     "question": "Which fund objectives mention capital preservation and income generation?",
     "cypher": "CALL db.index.vector.queryNodes('profileObjectiveIndex', 10, $queryVector) YIELD node AS objective, score MATCH (objective)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, objective.text AS objectiveText, score ORDER BY score DESC LIMIT 10"
+  },
+
+  {
+    "question": "What cybersecurity and data privacy risks does Microsoft disclose in its 10-K?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'MSFT'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What does Apple say about artificial intelligence and machine learning risks in its annual filing?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What antitrust and regulatory risks does Google disclose in its 10-K risk factors?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOGL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "How does Tesla describe its electric vehicle manufacturing and energy storage business?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'TSLA'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "How does Amazon management explain operating income and segment profitability in its 10-K?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:ManagementDiscussion)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AMZN'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What antitrust lawsuits and government investigations does Google disclose in its legal proceedings?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOGL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What fulfillment centers and warehouses does Amazon disclose in its properties section?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AMZN'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What data centers and physical facilities does Microsoft describe in its 10-K?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'MSFT'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What manufacturing plants and Gigafactories does Tesla describe in its annual report?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Properties)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'TSLA'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "Which companies mention supply chain concentration or manufacturing risks in their 10-K filings?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company) RETURN chunk.text AS text, c.ticker AS ticker, c.name AS companyName, r.year AS filingYear, score ORDER BY score DESC LIMIT 10"
+  },
+  {
+    "question": "How do companies describe their advertising revenue model in their 10-K business sections?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company) RETURN chunk.text AS text, c.ticker AS ticker, c.name AS companyName, r.year AS filingYear, score ORDER BY score DESC LIMIT 10"
+  },
+  {
+    "question": "What does Google say about its business operations and revenue segments in its 10-K?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOGL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What does Tesla's management say about its financial results and growth strategy?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:ManagementDiscussion)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'TSLA'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What patent disputes or intellectual property litigation does Apple disclose in its 10-K?",
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
   }
 ]
