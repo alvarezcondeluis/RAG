@@ -16,18 +16,15 @@ import statistics
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
-from collections import Counter
 import numpy as np
 
-# Add project src to path for imports
-# Script is at: .../RAG/src/simple_rag/evaluation/query/classifier_benchmark.py
-# SRC_ROOT should be: .../RAG/src
+
 SCRIPT_DIR = Path(__file__).parent
 SRC_ROOT = SCRIPT_DIR.parent.parent.parent
 PROJECT_ROOT = SRC_ROOT.parent
 sys.path.insert(0, str(SRC_ROOT))
 
-from sklearn.metrics import classification_report, hamming_loss, f1_score, precision_recall_fscore_support
+from sklearn.metrics import hamming_loss, precision_recall_fscore_support
 from sklearn.preprocessing import MultiLabelBinarizer
 
 
