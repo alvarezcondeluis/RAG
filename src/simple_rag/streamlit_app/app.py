@@ -19,11 +19,8 @@ from src.simple_rag.streamlit_app import config
 from src.simple_rag.streamlit_app.components import chat_interface, sidebar, config_page
 from src.simple_rag.streamlit_app.pipeline_bridge import (
     process_query as pipeline_process_query,
-    shutdown_pipeline,
     verify_connection,
-    PipelineQueryResult,
 )
-from src.simple_rag.rag.answer_generation.result_classifier import ResultType
 
 
 def load_css():
