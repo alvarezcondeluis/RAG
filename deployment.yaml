@@ -1,0 +1,43 @@
+neo4j:
+  uri: bolt://localhost:7687
+  user: neo4j
+  password: ""               # or set NEO4J_PASSWORD in .env
+  # "docker"  → runs: docker compose up -d  (in ./neo4j/)
+  # "manual"  → assumes already running; fails fast if unreachable
+  start_mode: manual
+  compose_dir: neo4j
+  container_name: fund_graph_db
+
+lm_studio:
+  base_url: http://localhost:1234
+  # Model identifier as shown in LM Studio (e.g. "lmstudio-community/Qwen2.5-Coder-7B-Instruct-GGUF")
+  # Leave blank to skip model-presence check
+  model_id: ""
+  # "auto"    → launch LM Studio CLI (requires `executable` below)
+  # "manual"  → assumes already running; prints instructions if unreachable
+  start_mode: manual
+  executable: ""             # e.g. /Applications/LM Studio.app/Contents/MacOS/LM Studio
+
+pipeline:
+  # Text2Cypher — should point at LM Studio (openai-compatible)
+  cypher_backend: openai
+  cypher_model: qwen2.5-coder
+
+  # Answer generation
+  answer_provider: groq      # groq | openrouter | gemini | ollama
+  answer_model: llama-3.3-70b-versatile
+
+  # Feature toggles
+  use_schema_injection: true
+  enable_entity_resolution: true
+  enable_few_shot: true
+  verbose: false
+
+streamlit:
+  port: 8501
+  app_path: src/simple_rag/streamlit_app/app.py
+  open_browser: true
+
+timeouts:
+  probe_timeout_s: 60        # max seconds to wait for each service to become ready
+  probe_interval_s: 2.0      # polling interval between health checks

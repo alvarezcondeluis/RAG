@@ -1143,8 +1143,8 @@
     "complexity": "vector"
   },
   {
-    "question": "Describe how Microsoft positions its business in artificial intelligence.",
-    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'MSFT'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
+    "question": "How does Starbucks describe its Back to Starbucks strategy and global store restructuring in its 10-K?",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'SBUX'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {
@@ -1168,8 +1168,8 @@
     "complexity": "vector"
   },
   {
-    "question": "What did Apple say about AI in their 2023 10-K business description?",
-    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN {year: 2023}]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, score ORDER BY score DESC LIMIT 5",
+    "question": "What does Starbucks say about its coffee sourcing, supply chain, and green coffee purchasing in its annual filing?",
+    "expected_cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'SBUX'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5",
     "complexity": "vector"
   },
   {

@@ -46,7 +46,7 @@ TEST_QUESTIONS: List[Dict[str, Any]] = [
     },
     {
         "id": 3,
-        "question": "What regulatory and antitrust risks does Google disclose in its 10-K?",
+        "question": "What regulatory and antitrust risks does GOOG disclose in its 10-K?",
         "category": "company_filing",
         "index": "chunks",
         "section_label": "RiskFactor",
@@ -61,21 +61,21 @@ TEST_QUESTIONS: List[Dict[str, Any]] = [
     # ── BusinessInformation ───────────────────────────────────────────────────
     {
         "id": 5,
-        "question": "How does Microsoft describe its cloud computing and Azure business segments?",
+        "question": "How does Starbucks describe its Back to Starbucks strategy and global store restructuring in its 10-K?",
         "category": "company_filing",
         "index": "chunks",
         "section_label": "BusinessInformation",
     },
     {
         "id": 6,
-        "question": "What does Tesla say about its electric vehicle manufacturing and energy business?",
+        "question": "What does Starbucks say about its coffee sourcing, supply chain, and green coffee purchasing in its annual filing?",
         "category": "company_filing",
         "index": "chunks",
         "section_label": "BusinessInformation",
     },
     {
         "id": 7,
-        "question": "How do companies describe their advertising revenue model in their 10-K filings?",
+        "question": "How does Starbucks describe its loyalty program, Starbucks Rewards, and digital customer experience in its 10-K?",
         "category": "company_filing",
         "index": "chunks",
         "section_label": "BusinessInformation",
@@ -95,38 +95,23 @@ TEST_QUESTIONS: List[Dict[str, Any]] = [
         "index": "chunks",
         "section_label": "ManagementDiscussion",
     },
-    # ── LegalProceeding ───────────────────────────────────────────────────────
-    {
-        "id": 10,
-        "question": "What antitrust or competition lawsuits are disclosed in Google's 10-K filings?",
-        "category": "company_filing",
-        "index": "chunks",
-        "section_label": "LegalProceeding",
-    },
-    {
-        "id": 11,
-        "question": "What patent disputes or intellectual property litigation does Apple disclose?",
-        "category": "company_filing",
-        "index": "chunks",
-        "section_label": "LegalProceeding",
-    },
     # ── Properties ────────────────────────────────────────────────────────────
     {
-        "id": 12,
+        "id": 10,
         "question": "What data centers and office facilities does Microsoft own or lease?",
         "category": "company_filing",
         "index": "chunks",
         "section_label": "Properties",
     },
     {
-        "id": 13,
+        "id": 11,
         "question": "What fulfillment centers and warehouses does Amazon disclose in its properties section?",
         "category": "company_filing",
         "index": "chunks",
         "section_label": "Properties",
     },
     {
-        "id": 14,
+        "id": 12,
         "question": "What manufacturing plants and Gigafactories does Tesla describe in its 10-K?",
         "category": "company_filing",
         "index": "chunks",

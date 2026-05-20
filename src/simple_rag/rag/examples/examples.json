@@ -213,7 +213,7 @@
   },
   {
     "question": "Show me the business description from the 10-K for Google.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5"
   },
   {
     "question": "What are the insider transactions for Microsoft?",
@@ -297,7 +297,7 @@
   },
   {
     "question": "What real estate or facilities does Google disclose in its 10-K?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS title, s.text AS propertiesText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS title, s.text AS propertiesText, r.year AS year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "Describe the manufacturing plants and facilities mentioned in Tesla's annual report.",
@@ -317,7 +317,7 @@
   },
   {
     "question": "What products and services does Google offer according to its 10-K business section?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS title, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS title, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "How does Tesla describe its operations and business in its 10-K filing?",
@@ -337,7 +337,7 @@
   },
   {
     "question": "List all key risks mentioned in Google's 10-K risk factor section.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskText, r.year AS year ORDER BY r.year DESC"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskText, r.year AS year ORDER BY r.year DESC"
   },
   {
     "question": "What risks does Tesla disclose in its 10-K filing?",
@@ -357,7 +357,7 @@
   },
   {
     "question": "What is management's analysis of Google's financial results and business outlook?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS title, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS title, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What does Tesla's management discuss about their liquidity and capital resources in the 10-K?",
@@ -377,7 +377,7 @@
   },
   {
     "question": "Does Google have any pending lawsuits disclosed in its 10-K?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
   },
   {
     "question": "What legal matters has Tesla disclosed in its latest annual report?",
@@ -693,7 +693,7 @@
   },
   {
     "question": "Compare the revenue and net income for Google in its latest annual report.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOGL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, mRev.value AS Revenue, mNet.value AS NetIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) MATCH (fin)-[:HAS_METRIC]->(mRev:FinancialMetric {label: 'Revenue'}) MATCH (fin)-[:HAS_METRIC]->(mNet:FinancialMetric {label: 'NetIncome'}) RETURN c.name AS CompanyName, fin.fiscalYear AS FiscalYear, mRev.value AS Revenue, mNet.value AS NetIncome ORDER BY fin.fiscalYear DESC LIMIT 1"
   },
   {
     "question": "Get the total return and expense ratio for each year for the VFIAX fund",
@@ -1106,7 +1106,7 @@
   },
   {
     "question": "What antitrust and regulatory risks does Google disclose in its 10-K risk factors?",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOGL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOG'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
   },
   {
     "question": "How does Tesla describe its electric vehicle manufacturing and energy storage business?",
@@ -1118,7 +1118,7 @@
   },
   {
     "question": "What antitrust lawsuits and government investigations does Google disclose in its legal proceedings?",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOGL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOG'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
   },
   {
     "question": "What fulfillment centers and warehouses does Amazon disclose in its properties section?",
@@ -1142,7 +1142,7 @@
   },
   {
     "question": "What does Google say about its business operations and revenue segments in its 10-K?",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOGL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:BusinessInformation)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'GOOG'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
   },
   {
     "question": "What does Tesla's management say about its financial results and growth strategy?",
