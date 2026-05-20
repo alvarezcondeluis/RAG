@@ -12,28 +12,12 @@ from simple_rag.streamlit_app.pipeline_bridge import (
 )
 
 
-def _status_dot(key_status: str) -> str:
-    """Return a colored dot for API key status."""
-    if key_status == "ok":
-        return '<span class="provider-status status-ok"></span>'
-    elif key_status == "missing":
-        return '<span class="provider-status status-missing"></span>'
-    return '<span class="provider-status status-na"></span>'
-
-
 def _fetch_models(provider_name: str, cache_key: str) -> list:
     """Fetch and cache model list for a provider."""
     cache = st.session_state.setdefault("_models_cache", {})
     if provider_name not in cache:
         cache[provider_name] = list_models_for_provider(provider_name)
     return cache[provider_name]
-
-
-def _invalidate_model_cache(provider_name: str) -> None:
-    """Remove cached models for a provider (on backend change)."""
-    cache = st.session_state.get("_models_cache", {})
-    cache.pop(provider_name, None)
-
 
 def render_config_page() -> None:
     """Render the pipeline configuration page."""
@@ -120,9 +104,7 @@ def render_config_page() -> None:
     # Show all providers with status indicators
     provider_labels = {}
     for p in providers:
-        dot = {"ok": "\\u2705", "missing": "\\u274c", "n/a": "\\u26a0\\ufe0f"}.get(
-            p["key_status"], ""
-        )
+        dot = {"ok": "✅", "missing": "❌", "n/a": ""}.get(p["key_status"], "")
         provider_labels[p["name"]] = f"{p['display']} {dot}"
 
     available_names = [p["name"] for p in available]
@@ -168,7 +150,7 @@ def render_config_page() -> None:
         with col1:
             openai_host = st.text_input("Host", value="localhost", key="_openai_host")
         with col2:
-            openai_port = st.number_input("Port", value=1234, min_value=1, max_value=65535, step=1, key="_openai_port")
+            openai_port = st.text_input("Port", value="1234", key="_openai_port")
 
     # ── Pipeline Options ─────────────────────────────────────────────────────
     st.markdown(
@@ -191,14 +173,16 @@ def render_config_page() -> None:
         retry_module = st.toggle("Retry on Error", value=True, key="_retry_toggle")
     with col2:
         embed_vector_queries = st.toggle("Embed Vector Queries", value=False, key="_embed_toggle")
-    with col3:
+
+    col1, col2 = st.columns(2)
+    with col1:
         retry_strategy = st.selectbox(
             "Retry Strategy",
             options=["full", "lean"],
             index=0,
             key="_retry_strategy_select",
         )
-    with col4:
+    with col2:
         few_shot_model = st.selectbox(
             "Few-Shot Model",
             options=[
@@ -210,7 +194,6 @@ def render_config_page() -> None:
         )
 
     # ── Summary ──────────────────────────────────────────────────────────────
-    st.markdown("---")
 
     server_info = f"`{openai_host}:{openai_port}`" if cypher_backend == "openai" else "—"
     summary_md = f"""

@@ -1,4 +1,5 @@
 {
+  "normalize_embeddings": false,
   "labels": [
     "not_related",
     "fund_basic",
@@ -6,6 +7,5 @@
     "fund_profile",
     "company_filing",
     "company_people"
-  ],
-  "normalize_embeddings": false
+  ]
 }

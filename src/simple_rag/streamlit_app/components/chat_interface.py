@@ -37,11 +37,19 @@ def display_messages(messages: List[Dict[str, Any]]):
         
         with st.chat_message(role):
             st.markdown(content)
-            
+
             # Display sources if available (for assistant messages)
             if role == "assistant" and message.get("sources"):
                 with st.expander(f"◆ Sources ({len(message['sources'])})"):
                     display_sources(message["sources"])
+
+            # AI-generated content warning
+            if role == "assistant":
+                st.markdown(
+                    '<div class="ai-warning">&#9888; AI-generated &mdash; may contain errors. '
+                    'Verify against primary sources before making financial decisions.</div>',
+                    unsafe_allow_html=True,
+                )
 
 
 def display_sources(sources: List[Dict[str, Any]]):

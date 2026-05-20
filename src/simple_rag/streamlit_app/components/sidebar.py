@@ -69,17 +69,6 @@ def render_sidebar() -> Dict[str, Any]:
 
         st.divider()
 
-        st.markdown("### Search Mode")
-
-        search_mode = st.selectbox(
-            "Strategy",
-            options=["Hybrid", "Semantic", "Graph"],
-            index=0,
-            help="Choose retrieval strategy",
-            label_visibility="collapsed",
-        )
-
-        st.divider()
 
         # ── Conversation management ──────────────────────────────────────────
         st.markdown("### Session")
@@ -117,10 +106,27 @@ def render_sidebar() -> Dict[str, Any]:
 
         st.caption("SEC Filings Intelligence v0.2.0")
 
+        st.divider()
+
+        # ── Legal disclaimer ─────────────────────────────────────────────────
+        st.markdown(
+            """
+            <div class="legal-disclaimer">
+                <span class="legal-title">DISCLAIMER</span>
+                This tool is for <strong>informational purposes only</strong> and does
+                not constitute investment advice, financial guidance, or a recommendation
+                to buy or sell any security. Data is sourced from public
+                <strong>SEC EDGAR</strong> filings and may not reflect the most recent
+                information. Always verify against primary sources before making any
+                financial decision.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     return {
         "companies": companies,
-        "funds": funds,
-        "search_mode": search_mode,
+        "funds": funds
     }
 
 

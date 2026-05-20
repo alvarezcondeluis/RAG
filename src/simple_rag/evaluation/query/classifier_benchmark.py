@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 import numpy as np
+from collections import Counter
 
 
 SCRIPT_DIR = Path(__file__).parent
@@ -120,35 +121,44 @@ class SetFitClassifier:
 class LLMQueryClassifier:
     """LLM-based query classifier using OpenRouter or local endpoint."""
 
-    CLASSIFICATION_PROMPT = """You are an expert query classifier for a financial SEC filings RAG system.
-
-Your task is to classify the given user query into one or more of these categories:
+    CLASSIFICATION_PROMPT = """Classify the query for a financial SEC filings RAG system into one or more categories.
 
 Categories:
-- fund_basic: Questions about fund properties like expense ratios, returns, net assets, costs, fees
-- fund_portfolio: Questions about fund holdings, portfolio composition, sector allocations, regional allocations
-- fund_profile: Questions about fund strategy, risks, objectives, performance commentary (text/document search)
-- company_filing: Questions about company 10-K filings, business information, financial metrics, risk factors
-- company_people: Questions about company executives, CEOs, insider transactions, compensation
-- not_related: Questions completely unrelated to SEC filings or financial data
+- fund_basic: Fund identifiers (ticker, name, exchange, share class), provider/trust structure, charts/tables/images stored for a fund, source documents/accession numbers of fund data, and quantitative metrics (expense ratio, returns, NAV, net assets, turnover, financial highlights). Any fund property NOT about holdings composition.
+- fund_portfolio: Holdings, number of holdings, sector/regional allocations, holding weights/market values, which funds hold a company. What is INSIDE a fund's portfolio.
+- fund_profile: Fund strategy, risks, objectives, performance commentary, ESG/thematic characteristics from prospectus documents. Covers both semantic queries ("which funds minimize volatility") and direct document retrieval ("what does the risk section say").
+- company_filing: Company 10-K content — business overview, risk factors, MD&A, legal proceedings, properties, financial statements (income, balance sheet, cash flow, revenue segments).
+- company_people: Any person — fund managers (who manages a fund, how many funds per manager), company CEOs/executives (compensation, actually paid, shareholder return), insider transactions (buy/sell/grant, shares, price).
+- not_related: Unrelated to SEC filings or fund data (weather, sports, general market concepts with no specific filing/fund).
 
-Rules:
-1. A query can belong to MULTIPLE categories (use the "categories" array in your response)
-2. Always include all applicable categories
-3. Return confidence as a single float between 0.0 and 1.0 (average confidence for selected categories)
-4. Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
-{{"categories": ["category1", "category2"], "confidence": 0.85, "reasoning": "brief explanation"}}
+Rules: queries can have MULTIPLE categories. Respond ONLY with JSON: {{"categories": [...], "confidence": 0.0-1.0}}
+
+Key disambiguations:
+- "how many holdings" → fund_portfolio | "holdings TABLE" (document artifact) → fund_basic
+- Charts/tables/images of a fund → fund_basic | CIK for company ticker → company_filing | CIK for fund ticker → fund_basic
+- Financial metrics on fund ticker (return %, NAV, net income ratio) → fund_basic, NOT company_filing
+- Fund manager → company_people | Fund risk/strategy → fund_profile | Company risk → company_filing
+- Open-ended "general info about fund X" → fund_basic + fund_portfolio + fund_profile (all three)
 
 Examples:
-- "What is the expense ratio of VTI?" → {{"categories": ["fund_basic"], "confidence": 0.95}}
-- "What are the top holdings and sectors in VTSAX?" → {{"categories": ["fund_portfolio"], "confidence": 0.90}}
-- "Tell me about Apple's risk factors" → {{"categories": ["company_filing"], "confidence": 0.92}}
+- "Expense ratio of VTI?" → {{"categories": ["fund_basic"], "confidence": 0.95}}
+- "Charts available for VTI?" → {{"categories": ["fund_basic"], "confidence": 0.93}}
+- "Net income ratio for VTI in 2022?" → {{"categories": ["fund_basic"], "confidence": 0.95}}
+- "CIK number for Apple?" → {{"categories": ["company_filing"], "confidence": 0.94}}
+- "Top 10 holdings of VGT?" → {{"categories": ["fund_portfolio"], "confidence": 0.95}}
+- "Which funds use a passive indexing approach?" → {{"categories": ["fund_profile"], "confidence": 0.91}}
+- "Risk section for EDV?" → {{"categories": ["fund_profile"], "confidence": 0.93}}
+- "Microsoft's 10-K business overview?" → {{"categories": ["company_filing"], "confidence": 0.95}}
+- "Who manages Vanguard Small Cap Growth?" → {{"categories": ["company_people"], "confidence": 0.94}}
+- "Insider buys for AAPL?" → {{"categories": ["company_people"], "confidence": 0.95}}
 - "What is the weather today?" → {{"categories": ["not_related"], "confidence": 0.98}}
-- "Show me portfolio holdings and compare expense ratios" → {{"categories": ["fund_basic", "fund_portfolio"], "confidence": 0.88}}
+- "VBR expense ratio, top 5 holdings, portfolio manager?" → {{"categories": ["fund_basic", "fund_portfolio", "company_people"], "confidence": 0.90}}
+- "General information about Vanguard Healthcare fund?" → {{"categories": ["fund_basic", "fund_portfolio", "fund_profile"], "confidence": 0.88}}
+- "ESG funds from Vanguard with >10% in Technology?" → {{"categories": ["fund_profile", "fund_portfolio"], "confidence": 0.88}}
 
-Query to classify: {query}
+Query: {query}
 
-Respond with ONLY the JSON object, nothing else:"""
+Respond with ONLY the JSON object:"""
 
     def __init__(
         self,
@@ -300,14 +310,19 @@ class QueryClassifierBenchmark:
         # Vector index: chunkEmbeddingIndex
         # Properties unique to this slice: incomeStatement, balanceSheet,
         #   cashFlow, fiscalYear
+        # chunkEmbeddingIndex is SHARED between company_filing (10-K chunks) and
+        # fund_profile (Strategy/RiskFactor chunks inside :Profile).
+        # Only count it as company_filing when the traversal goes through Filing10K
+        # or a 10-K-specific section — NOT when it goes through :Profile / DEFINED_BY.
+        _is_profile_chunk = any(p in cypher for p in [":Profile", "DEFINED_BY", ":Strategy", ":Objective", "profileObjectiveIndex"])
+        _chunk_index_present = "chunkEmbeddingIndex" in cypher
         if any(p in cypher for p in [
             "Filing10K", "REPORTS_IN", "HAS_FINANCIALS", "HAS_FINACIALS",
             "FinancialMetric", ":Segment",
             "BusinessInformation", "LegalProceeding", "ManagementDiscussion",
             ":Properties", ":Financials",
-            "chunkEmbeddingIndex",
             "incomeStatement", "balanceSheet", "cashFlow", "fiscalYear",
-        ]):
+        ]) or (_chunk_index_present and not _is_profile_chunk):
             labels.add("company_filing")
 
         # ── fund_portfolio ──────────────────────────────────────────────────────
@@ -714,40 +729,100 @@ class QueryClassifierBenchmark:
                 report_lines.append(f"{'':<22} {'Recall':<12} {sf_r:>10.4f}")
             report_lines.append("")
 
-        # ── Misclassified examples ────────────────────────────────────────────
-        # Superset matches (predicted ⊇ expected) are treated as correct — exclude them.
-        # Only show true failures: expected labels NOT fully covered by predicted.
-        truly_wrong = [
-            r for r in self.setfit_results
-            if r.error is None and not set(r.expected_labels).issubset(set(r.predicted_labels))
-        ]
-        superset_only = [
-            r for r in self.setfit_results
-            if r.error is None
-            and set(r.expected_labels).issubset(set(r.predicted_labels))
-            and set(r.expected_labels) != set(r.predicted_labels)
-        ]
-        if truly_wrong or superset_only:
+        # ── Misclassified examples — per classifier ───────────────────────────
+        def _render_failures(results: List[ClassificationResult], classifier_name: str) -> None:
+            truly_wrong = [
+                r for r in results
+                if r.error is None and not set(r.expected_labels).issubset(set(r.predicted_labels))
+            ]
+            superset_only = [
+                r for r in results
+                if r.error is None
+                and set(r.expected_labels).issubset(set(r.predicted_labels))
+                and set(r.expected_labels) != set(r.predicted_labels)
+            ]
+
             report_lines.append("=" * 80)
-            if truly_wrong:
-                report_lines.append(f"❌ TRUE FAILURES ({len(truly_wrong)} — expected labels missing from prediction)")
-                report_lines.append("-" * 80)
-                for r in truly_wrong[:30]:
-                    report_lines.append(f"  Q{r.query_id}: {r.query[:70]}")
-                    report_lines.append(f"    Expected : {r.expected_labels}")
-                    report_lines.append(f"    Predicted: {r.predicted_labels}  ({r.confidence_score:.2f})")
-                if len(truly_wrong) > 30:
-                    report_lines.append(f"  ... and {len(truly_wrong) - 30} more")
+            report_lines.append(f"🔍 MISCLASSIFICATION DETAILS — {classifier_name}")
+            report_lines.append("=" * 80)
+
+            if not truly_wrong and not superset_only:
+                report_lines.append(f"  ✅ No failures or superset predictions for {classifier_name}.")
                 report_lines.append("")
-            if superset_only:
-                report_lines.append(f"⚠️  SUPERSET PREDICTIONS ({len(superset_only)} — predicted extra labels, counted as correct)")
+                return
+
+            if truly_wrong:
+                report_lines.append(
+                    f"  ❌ TRUE FAILURES: {len(truly_wrong)} queries where expected labels are missing from prediction"
+                )
+                report_lines.append(
+                    f"     (These count against accuracy — the predicted set does NOT cover all expected labels)"
+                )
                 report_lines.append("-" * 80)
-                for r in superset_only[:20]:
-                    extra = sorted(set(r.predicted_labels) - set(r.expected_labels))
-                    report_lines.append(f"  Q{r.query_id}: {r.query[:70]}")
-                    report_lines.append(f"    Expected : {r.expected_labels}  →  extra: {extra}")
-                if len(superset_only) > 20:
-                    report_lines.append(f"  ... and {len(superset_only) - 20} more")
+
+                # Group by misclassification pattern: expected → predicted
+                from collections import defaultdict
+                pattern_groups: dict = defaultdict(list)
+                for r in truly_wrong:
+                    key = (tuple(sorted(r.expected_labels)), tuple(sorted(r.predicted_labels)))
+                    pattern_groups[key].append(r)
+
+                for (expected_tuple, predicted_tuple), group in sorted(
+                    pattern_groups.items(), key=lambda x: -len(x[1])
+                ):
+                    expected_str  = ", ".join(expected_tuple)
+                    predicted_str = ", ".join(predicted_tuple)
+                    report_lines.append(
+                        f"  [{len(group):>2}x]  Expected [{expected_str}]  →  Predicted [{predicted_str}]"
+                    )
+                    report_lines.append("-" * 80)
+                    for r in group:
+                        report_lines.append(f"    Q{r.query_id:<5} conf={r.confidence_score:.2f}  {r.query[:72]}")
+                    report_lines.append("")
+
+                report_lines.append(
+                    f"  Total true failures: {len(truly_wrong)} / "
+                    f"{len([r for r in results if r.error is None])} evaluated queries"
+                )
+                report_lines.append("")
+
+            if superset_only:
+                report_lines.append(
+                    f"  ⚠️  SUPERSET PREDICTIONS: {len(superset_only)} queries with extra labels beyond expected"
+                )
+                report_lines.append(
+                    f"     (Counted as CORRECT — predicted set covers all expected labels but adds more)"
+                )
+                report_lines.append("-" * 80)
+
+                from collections import defaultdict
+                extra_groups: dict = defaultdict(list)
+                for r in superset_only:
+                    extra = tuple(sorted(set(r.predicted_labels) - set(r.expected_labels)))
+                    key = (tuple(sorted(r.expected_labels)), extra)
+                    extra_groups[key].append(r)
+
+                for (expected_tuple, extra_tuple), group in sorted(
+                    extra_groups.items(), key=lambda x: -len(x[1])
+                ):
+                    expected_str = ", ".join(expected_tuple)
+                    extra_str    = ", ".join(extra_tuple)
+                    report_lines.append(
+                        f"  [{len(group):>2}x]  Expected [{expected_str}]  +extra: [{extra_str}]"
+                    )
+                    for r in group:
+                        report_lines.append(f"    Q{r.query_id:<5} conf={r.confidence_score:.2f}  {r.query[:72]}")
+                    report_lines.append("")
+
+                report_lines.append(
+                    f"  Total superset predictions: {len(superset_only)} / "
+                    f"{len([r for r in results if r.error is None])} evaluated queries"
+                )
+                report_lines.append("")
+
+        _render_failures(self.setfit_results, "SetFit")
+        if not setfit_only and self.llm_results:
+            _render_failures(self.llm_results, f"LLM ({llm_stats.classifier_name})")
         report_lines.append("")
 
         # ── Overall assessment ────────────────────────────────────────────────

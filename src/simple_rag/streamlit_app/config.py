@@ -44,12 +44,9 @@ HYBRID_SEARCH_WEIGHT = 0.7  # Weight for semantic vs graph search
 
 # Query Examples
 SAMPLE_QUERIES = [
-    "Apple FY2024 revenue breakdown",
-    "VTSAX top 10 holdings",
-    "MSFT key risk factors",
-    "Tesla CEO compensation 2024",
-    "NVDA insider trading activity",
-    "Compare AAPL vs MSFT margins",
+    "Apple summary of the last business information",
+    "VTSAX top 10 holdings and sector allocation",
+    "Performance summary of healthcare fund", 
 ]
 
 # Paths

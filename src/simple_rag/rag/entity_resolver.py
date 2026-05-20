@@ -37,8 +37,22 @@ class EntityResolver:
                 if record["ticker"]:
                     self.tickers.append(record["ticker"])
 
+            # 3. Load Company tickers (only those with a 10-K filing in the graph)
+            company_res = session.run(
+                "MATCH (c:Company)-[:REPORTS_IN]->(:Filing10K) "
+                "RETURN DISTINCT c.ticker AS ticker, c.name AS companyName "
+                "ORDER BY ticker ASC"
+            )
+            company_count = 0
+            for record in company_res:
+                ticker = record["ticker"]
+                if ticker and ticker not in self.tickers:
+                    self.tickers.append(ticker)
+                    company_count += 1
+
         print(f"✓ Entity cache loaded:")
-        print(f"  Funds     : {len(self.funds):>5}  ({len(self.tickers)} with tickers)")
+        print(f"  Funds     : {len(self.funds):>5}  ({len(self.tickers) - company_count} with tickers)")
+        print(f"  Companies : {company_count:>5}  (with Filing10K)")
         print(f"  Providers : {len(self.providers):>5}")
         print(f"  Trusts    : {len(self.trusts):>5}")
         if not self.funds:

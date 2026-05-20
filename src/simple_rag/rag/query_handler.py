@@ -203,7 +203,12 @@ class QueryHandler:
                 query=user_query, category=QueryCategory.NOT_RELATED.value,
                 confidence=confidence, schema_used="",
             )
-            result.error = "Query is not related to the financial database."
+            result.error = (
+                "NOT_RELATED: This question is outside the scope of the SEC Filings Intelligence system. "
+                "I can only answer questions about fund holdings, expense ratios, returns, investment strategies, "
+                "company 10-K filings, financial metrics, executive compensation, and insider transactions. "
+                "Please rephrase your question to relate to SEC filings or fund data."
+            )
             print("🚫 Not related — skipping.")
             return result
 

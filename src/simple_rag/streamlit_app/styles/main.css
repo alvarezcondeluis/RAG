@@ -3,7 +3,7 @@
    ============================================================ */
 
 /* ---- Fonts ---- */
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&family=Syne:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap');
 
 /* ---- Design Tokens ---- */
 :root {
@@ -66,6 +66,12 @@
     padding: 2rem 2.5rem;
     margin-bottom: 2rem;
     border-radius: var(--radius-lg);
+    overflow: visible;
+}
+
+[data-testid="stMarkdownContainer"],
+[data-testid="element-container"] {
+    overflow: visible !important;
 }
 
 /* Corner brackets */
@@ -99,13 +105,13 @@
 .header-bottom-right { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
 
 .main-header h1 {
-    font-family: 'Syne', sans-serif;
+    font-family: 'Barlow Condensed', sans-serif;
     color: var(--text-1);
-    font-size: 2.2rem;
+    font-size: 2.6rem;
     font-weight: 800;
     margin: 0;
-    letter-spacing: -1px;
-    line-height: 1.15;
+    letter-spacing: 1px;
+    line-height: 1.3;
 }
 
 .main-header .subtitle {
@@ -339,18 +345,35 @@
 /* ============================================================
    INPUT
    ============================================================ */
-.stChatInput > div {
+.stChatInput > div,
+.stChatInput > div > div,
+[data-testid="stChatInput"],
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] > div > div {
     border-color: var(--border) !important;
-    background: var(--surface-2) !important;
+    background: transparent !important;
     border-radius: var(--radius-lg) !important;
 }
-.stChatInput > div:focus-within {
+.stChatInput > div:focus-within,
+[data-testid="stChatInput"] > div:focus-within {
     border-color: var(--amber) !important;
     box-shadow: 0 0 0 3px var(--amber-dim) !important;
 }
-.stChatInput input, .stChatInput textarea {
+.stChatInput input, .stChatInput textarea,
+[data-testid="stChatInput"] input,
+[data-testid="stChatInput"] textarea {
     font-family: 'DM Sans', sans-serif !important;
     color: var(--text-1) !important;
+    background: transparent !important;
+}
+[data-baseweb="base-input"] {
+    background: transparent !important;
+}
+[data-testid="stChatInputTextArea"] {
+    background: transparent !important;
+}
+.st-bb {
+    background-color: transparent !important;
 }
 
 .stTextInput > div > div > input {
@@ -404,6 +427,13 @@ section[data-testid="stSidebar"] .stMarkdown h3 {
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 2px;
+    margin-top: 2rem;
+    margin-bottom: 0.6rem;
+}
+
+section[data-testid="stSidebar"] hr {
+    margin-top: 1.2rem !important;
+    margin-bottom: 0.4rem !important;
 }
 
 .sidebar-header {
@@ -586,9 +616,9 @@ hr, .stDivider {
     text-transform: uppercase;
     letter-spacing: 2px;
     color: var(--amber);
-    margin: 1.5rem 0 0.75rem 0;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
+    margin: 0.6rem 0 0.3rem 0;
+    padding-bottom: 0;
+    border-bottom: none;
 }
 
 /* Configuring status pill (amber instead of green) */
@@ -688,10 +718,132 @@ button[data-testid="stBaseButton-primary"]:hover {
 }
 
 /* ============================================================
+   INPUT DISCLAIMER (inside the input card — responsive to sidebar)
+   ============================================================ */
+[data-testid="stBottomBlockContainer"] {
+    padding-bottom: 0rem !important;
+}
+[data-testid="stBottomBlockContainer"]::after {
+    content: "⚠ This is an AI and can make mistakes, including with financial and legal information. Verify all responses against official SEC filings.";
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-3);
+    text-align: center;
+    padding: 1.5rem 1rem 0.5rem 1rem;
+    pointer-events: none;
+}
+
+/* ============================================================
+   LEGAL DISCLAIMER (sidebar)
+   ============================================================ */
+.legal-disclaimer {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-3);
+    line-height: 1.7;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+    margin-top: 0.5rem;
+}
+.legal-title {
+    display: block;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--amber);
+    margin-bottom: 0.4rem;
+}
+
+/* ============================================================
+   NOT-RELATED MESSAGE
+   ============================================================ */
+.not-related-msg {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--amber);
+    border-radius: var(--radius);
+    padding: 0.9rem 1.2rem;
+    line-height: 1.6;
+}
+
+/* ============================================================
+   AI WARNING (below assistant messages)
+   ============================================================ */
+.ai-warning {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-3);
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border-left: 2px solid var(--border);
+}
+
+/* ============================================================
+   TERMS OF USE PAGE
+   ============================================================ */
+.terms-container {
+    max-width: 680px;
+    margin: 4rem auto;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2.5rem 3rem;
+}
+.terms-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-1);
+    letter-spacing: 1px;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.terms-body {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    color: var(--text-2);
+    line-height: 1.8;
+}
+.terms-body ul {
+    padding-left: 1.2rem;
+    margin-top: 0.75rem;
+}
+.terms-body li {
+    margin-bottom: 0.75rem;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.app-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 3rem;
+    padding: 1rem 0.5rem;
+    border-top: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-3);
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.footer-copyright {
+    color: var(--text-3);
+}
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 768px) {
-    .main-header h1 { font-size: 1.6rem; }
+    .main-header h1 { font-size: 1.8rem; }
     .user-message    { margin-left: 1rem; }
     .assistant-message { margin-right: 1rem; }
 }
