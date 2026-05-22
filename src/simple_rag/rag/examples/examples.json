@@ -8,6 +8,18 @@
     "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund {ticker: 'BND'}) RETURN p.name AS providerName"
   },
   {
+    "question": "What are the main risks that the fund VOO has?",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.text AS riskFactors"
+  },
+  {
+    "question": "Regarding the risks of the vanguard small-cap index fund, show them to me?",
+    "cypher": "MATCH (f:Fund) WHERE toLower(f.name) CONTAINS 'vanguard small-cap index' WITH f LIMIT 1 MATCH (f)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(c:Chunk) RETURN f.name AS fundName, f.ticker AS ticker, c.text AS chunkText"
+  },
+  {
+    "question": "What are the risks of investing in the vanguard health care index fund?",
+    "cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'health care index') YIELD node AS fund, score WITH fund ORDER BY score DESC LIMIT 1 MATCH (fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(c:Chunk) RETURN fund.name AS fundName, fund.ticker AS ticker, c.text AS chunkText"
+  },
+  {
     "question": "Who manages the fund with the highest turnover?",
     "cypher": "MATCH (p:Provider)-[:MANAGES]->(:Trust)-[:ISSUES]->(f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.turnover IS NOT NULL RETURN p.name AS providerName, f.ticker, f.name, fh.turnover ORDER BY fh.turnover DESC LIMIT 1"
   },
@@ -100,12 +112,8 @@
     "cypher": "MATCH (f:Fund)-[:HAS_SHARE_CLASS]->(:ShareClass {name: 'Admiral Shares'}) RETURN f.name AS fundName"
   },
   {
-    "question": "What are the risks described for the VTI fund?",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VTI'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 10"
-  },
-  {
     "question": "What are the investment strategies for the Short-Term Bond fund?",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) WHERE f.name CONTAINS 'Short-Term Bond' RETURN chunk.text AS text, f.ticker AS ticker, f.name AS fundName, score ORDER BY score DESC LIMIT 10"
+    "cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'Short-Term Bond') YIELD node AS f, score WITH f ORDER BY score DESC LIMIT 1 MATCH (f)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Strategy)-[:HAS_CHUNK]->(chunk:Chunk) RETURN f.ticker AS ticker, f.name AS fundName, s.title AS sectionTitle, chunk.text AS chunkContent ORDER BY chunk.id ASC"
   },
   {
     "question": "Show me all the strategy sections and their content for the VOO fund.",
@@ -205,7 +213,7 @@
   },
   {
     "question": "What are the risk factors from the 10-K filing for Apple?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_SECTION]->(rf:Section:RiskFactor) RETURN rf.text AS riskFactor LIMIT 10"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What are the funds that have more than 10% invested in the United States?",
@@ -213,7 +221,7 @@
   },
   {
     "question": "Show me the business description from the 10-K for Google.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[:REPORTS_IN]->(:Filing10K)-[:HAS_SECTION]->(bi:Section:BusinessInformation) RETURN bi.text AS businessInfo LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What are the insider transactions for Microsoft?",
@@ -287,6 +295,10 @@
     "question": "What is the fund with the most average return since inception?",
     "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE ar.returnInception IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, ar.returnInception AS returnSinceInception ORDER BY ar.returnInception DESC LIMIT 1"
   },
+   {
+    "question": "I am wondering what are the funds with the highest average return since inception, can you show them to me?",
+    "cypher": "MATCH (f:Fund)-[:HAS_AVERAGE_RETURNS]->(ar:AverageReturns) WHERE ar.returnInception IS NOT NULL RETURN f.ticker AS ticker, f.name AS fundName, ar.returnInception AS returnSinceInception ORDER BY ar.returnInception DESC LIMIT 10"
+  },
   {
     "question": "What are the properties owned by Apple?",
     "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:Properties) RETURN s.title AS sectionTitle, s.text AS properties"
@@ -309,83 +321,83 @@
   },
   {
     "question": "What are the main business activities of Apple according to its 10-K?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Describe the business model of Microsoft as disclosed in its latest annual report.",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessDescription, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What products and services does Google offer according to its 10-K business section?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS title, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "How does Tesla describe its operations and business in its 10-K filing?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessDescription, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Tell me about the business segments and operations of Amazon from its 10-K.",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation) RETURN s.title AS sectionTitle, s.text AS businessInfo, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:BusinessInformation)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What are the main risks Apple faces according to its 10-K?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskDescription, r.year AS year ORDER BY r.year DESC"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What risk factors does Microsoft disclose in its latest annual filing?",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskDescription, r.year AS year ORDER BY r.year DESC LIMIT 10"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "List all key risks mentioned in Google's 10-K risk factor section.",
-    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskText, r.year AS year ORDER BY r.year DESC"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What risks does Tesla disclose in its 10-K filing?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskDescription, r.year AS year ORDER BY r.year DESC"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What does Amazon say are the risks to its business in its annual report?",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor) RETURN s.title AS riskTitle, s.text AS riskText, r.year AS year ORDER BY r.year DESC"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What does Apple's management say about the company's financial performance?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS sectionTitle, s.text AS managementDiscussion, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Show me the management discussion and analysis from Microsoft's 10-K.",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS sectionTitle, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What is management's analysis of Google's financial results and business outlook?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS title, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What does Tesla's management discuss about their liquidity and capital resources in the 10-K?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS sectionTitle, s.text AS managementDiscussion, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "How does Amazon's management explain the evolution of their revenues in the latest filing?",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion) RETURN s.title AS sectionTitle, s.text AS mdaText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Are there any ongoing lawsuits or legal cases against Apple?",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What legal proceedings is Microsoft currently involved in?",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Does Google have any pending lawsuits disclosed in its 10-K?",
-    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'GOOG'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What legal matters has Tesla disclosed in its latest annual report?",
-    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalText, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Show me the legal proceedings from Amazon's most recent 10-K filing.",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding) RETURN s.title AS sectionTitle, s.text AS legalProceedings, r.year AS year ORDER BY r.year DESC LIMIT 1"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What is the average expense ratio across all funds managed by Vanguard?",
@@ -401,11 +413,11 @@
   },
   {
     "question": "What is the management discussion from the 10-K filing for Amazon?",
-    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(md:Section:ManagementDiscussion) RETURN md.text AS managementDiscussion LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:ManagementDiscussion)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Show me the legal proceedings from the 10-K for Microsoft.",
-    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceeding LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "Show me the evolution of the turnover ratio for VIEIX along the years.",
@@ -441,11 +453,11 @@
   },
   {
     "question": "What are the risk descriptions for VOO?",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VOO'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 10"
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[d:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, d.year AS year ORDER BY chunk.id ASC"
   },
   {
     "question": "Show me the investment strategies for the Short-Term Bond fund.",
-    "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) WHERE f.name CONTAINS 'Short-Term Bond' RETURN chunk.text AS text, f.ticker AS ticker, f.name AS fundName, score ORDER BY score DESC LIMIT 10"
+    "cypher": "CALL db.index.fulltext.queryNodes('fundNameIndex', 'Short-Term Bond') YIELD node AS f, score WITH f ORDER BY score DESC LIMIT 1 MATCH (f)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Strategy)-[:HAS_CHUNK]->(chunk:Chunk) RETURN f.ticker AS ticker, f.name AS fundName, s.title AS sectionTitle, chunk.text AS chunkContent ORDER BY chunk.id ASC"
   },
   {
     "question": "Which funds have no performance commentary attached?",
@@ -473,7 +485,7 @@
   },
   {
     "question": "Show me legal proceedings from the 10-K for Apple.",
-    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[:REPORTS_IN]->(filing:Filing10K)-[:HAS_SECTION]->(lp:Section:LegalProceeding) RETURN lp.text AS legalProceedings LIMIT 5"
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_SECTION]->(s:Section:LegalProceeding)-[:HAS_CHUNK]->(chunk:Chunk) RETURN s.title AS sectionTitle, chunk.text AS chunkContent, r.year AS year ORDER BY r.year DESC, chunk.id ASC"
   },
   {
     "question": "What was the fund with the highest total return in any single year?",
@@ -1031,7 +1043,6 @@
     "question": "Rank all sectors by their combined allocation weight across every fund.",
     "cypher": "MATCH (f:Fund)-[sa:HAS_SECTOR_ALLOCATION]->(s:Sector) RETURN s.name AS sectorName, sum(toFloat(sa.weight)) AS totalWeight ORDER BY totalWeight DESC"
   },
-
   {
     "question": "Show me the 10 largest positions in the VOO fund by market value.",
     "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN h.name AS holdingName, h.ticker AS ticker, r.weight AS weight, r.marketValue AS marketValue ORDER BY toFloat(r.marketValue) DESC LIMIT 10"
@@ -1040,7 +1051,6 @@
     "question": "What are the top 5 positions in VTI by portfolio weight?",
     "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(:Portfolio)-[r:HAS_HOLDING]->(h:Holding) RETURN h.name AS holdingName, h.ticker AS ticker, r.weight AS weight, r.marketValue AS marketValue ORDER BY toFloat(r.weight) DESC LIMIT 5"
   },
-
   {
     "question": "What does Apple say about supply chain risks in their 10-K filings?",
     "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, s.title AS sectionTitle, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
@@ -1073,7 +1083,6 @@
     "question": "What does Apple say about competitive pressures in both business description and risk factors?",
     "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 20, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) WHERE 'BusinessInformation' IN labels(s) OR 'RiskFactor' IN labels(s) RETURN chunk.text AS text, [l IN labels(s) WHERE l <> 'Section'][0] AS sectionType, r.year AS year, score ORDER BY score DESC LIMIT 8"
   },
-
   {
     "question": "What is the investment strategy of VOO regarding index tracking?",
     "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund {ticker: 'VOO'}) RETURN chunk.text AS text, d.year AS year, score ORDER BY score DESC LIMIT 5"
@@ -1086,7 +1095,6 @@
     "question": "Which fund prospectuses discuss emerging market investment strategies?",
     "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 15, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:Strategy)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, chunk.text AS excerpt, score ORDER BY score DESC LIMIT 10"
   },
-
   {
     "question": "Find funds whose investment objective focuses on tracking the S&P 500 index.",
     "cypher": "CALL db.index.vector.queryNodes('profileObjectiveIndex', 10, $queryVector) YIELD node AS objective, score MATCH (objective)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, objective.text AS objectiveText, score ORDER BY score DESC LIMIT 10"
@@ -1095,7 +1103,6 @@
     "question": "Which fund objectives mention capital preservation and income generation?",
     "cypher": "CALL db.index.vector.queryNodes('profileObjectiveIndex', 10, $queryVector) YIELD node AS objective, score MATCH (objective)<-[:HAS_SECTION]-(p:Profile)<-[d:DEFINED_BY]-(f:Fund) RETURN DISTINCT f.ticker AS ticker, f.name AS fundName, objective.text AS objectiveText, score ORDER BY score DESC LIMIT 10"
   },
-
   {
     "question": "What cybersecurity and data privacy risks does Microsoft disclose in its 10-K?",
     "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'MSFT'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
@@ -1151,5 +1158,33 @@
   {
     "question": "What patent disputes or intellectual property litigation does Apple disclose in its 10-K?",
     "cypher": "CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:LegalProceeding)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'}) RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5"
+  },
+  {
+    "question": "What is the ticker and CIK for Microsoft?",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Microsoft') YIELD node AS c, score RETURN c.name AS companyName, c.ticker AS ticker, c.cik AS cik ORDER BY score DESC LIMIT 1"
+  },
+  {
+    "question": "Find information about Apple Inc including its stock ticker and CIK number",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Apple Inc') YIELD node AS c, score RETURN c.name AS companyName, c.ticker AS ticker, c.cik AS cik ORDER BY score DESC LIMIT 1"
+  },
+  {
+    "question": "What is the ticker symbol for Alphabet or Google?",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Alphabet') YIELD node AS c, score RETURN c.name AS companyName, c.ticker AS ticker ORDER BY score DESC LIMIT 1"
+  },
+  {
+    "question": "Find the ticker for Tesla company",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Tesla~') YIELD node AS c, score RETURN c.name AS companyName, c.ticker AS ticker, c.cik AS cik ORDER BY score DESC LIMIT 1"
+  },
+  {
+    "question": "What are the latest financial highlights for Meta Platforms?",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Meta Platforms') YIELD node AS c, score WITH c ORDER BY score DESC LIMIT 1 MATCH (c)-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) RETURN c.ticker AS ticker, c.name AS companyName, fin.fiscalYear AS fiscalYear ORDER BY r.year DESC LIMIT 1"
+  },
+  {
+    "question": "Get the CEO information for Amazon",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Amazon') YIELD node AS c, score WITH c ORDER BY score DESC LIMIT 1 MATCH (c)-[r:HAS_CEO]->(p:Person) RETURN c.ticker AS ticker, c.name AS companyName, p.name AS ceoName, r.ceoCompensation AS compensation, r.date AS date ORDER BY r.date DESC LIMIT 1"
+  },
+  {
+    "question": "Show insider transactions for Netflix",
+    "cypher": "CALL db.index.fulltext.queryNodes('companyNameIndex', 'Netflix~') YIELD node AS c, score WITH c ORDER BY score DESC LIMIT 1 MATCH (c)-[:HAS_INSIDER_TRANSACTION]->(trans:InsiderTransaction)-[:MADE_BY]->(p:Person) RETURN c.ticker AS ticker, c.name AS companyName, p.name AS insiderName, trans.transactionType AS transactionType, trans.shares AS shares, trans.value AS transactionValue ORDER BY trans.transactionDate DESC LIMIT 10"
   }
 ]
