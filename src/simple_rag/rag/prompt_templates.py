@@ -22,17 +22,17 @@ CRITICAL RULES:
 4. AGGREGATIONS & GROUPING: If the question asks for a global calculation (e.g., highest, average, total across all nodes), DO NOT include row-specific identifiers (like ticker, name, or year) in the RETURN clause. Doing so triggers an implicit GROUP BY and ruins the calculation.
 5. EXTRA PROPERTIES: For standard lists/queries (NOT aggregations), always return extra identifying properties (ticker, name) and relationship properties beyond what was asked.
 6. SCHEMA STRICTNESS: Use property names EXACTLY as they appear in the provided schema. Do not hallucinate properties like `.text` if the schema specifies `.summaryProspectus`.
-7. FILTERING: Use CONTAINS or regex for text searches; use >, <, =, etc., for numeric comparisons. WHERE clauses must follow MATCH or WITH, never RETURN.
+7. FILTERING: Take into account the score of the entity resolver and use it to filter the results by ticker or name.
 8. DUPLICATES: If a MATCH traverses nodes not included in the RETURN, use RETURN DISTINCT.
-9. CONTEXT MATCHING: If entity names appear in Entity Context, use them EXACTLY as written.
-10. FEW-SHOT REPLICATION: If an example is marked [★ VERY SIMILAR], strictly replicate its structural logic — only swap the specific entity names or target properties.
-11. FULLTEXT INDEXES: If the entity extractor has identified the entity with a score similar to 100 do not use the index, use a ticker or name search.
-12. AVERAGE RETURNS: Use predefined properties like return1y, return5y, return10y instead of calculating based on dates.
-13. LATEST: When asked for the latest ALWAYS use ORDER BY property.date DESC LIMIT 1 rather than building complex NOT EXISTS subqueries
-14. TICKER: When the query contains a ticker ALWAYS use that exact ticker.
-15. NO YEAR FILTER UNLESS ASKED: Do NOT add year/date filters (e.g. {{year: 2023}} or WHERE r.year = ...) unless the question explicitly mentions a specific year or date range. Omit year filters for general questions.
-16. NO TEXT FILTERS ON VECTOR SEARCH: When using a vector index (chunkEmbeddingIndex, profileObjectiveIndex), NEVER add any property filter on Section or Chunk nodes — not WHERE CONTAINS, not WHERE s.title CONTAINS, not WHERE chunk.title CONTAINS, and not inline {{title: '...'}} filters in the MATCH pattern. The vector embedding already ranks by semantic relevance — any additional filter on text, title, or any other Section/Chunk property will silently return 0 results because section titles are generic strings ('Risk Factors', 'Item 1A') that will never match topic-specific phrases. BAD: `... YIELD node AS chunk MATCH (chunk)<-[:HAS_CHUNK]-(s:Section) WHERE s.title CONTAINS 'cybersecurity'` BAD: `... YIELD node AS chunk MATCH (chunk:Chunk {{title: 'Cybersecurity'}})<-[:HAS_CHUNK]-(s:Section)` GOOD: `... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)`
-17. GENERAL QUERIES (no entity): If the question asks broadly ("which funds...", "find funds that...") WITHOUT naming a specific ticker or fund/company name, do NOT add entity filters to the vector search. Ignore resolved entity context and search globally.
+9. FEW-SHOT REPLICATION: If an example is marked [★ VERY SIMILAR], strictly replicate its structural logic — only swap the specific entity names or target properties.
+10. FULLTEXT INDEXES: If the entity extractor has identified the entity with a score similar to 100 do not use the index, use a ticker or name search.
+11. AVERAGE RETURNS: Use predefined properties like return1y, return5y, return10y instead of calculating based on dates.
+12. LATEST: When asked for the latest ALWAYS use ORDER BY property.date DESC LIMIT 1 rather than building complex NOT EXISTS subqueries
+13. TICKER: Use the exact ticker from the question.
+14. NO YEAR FILTER UNLESS ASKED: Only add year/date filters if the question explicitly mentions a specific year or date range.
+15. NO TEXT FILTERS ON VECTOR SEARCH: Never add WHERE CONTAINS or title filters on Section/Chunk nodes in vector searches. Embeddings already rank by relevance. Text filters silently return 0 results (section titles like 'Risk Factors' won't match topic phrases).
+16. GENERAL QUERIES: Questions asking broadly ("which funds...", "find funds...") without naming a specific entity → search globally, omit entity filters.
+17. ENTITY FILTERS IN VECTOR SEARCH: Add entity filter after YIELD only if BOTH: (a) Entity Context score ≈ 100 (exact match) AND (b) ticker/entity explicitly stated in question text. Never use CONTAINS on entity properties.
 
 Question: {question}
 
