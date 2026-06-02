@@ -104,6 +104,7 @@ class CypherValidator:
                          "subsection", "sectionName", "ticker", "filingDate"},
         "Filing10K": set(),
         "Section": {"title", "text", "embedding", "sectionType", "secItem"},
+        "Risk":       {"title", "text", "embedding"},
         "RiskFactor": {"title", "text", "embedding", "sectionType", "secItem"},
         "BusinessInformation": {"title", "text", "embedding", "sectionType", "secItem"},
         "LegalProceeding": {"title", "text", "embedding", "sectionType", "secItem"},
@@ -150,9 +151,8 @@ class CypherValidator:
                         ("Filing10K", "BusinessInformation"), ("Filing10K", "LegalProceeding"),
                         ("Filing10K", "ManagementDiscussion"), ("Filing10K", "Properties"),
                         ("Profile", "Section"), ("Profile", "Objective"),
-                        ("Profile", "PerformanceCommentary"), ("Profile", "RiskFactor"),
+                        ("Profile", "PerformanceCommentary"), ("Profile", "Risk"),
                         ("Profile", "Strategy")},
-        "HAS_FINACIALS": {("Filing10K", "Financials")},  # typo preserved from schema
         "HAS_FINANCIALS": {("Filing10K", "Financials")},
         "HAS_METRIC": {("Financials", "FinancialMetric")},
         "HAS_SEGMENT": {("FinancialMetric", "Segment")},
@@ -160,6 +160,7 @@ class CypherValidator:
                            ("Portfolio", "Document"), ("Filing10K", "Document"),
                            ("InsiderTransaction", "Document")},
         "HAS_CHUNK": {("Section", "Chunk"), ("Section", "SectionChunk"),
+                      ("Risk", "Chunk"),
                       ("RiskFactor", "Chunk"), ("RiskFactor", "SectionChunk"),
                       ("BusinessInformation", "Chunk"), ("BusinessInformation", "SectionChunk"),
                       ("LegalProceeding", "Chunk"), ("LegalProceeding", "SectionChunk"),
@@ -266,9 +267,9 @@ class CypherValidator:
             result.syntax_errors.append(
                 f"VARIABLE COLLISION ERROR: The variable '{_collision_var}' is used for both a "
                 f"relationship and a node in the same query. This is invalid Cypher and will crash. "
-                f"Use distinct variable names: use 'rel' or a prefixed name for the relationship. "
-                f"BAD:  MATCH (f:Fund)-[p:HAS_PORTFOLIO]->(p:Portfolio) "
-                f"GOOD: MATCH (f:Fund)-[rel:HAS_PORTFOLIO]->(p:Portfolio)"
+                f"Use distinct variable names"
+                f"\nBAD:  MATCH (f:Fund)-[p:HAS_PORTFOLIO]->(p:Portfolio) "
+                f"\nGOOD: MATCH (f:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)"
             )
             return result
 
@@ -326,6 +327,29 @@ class CypherValidator:
                 "      ORDER BY r.year DESC"
             )
             return result
+
+        # Step 0-fh: Catch FinancialHighlight properties accessed on Fund variable
+        # e.g. f.expenseRatio, f.netAssets, f.advisoryFees — these live on FinancialHighlight, not Fund
+        _fh_only_props = {'expenseRatio', 'netAssets', 'advisoryFees', 'totalReturn',
+                          'turnover', 'netIncomeRatio', 'netAssetsValueBeginning',
+                          'netAssetsValueEnd', 'costsPer10k'}
+        # Find Fund variables: (f:Fund) or (fund:Fund)
+        _fund_vars = set(re.findall(r'\(\s*(\w+)\s*:\s*Fund\b', query))
+        if _fund_vars:
+            for fvar in _fund_vars:
+                for prop in _fh_only_props:
+                    if re.search(rf'\b{re.escape(fvar)}\.{re.escape(prop)}\b', query):
+                        result.is_valid = False
+                        result.triggered_rule = "FH_PROPERTY_ON_FUND"
+                        result.syntax_errors.append(
+                            f"WRONG NODE PROPERTY ERROR: '{fvar}.{prop}' accesses '{prop}' on the Fund node, "
+                            f"but '{prop}' is a property of FinancialHighlight, not Fund. "
+                            f"You must traverse the HAS_FINANCIAL_HIGHLIGHT relationship first. "
+                            f"BAD:  MATCH (f:Fund {{ticker: 'VTI'}}) RETURN f.{prop} "
+                            f"GOOD: MATCH (f:Fund {{ticker: 'VTI'}})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) "
+                            f"RETURN fh.{prop}, r.year ORDER BY r.year DESC LIMIT 1"
+                        )
+                        return result
 
         # Step 0: Fast pre-check — catch inline math operators inside {} before Neo4j
         inline_math = re.search(r'\{[^}]*(?:[<>]=?|!=)\s*[\d\w\'"]', query)
@@ -523,6 +547,354 @@ class CypherValidator:
 
         return result
 
+    @staticmethod
+    def strip_spurious_ticker_filters(
+        cypher: str,
+        question: str,
+        resolved_entities: dict | None = None,
+    ) -> tuple:
+        """
+        Remove {ticker: 'XYZ'} filters from Company node patterns when XYZ was not
+        mentioned in the question and was not identified by the entity resolver.
+
+        Only targets the simple single-property case: (c:Company {ticker: 'XYZ'}).
+        Multi-property maps (e.g. {ticker: 'XYZ', name: '...'}) are left untouched.
+
+        Returns (cleaned_cypher: str, was_modified: bool).
+        """
+        if resolved_entities is None:
+            resolved_entities = {}
+
+        known_tickers: set = set()
+        for entity_name, entity_info in resolved_entities.items():
+            if isinstance(entity_info, dict):
+                if entity_info.get("type") == "Ticker":
+                    known_tickers.add(entity_name.upper())
+                if entity_info.get("ticker"):
+                    known_tickers.add(str(entity_info["ticker"]).upper())
+
+        question_upper = question.upper()
+
+        # Match (varname:Company {ticker: 'XYZ'}) where ticker is the ONLY property
+        pattern = re.compile(
+            r'(\(\s*\w*\s*:Company\s*)\{\s*ticker\s*:\s*[\'"]([A-Z0-9]+)[\'"]\s*\}(\s*\))',
+            re.IGNORECASE,
+        )
+
+        was_modified = False
+
+        def _replace(m):
+            nonlocal was_modified
+            node_prefix = m.group(1)
+            ticker = m.group(2).upper()
+            closing = m.group(3)
+            in_question = bool(re.search(rf'\b{re.escape(ticker)}\b', question_upper))
+            in_resolver = ticker in known_tickers
+            if not in_question and not in_resolver:
+                was_modified = True
+                return node_prefix.rstrip() + closing
+            return m.group(0)
+
+        cleaned = pattern.sub(_replace, cypher)
+        return cleaned, was_modified
+
+    @staticmethod
+    def replace_fund_name_with_resolved_ticker(
+        cypher: str,
+        resolved_entities: dict | None = None,
+    ) -> tuple:
+        """
+        Replace (f:Fund {name: 'X'}) inline exact-name filters with the ticker
+        identified by the entity resolver, when a close name match exists.
+
+        Fund names in user queries are often partial or slightly wrong (missing
+        "Index", "ETF", etc.), so exact name filters return 0 results.  When
+        the resolver has already found a ticker for a similar name, using the
+        ticker is always more reliable.
+
+        Requires resolved_entities to have entries with type='Fund' and a 'ticker'.
+        Uses word-overlap similarity (>= 70%) to identify matching resolved names.
+
+        Returns (cleaned_cypher: str, was_modified: bool).
+        """
+        if resolved_entities is None:
+            return cypher, False
+
+        # Build a map: fund_name (lowercase) → ticker, from resolver results
+        fund_name_to_ticker: dict = {}
+        for entity_name, entity_info in resolved_entities.items():
+            if isinstance(entity_info, dict):
+                if entity_info.get("type") == "Fund" and entity_info.get("ticker"):
+                    fund_name_to_ticker[entity_name.lower()] = entity_info["ticker"]
+
+        if not fund_name_to_ticker:
+            return cypher, False
+
+        pattern = re.compile(
+            r'(\(\s*\w*\s*:Fund\s*)\{\s*name\s*:\s*[\'"]([^\'"]+)[\'"]\s*\}(\s*\))',
+            re.IGNORECASE,
+        )
+
+        # Also build a map that includes entity resolver score for tiebreaking
+        fund_name_to_info: dict = {}
+        for entity_name, entity_info in resolved_entities.items():
+            if isinstance(entity_info, dict):
+                if entity_info.get("type") == "Fund" and entity_info.get("ticker"):
+                    fund_name_to_info[entity_name.lower()] = entity_info
+
+        was_modified = [False]
+        _STOP = {"fund", "vanguard", "ishares", "blackrock", "the", "of", "a", "index", "etf", "admiral", "shares"}
+
+        def _replace(m):
+            node_open = m.group(1)
+            query_name = m.group(2)
+            node_close = m.group(3)
+
+            query_words = set(re.sub(r"[^a-z0-9 ]", "", query_name.lower()).split()) - _STOP
+            if len(query_words) < 1:
+                return m.group(0)
+
+            best_ticker: str | None = None
+            best_coverage = 0.0
+            best_resolver_score = 0.0
+            for resolved_name, info in fund_name_to_info.items():
+                resolved_words = set(re.sub(r"[^a-z0-9 ]", "", resolved_name).split()) - _STOP
+                if not resolved_words:
+                    continue
+                # "coverage" = what fraction of the query's meaningful words appear in the entity name
+                coverage = len(query_words & resolved_words) / len(query_words)
+                resolver_score = info.get("score", 0.0)
+                if coverage > best_coverage or (coverage == best_coverage and resolver_score > best_resolver_score):
+                    best_coverage = coverage
+                    best_resolver_score = resolver_score
+                    best_ticker = info["ticker"]
+
+            if best_ticker and best_coverage >= 0.85:
+                was_modified[0] = True
+                return f"{node_open}{{ticker: '{best_ticker}'}}{node_close}"
+            return m.group(0)
+
+        cleaned = pattern.sub(_replace, cypher)
+        return cleaned, was_modified[0]
+
+    @staticmethod
+    def strip_filing10k_year_filter(cypher: str) -> tuple:
+        """
+        Remove year property filters from Filing10K node patterns.
+
+        Filing10K has NO year property — the year lives exclusively on the
+        REPORTS_IN relationship (r.year).  When the model writes
+        (f:Filing10K {year: 2025}) it always returns 0 results.
+
+        Handles both single-property and mixed maps:
+          (f:Filing10K {year: 2025})             → (f:Filing10K)
+          (f:Filing10K {year: 2025, other: 'x'}) → (f:Filing10K {other: 'x'})
+
+        Returns (cleaned_cypher: str, was_modified: bool).
+        """
+        if not re.search(r':Filing10K', cypher, re.IGNORECASE):
+            return cypher, False
+
+        was_modified = [False]
+
+        def _strip_year(m):
+            node_open = m.group(1)   # e.g. "(f:Filing10K "
+            props_str = m.group(2)   # e.g. "year: 2025" or "year: 2025, other: 'x'"
+            node_close = m.group(3)  # e.g. ")"
+
+            # Remove "year: VALUE," or ", year: VALUE" or just "year: VALUE"
+            cleaned = re.sub(
+                r'\byear\s*:\s*(?:\d{4}|\$\w+)\s*(?:,\s*)?',
+                '',
+                props_str,
+                flags=re.IGNORECASE,
+            ).strip().strip(',').strip()
+
+            was_modified[0] = True
+            if cleaned:
+                return f'{node_open}{{{cleaned}}}{node_close}'
+            return node_open.rstrip() + node_close
+
+        pattern = re.compile(
+            r'(\(\s*\w*\s*:Filing10K\s*)\{([^}]*\byear\s*:\s*(?:\d{4}|\$\w+)[^}]*)\}(\s*\))',
+            re.IGNORECASE,
+        )
+        cleaned = pattern.sub(_strip_year, cypher)
+        return cleaned, was_modified[0]
+
+    @staticmethod
+    def strip_has_average_returns_year_filter(cypher: str) -> tuple:
+        """
+        Remove year property filters from HAS_AVERAGE_RETURNS relationship patterns.
+
+        AverageReturns properties (return1y, return5y, return10y, returnInception)
+        already encode the time period. A year filter on the relationship like
+        [:HAS_AVERAGE_RETURNS {year: 2023}] returns 0 results when the stored year
+        doesn't match, and is always wrong when the user asks about "best/highest
+        returns" (they want all years, not just 2023).
+
+        Handles:
+          [:HAS_AVERAGE_RETURNS {year: 2023}]           → [:HAS_AVERAGE_RETURNS]
+          [r:HAS_AVERAGE_RETURNS {year: 2023}]          → [r:HAS_AVERAGE_RETURNS]
+          [:HAS_AVERAGE_RETURNS {year: 2023, other: 1}] → [:HAS_AVERAGE_RETURNS {other: 1}]
+
+        Returns (cleaned_cypher: str, was_modified: bool).
+        """
+        if not re.search(r'HAS_AVERAGE_RETURNS', cypher, re.IGNORECASE):
+            return cypher, False
+
+        was_modified = [False]
+
+        def _strip_year(m):
+            rel_open = m.group(1)   # e.g. "[:HAS_AVERAGE_RETURNS " or "[r:HAS_AVERAGE_RETURNS "
+            props_str = m.group(2)  # e.g. "year: 2023" or "year: 2023, other: 1"
+            rel_close = m.group(3)  # e.g. "]"
+
+            cleaned = re.sub(
+                r'\byear\s*:\s*(?:\d{4}|\$\w+)\s*(?:,\s*)?',
+                '',
+                props_str,
+                flags=re.IGNORECASE,
+            ).strip().strip(',').strip()
+
+            was_modified[0] = True
+            if cleaned:
+                return f'{rel_open}{{{cleaned}}}{rel_close}'
+            return rel_open.rstrip() + rel_close
+
+        pattern = re.compile(
+            r'(\[\s*\w*\s*:HAS_AVERAGE_RETURNS\s*)\{([^}]*\byear\s*:\s*(?:\d{4}|\$\w+)[^}]*)\}(\s*\])',
+            re.IGNORECASE,
+        )
+        cleaned = pattern.sub(_strip_year, cypher)
+        return cleaned, was_modified[0]
+
+    @staticmethod
+    def strip_portfolio_intermediary_for_allocation(cypher: str) -> tuple:
+        """
+        Remove the spurious [:HAS_PORTFOLIO]->(p:Portfolio) hop when the model
+        incorrectly routes HAS_SECTOR_ALLOCATION or HAS_REGION_ALLOCATION through
+        Portfolio instead of directly from Fund.
+
+        Schema: (Fund)-[HAS_SECTOR_ALLOCATION]->(Sector)  — direct, never via Portfolio.
+        Model error: (Fund)-[:HAS_PORTFOLIO]->(p:Portfolio)-[sa:HAS_SECTOR_ALLOCATION]->(Sector)
+
+        Input:  (f:Fund {ticker: 'VTI'})-[:HAS_PORTFOLIO]->(p:Portfolio)-[sa:HAS_SECTOR_ALLOCATION]->(s:Sector)
+        Output: (f:Fund {ticker: 'VTI'})-[sa:HAS_SECTOR_ALLOCATION]->(s:Sector)
+
+        Returns (cleaned_cypher: str, was_modified: bool).
+        """
+        if not re.search(r'HAS_PORTFOLIO', cypher, re.IGNORECASE):
+            return cypher, False
+        if not re.search(r'HAS_SECTOR_ALLOCATION|HAS_REGION_ALLOCATION', cypher, re.IGNORECASE):
+            return cypher, False
+
+        # Remove "-[:HAS_PORTFOLIO]->(var:Portfolio)" — the intermediate hop
+        pattern = re.compile(
+            r'-\[:HAS_PORTFOLIO\]->\s*\(\s*\w*\s*:Portfolio\s*\)',
+            re.IGNORECASE,
+        )
+        cleaned, n = pattern.subn('', cypher)
+        return cleaned, n > 0
+
+    @staticmethod
+    def strip_vector_where_filters(cypher: str) -> tuple:
+        """
+        In vector search queries, remove WHERE predicates that filter by year or
+        text CONTAINS — these silently return 0 results because the post-YIELD MATCH
+        cannot pre-filter the vector index.
+
+        Kept: Company/Fund ticker/name inline filters ({ticker: 'XYZ'}).
+        Removed: r.year = N, r.year IS NOT NULL, x.prop CONTAINS '...'.
+
+        Returns (cleaned_cypher: str, was_modified: bool).
+        """
+        if 'db.index.vector.queryNodes' not in cypher:
+            return cypher, False
+
+        _BAD = [
+            # year equality / range on relationship
+            re.compile(r'^\s*r\.year\s*(?:=|!=|<>|<=?|>=?)\s*\d{4}\s*$', re.IGNORECASE),
+            re.compile(r'^\s*r\.year\s+IS\s+NOT\s+NULL\s*$', re.IGNORECASE),
+            # CONTAINS text filter on any node property (section, chunk, filing)
+            re.compile(r'^\s*\w+\.\w+\s+(?:NOT\s+)?CONTAINS\s+[\'"][^\'"]*[\'"]\s*$', re.IGNORECASE),
+        ]
+
+        was_modified = [False]
+
+        def _clean_where(m):
+            content = m.group(1)
+            parts = re.split(r'\s+AND\s+', content, flags=re.IGNORECASE)
+            kept = []
+            for p in parts:
+                if any(pat.match(p) for pat in _BAD):
+                    was_modified[0] = True
+                else:
+                    kept.append(p.strip())
+            if not kept:
+                return ''
+            return 'WHERE ' + ' AND '.join(kept)
+
+        # Match WHERE clause up to the next major Cypher keyword
+        cleaned = re.sub(
+            r'\bWHERE\b\s+((?:(?!\b(?:RETURN|WITH|ORDER|LIMIT|MATCH|CALL|UNION)\b).)+)',
+            _clean_where,
+            cypher,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Collapse any double-spaces left by WHERE removal
+        cleaned = re.sub(r'  +', ' ', cleaned).strip()
+        return cleaned, was_modified[0]
+
+    @staticmethod
+    def inject_chunk_id(cypher: str) -> tuple:
+        """
+        Ensure vector search queries always include `chunk.id AS chunkId` in RETURN.
+        Without it the benchmark (and result post-processing) cannot identify chunks.
+        Inserts `chunk.id AS chunkId, ` right after the RETURN keyword when missing.
+        Returns (cypher: str, was_modified: bool).
+        """
+        if 'db.index.vector.queryNodes' not in cypher:
+            return cypher, False
+        # Already present — nothing to do
+        if re.search(r'chunk\.id\s+AS\s+chunkId', cypher, re.IGNORECASE):
+            return cypher, False
+
+        # Find the RETURN keyword and insert after it
+        def _inject(m):
+            return m.group(0) + 'chunk.id AS chunkId, '
+
+        cleaned = re.sub(r'\bRETURN\s+(?:DISTINCT\s+)?', _inject, cypher, count=1, flags=re.IGNORECASE)
+        return cleaned, cleaned != cypher
+
+    @staticmethod
+    def boost_vector_candidate_count(cypher: str, min_k: int = 50) -> tuple:
+        """
+        Increase the candidate count in queryNodes(..., k, ...) for vector queries.
+
+        The chunkEmbeddingIndex mixes fund-profile chunks and company-filing chunks.
+        A low k (e.g. 10–15) leaves too few company-filing candidates after the
+        post-YIELD MATCH filter, causing relevant chunks to fall outside the window.
+        Bumps k to at least `min_k` when the current value is lower.
+
+        Returns (cypher: str, was_modified: bool).
+        """
+        if 'db.index.vector.queryNodes' not in cypher:
+            return cypher, False
+
+        def _bump(m):
+            current_k = int(m.group(1))
+            if current_k < min_k:
+                return m.group(0).replace(m.group(1), str(min_k), 1)
+            return m.group(0)
+
+        pattern = re.compile(
+            r"db\.index\.vector\.queryNodes\s*\(\s*'[^']+'\s*,\s*(\d+)\s*,",
+            re.IGNORECASE,
+        )
+        cleaned = pattern.sub(_bump, cypher)
+        return cleaned, cleaned != cypher
+
     def check_syntax_only(self, query: str) -> ValidationResult:
         """Only check Cypher syntax, no schema validation."""
         result = ValidationResult(is_valid=True, original_query=query)
@@ -636,6 +1008,86 @@ class CypherValidator:
             rel_type = match.group(1).strip().strip('`').strip('!')
             if rel_type and rel_type not in self.VALID_REL_TYPES:
                 result.schema_errors.append(f"Unknown relationship type: '{rel_type}'")
+
+
+# ─── Result-level validator ───────────────────────────────────────────────────
+
+class ResultValidator:
+    """
+    Post-execution semantic checks on query results.
+
+    These are data-quality rules that cannot be caught at query-parse time
+    because they depend on what Neo4j actually returns.  Each failing check
+    produces a ValidationResult with a targeted error message that the retry
+    loop can feed back to the LLM.
+    """
+
+    @staticmethod
+    def validate(cypher: str, records: list) -> Optional["ValidationResult"]:
+        """
+        Run all result-level checks.  Returns the first failing ValidationResult,
+        or None if every check passes.
+
+        Args:
+            cypher:  The Cypher query that produced the records.
+            records: List of dicts returned by Neo4j (may be empty).
+        """
+        for check in (
+            ResultValidator._check_zero_expense_ratio,
+        ):
+            result = check(cypher, records)
+            if result is not None:
+                return result
+        return None
+
+    # ── Individual checks ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _check_zero_expense_ratio(cypher: str, records: list) -> Optional["ValidationResult"]:
+        """
+        Trigger when the query asks for expenseRatio but every returned value
+        is 0.0 (or None).  This indicates missing data-quality guard.
+        """
+        if not records:
+            return None
+
+        # Only apply when the query returns expenseRatio from FinancialHighlight
+        cypher_upper = cypher.upper()
+        if 'EXPENSERATIO' not in cypher_upper:
+            return None
+        # Guard already present — no action needed
+        if re.search(r'fh\.expenseRatio\s*>\s*0', cypher, re.IGNORECASE):
+            return None
+
+        # Collect every expenseRatio value from the result set
+        ratio_values = []
+        for row in records:
+            for key, val in row.items():
+                if 'expenseratio' in key.lower():
+                    ratio_values.append(val)
+
+        if not ratio_values:
+            return None
+
+        # All values are 0.0 / None — data quality issue
+        all_zero = all(v is None or v == 0.0 or v == 0 for v in ratio_values)
+        if not all_zero:
+            return None
+
+        result = ValidationResult(is_valid=False, original_query=cypher)
+        result.triggered_rule = "ZERO_EXPENSE_RATIO"
+        result.schema_errors.append(
+            "ZERO EXPENSE RATIO ERROR: Every expenseRatio value returned is 0.0. "
+            "This means your query is matching FinancialHighlight rows where the expense ratio "
+            "was not recorded (stored as 0.0 in the database). "
+            "Add WHERE fh.expenseRatio > 0 (or AND fh.expenseRatio > 0 if a WHERE clause already exists) "
+            "to filter out these placeholder rows and return only real expense ratio data. "
+            "BAD:  MATCH (f:Fund {ticker: 'VFINX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) "
+            "RETURN fh.expenseRatio ORDER BY r.year DESC LIMIT 1 "
+            "GOOD: MATCH (f:Fund {ticker: 'VFINX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) "
+            "WHERE fh.expenseRatio > 0 RETURN fh.expenseRatio ORDER BY r.year DESC LIMIT 1"
+        )
+        return result
 
 
 # ─── Convenience Functions ───────────────────────────────────────────────────

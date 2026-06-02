@@ -25,7 +25,7 @@ SRC_ROOT = SCRIPT_DIR.parent.parent.parent
 PROJECT_ROOT = SRC_ROOT.parent
 sys.path.insert(0, str(SRC_ROOT))
 
-from sklearn.metrics import hamming_loss, precision_recall_fscore_support
+from sklearn.metrics import hamming_loss, precision_recall_fscore_support, multilabel_confusion_matrix
 from sklearn.preprocessing import MultiLabelBinarizer
 
 
@@ -121,7 +121,7 @@ class SetFitClassifier:
 class LLMQueryClassifier:
     """LLM-based query classifier using OpenRouter or local endpoint."""
 
-    CLASSIFICATION_PROMPT = """Classify the query for a financial SEC filings RAG system into one or more categories.
+    CLASSIFICATION_PROMPT = """Classify the query for a financial SEC filings RAG system into one or more categories, you will receive questions about funds and companies in the graph database.
 
 Categories:
 - fund_basic: Fund identifiers (ticker, name, exchange, share class), provider/trust structure, charts/tables/images stored for a fund, source documents/accession numbers of fund data, and quantitative metrics (expense ratio, returns, NAV, net assets, turnover, financial highlights). Any fund property NOT about holdings composition.
@@ -351,10 +351,9 @@ class QueryClassifierBenchmark:
         ]) or ("Profile" in cypher and "HAS_SECTION" in cypher):
             labels.add("fund_profile")
 
-        # RiskFactor appears in both slices.
-        # If company_filing already matched → 10-K context.
-        # Otherwise → fund profile context.
-        if ":RiskFactor" in cypher and "company_filing" not in labels:
+        # Section:Risk is fund profile; Section:RiskFactor is company 10-K.
+        # ":Risk" must not match ":RiskFactor", hence the exclusion check.
+        if ":Risk" in cypher and ":RiskFactor" not in cypher and "company_filing" not in labels:
             labels.add("fund_profile")
 
         # ── fund_basic ──────────────────────────────────────────────────────────
@@ -393,7 +392,7 @@ class QueryClassifierBenchmark:
 
         return sorted(labels)
 
-    def load_test_set(self):
+    def load_test_set(self, extra_not_related_path: Optional[str] = None):
         """
         Load test set from JSON file.
 
@@ -401,6 +400,11 @@ class QueryClassifierBenchmark:
         - Old format: [{"text": "...", "labels": ["fund_basic", ...]}, ...]
         - test_set.json format: [{"question": "...", "expected_cypher": "...", "complexity": "..."}, ...]
           Labels are automatically inferred from the expected Cypher query.
+
+        Args:
+            extra_not_related_path: Optional path to a JSON file (flat list or
+                training_data split dict) from which only ``not_related`` items
+                are appended to the test set.  Duplicates (by text) are skipped.
         """
         with open(self.test_set_path, "r") as f:
             raw_data = json.load(f)
@@ -437,6 +441,28 @@ class QueryClassifierBenchmark:
 
             print(f"  Format: test_set.json (labels inferred from expected Cypher)")
             print(f"  Label distribution: {dict(label_dist.most_common())}")
+
+        # ── Append not_related items from extra file ──────────────────────────
+        if extra_not_related_path:
+            extra_path = Path(extra_not_related_path)
+            if extra_path.exists():
+                with open(extra_path, "r") as f:
+                    extra_raw = json.load(f)
+                # Support both flat list and train/test split dict
+                if isinstance(extra_raw, dict):
+                    extra_raw = extra_raw.get("test", extra_raw.get("train", []))
+                existing_texts = {item["text"] for item in self.test_data}
+                added = 0
+                for item in extra_raw:
+                    labels = self._get_labels(item)
+                    text = item.get("text", "")
+                    if "not_related" in labels and text and text not in existing_texts:
+                        self.test_data.append({"text": text, "labels": labels})
+                        existing_texts.add(text)
+                        added += 1
+                print(f"  + {added} not_related queries appended from {extra_path.name}")
+            else:
+                print(f"  ⚠️  Extra not_related file not found: {extra_path}")
 
         print(f"✓ Loaded {len(self.test_data)} test queries")
 
@@ -606,6 +632,114 @@ class QueryClassifierBenchmark:
 
         return stats
 
+    def _build_confusion_matrix_lines(
+        self, results: List[ClassificationResult], classifier_name: str
+    ) -> List[str]:
+        """
+        Build a per-label confusion matrix (TP/FP/FN/TN) as text lines,
+        plus a label-overlap matrix showing which labels get confused with which.
+        """
+        successful = [r for r in results if r.error is None]
+        if not successful:
+            return [f"  No results for {classifier_name}."]
+
+        y_true = self.mlb.transform([r.expected_labels for r in successful])
+        y_pred = self.mlb.transform([r.predicted_labels for r in successful])
+
+        lines: List[str] = []
+
+        # ── Per-label TP/FP/FN/TN table ──────────────────────────────────────
+        mcm = multilabel_confusion_matrix(y_true, y_pred)
+        col_w = 10
+        lines.append(f"  {'Label':<22} {'TN':>{col_w}} {'FP':>{col_w}} {'FN':>{col_w}} {'TP':>{col_w}}")
+        lines.append("  " + "-" * (22 + col_w * 4 + 4))
+        for i, label in enumerate(self.LABELS):
+            tn, fp, fn, tp = mcm[i].ravel()
+            lines.append(
+                f"  {label:<22} {tn:>{col_w}} {fp:>{col_w}} {fn:>{col_w}} {tp:>{col_w}}"
+            )
+        lines.append("")
+
+        # ── Label-overlap matrix: rows=true label, cols=predicted label ───────
+        # Cell(i,j) = number of examples where label i was expected AND label j was predicted
+        n = len(self.LABELS)
+        overlap = [[0] * n for _ in range(n)]
+        for r in successful:
+            true_idx  = {self.LABELS.index(l) for l in r.expected_labels if l in self.LABELS}
+            pred_idx  = {self.LABELS.index(l) for l in r.predicted_labels if l in self.LABELS}
+            for ti in true_idx:
+                for pi in pred_idx:
+                    overlap[ti][pi] += 1
+
+        short = [l[:8] for l in self.LABELS]  # abbreviated column headers
+        header = "  " + " " * 22 + "".join(f"{s:>9}" for s in short)
+        lines.append("  Label-overlap matrix  (row=true, col=predicted)")
+        lines.append(header)
+        lines.append("  " + "-" * (22 + 9 * n + 2))
+        for i, label in enumerate(self.LABELS):
+            row_total = sum(overlap[i])
+            cells = ""
+            for j in range(n):
+                v = overlap[i][j]
+                # Mark diagonal (correct), off-diagonal errors stand out as plain numbers
+                marker = f"[{v}]" if i == j else f" {v} "
+                cells += f"{marker:>9}"
+            lines.append(f"  {label:<22}{cells}  (n={row_total})")
+        lines.append("")
+        lines.append("  [N] = diagonal: correct predictions for that label")
+        lines.append("   N  = off-diagonal: true label → predicted as column label")
+
+        return lines
+
+    def _save_confusion_heatmap(
+        self,
+        results: List[ClassificationResult],
+        classifier_name: str,
+        output_path: str,
+    ) -> None:
+        """Save a matplotlib heatmap of the label-overlap matrix as PNG."""
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import numpy as _np
+        except ImportError:
+            return
+
+        successful = [r for r in results if r.error is None]
+        if not successful:
+            return
+
+        n = len(self.LABELS)
+        overlap = _np.zeros((n, n), dtype=int)
+        for r in successful:
+            true_idx  = [self.LABELS.index(l) for l in r.expected_labels if l in self.LABELS]
+            pred_idx  = [self.LABELS.index(l) for l in r.predicted_labels if l in self.LABELS]
+            for ti in true_idx:
+                for pi in pred_idx:
+                    overlap[ti, pi] += 1
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.imshow(overlap, cmap="YlOrRd", aspect="auto")
+        plt.colorbar(im, ax=ax)
+
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(self.LABELS, rotation=35, ha="right", fontsize=9)
+        ax.set_yticklabels(self.LABELS, fontsize=9)
+        ax.set_xlabel("Predicted label")
+        ax.set_ylabel("True label")
+        ax.set_title(f"Label-overlap matrix — {classifier_name}")
+
+        for i in range(n):
+            for j in range(n):
+                ax.text(j, i, str(overlap[i, j]), ha="center", va="center", fontsize=8,
+                        color="white" if overlap[i, j] > overlap.max() * 0.6 else "black")
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150)
+        plt.close(fig)
+
     def generate_report(
         self,
         setfit_stats: BenchmarkStats,
@@ -727,6 +861,20 @@ class QueryClassifierBenchmark:
                 report_lines.append(f"{label:<22} {'F1':<12} {sf_f1:>10.4f} {support:>8}")
                 report_lines.append(f"{'':<22} {'Precision':<12} {sf_p:>10.4f}")
                 report_lines.append(f"{'':<22} {'Recall':<12} {sf_r:>10.4f}")
+            report_lines.append("")
+
+        # ── Confusion matrix ──────────────────────────────────────────────────
+        report_lines.append("=" * 80)
+        report_lines.append("🔢 CONFUSION MATRIX — SetFit")
+        report_lines.append("=" * 80)
+        report_lines.extend(self._build_confusion_matrix_lines(self.setfit_results, "SetFit"))
+        report_lines.append("")
+
+        if not setfit_only and self.llm_results:
+            report_lines.append("=" * 80)
+            report_lines.append(f"🔢 CONFUSION MATRIX — LLM ({llm_stats.classifier_name})")
+            report_lines.append("=" * 80)
+            report_lines.extend(self._build_confusion_matrix_lines(self.llm_results, f"LLM ({llm_stats.classifier_name})"))
             report_lines.append("")
 
         # ── Misclassified examples — per classifier ───────────────────────────
@@ -869,13 +1017,25 @@ class QueryClassifierBenchmark:
         report_text = "\n".join(report_lines)
         print("\n" + report_text)
 
-        # Save to file
+        # Save to file + confusion heatmaps
         if output_file:
             output_path = Path(output_file)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(output_path, "w") as f:
                 f.write(report_text)
             print(f"\n💾 Report saved to: {output_path}")
+
+            stem = output_path.stem
+            sf_png = output_path.parent / f"{stem}_confusion_setfit.png"
+            self._save_confusion_heatmap(self.setfit_results, "SetFit", str(sf_png))
+            if sf_png.exists():
+                print(f"📊 Confusion heatmap saved to: {sf_png}")
+
+            if not setfit_only and self.llm_results:
+                llm_png = output_path.parent / f"{stem}_confusion_llm.png"
+                self._save_confusion_heatmap(self.llm_results, f"LLM ({llm_stats.classifier_name})", str(llm_png))
+                if llm_png.exists():
+                    print(f"📊 Confusion heatmap saved to: {llm_png}")
 
         return report_text
 
@@ -941,6 +1101,13 @@ def main():
         help="Output report file",
     )
     parser.add_argument(
+        "--extra-not-related",
+        type=str,
+        default=str(SCRIPT_DIR.parent.parent / "rag" / "query" / "classification_test_set.json"),
+        help="Path to a JSON file whose not_related items are appended to the test set "
+             "(default: src/simple_rag/rag/query/classification_test_set.json)",
+    )
+    parser.add_argument(
         "--skip-llm",
         "--setfit-only",
         dest="skip_llm",
@@ -952,7 +1119,7 @@ def main():
 
     # Load test set
     benchmark = QueryClassifierBenchmark(args.test_set)
-    benchmark.load_test_set()
+    benchmark.load_test_set(extra_not_related_path=args.extra_not_related)
 
     # Run SetFit benchmark
     setfit_stats = benchmark.run_setfit_benchmark()

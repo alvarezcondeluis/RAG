@@ -1,3 +1,4 @@
+import re
 import shutil
 import time
 from typing import List, Dict
@@ -7,6 +8,32 @@ from pathlib import Path
 import json
 import hashlib
 from src.simple_rag.embeddings.embedding import EmbedData
+
+# ── Intent normalisation ───────────────────────────────────────────────────────
+# Strip named entities (fund names, tickers, companies) from questions before
+# embedding so that MiniLM/Nomic capture *query intent* (strategy, expense ratio,
+# holdings…) rather than entity identity (Vanguard Dividend Appreciation Fund).
+# Applied at BOTH index-build time AND search time so vectors are in the same space.
+
+# Intent normalisation patterns.
+# Placeholders use lowercase to avoid being re-matched by later patterns.
+
+# 1. Fund / ETF names: MINIMUM 2 Title-Case (or digit) words before the terminator.
+#    Requiring ≥2 words prevents false matches like "Which fund" or "any Fund".
+#    No IGNORECASE — lowercase words (the, of, principal…) are never consumed.
+_RE_FUND = re.compile(
+    r'(?:(?:[A-Z][a-zA-Z0-9\-&]*|[0-9]+)\s+){2,8}'
+    r'(?:[Ii]ndex\s+[Ff]und|[Ff]und|ETFs?|[Pp]ortfolio|[Tt]rust)\b'
+)
+
+# 2. Company names: Title-Case words followed by Inc./Corp./LLC/Ltd./Co.
+_RE_COMPANY = re.compile(
+    r'(?:[A-Z][a-zA-Z0-9\-&]+\s+){1,5}(?:Inc\.?|Corp\.?|LLC\.?|Ltd\.?|Co\.?)\b'
+)
+
+# 3. Bare tickers: 2–5 standalone ALL-CAPS letters (run last so fund/company go first).
+#    Won't re-match placeholders since those are lowercase.
+_RE_TICKER = re.compile(r'\b[A-Z]{2,5}\b')
 
 
 NOMIC_MODEL = "nomic-ai/nomic-embed-text-v1.5"
@@ -71,9 +98,10 @@ class DynamicFewShotSelector:
         # 1. Define Paths relative to this file
         base_dir = Path(__file__).parent
         self.examples_path = base_dir / "examples" / "examples.json"
-        # Each model gets its own index dir to prevent cross-model cache pollution
+        # Each model gets its own index dir; "_norm" suffix = intent-normalised vectors.
+        # Different dir from legacy indexes forces a clean rebuild.
         index_slug = "nomic" if "nomic" in embedding_model.lower() else "minilm"
-        self.index_path = base_dir / "examples" / f"faiss_index_{index_slug}"
+        self.index_path = base_dir / "examples" / f"faiss_index_{index_slug}_norm"
         self.hash_file_path = self.index_path / "hash.md5"
 
         # 2. Pick adapter based on model name
@@ -84,6 +112,27 @@ class DynamicFewShotSelector:
         # 3. Smart Load: Check hash, then Load or Build
         self._load_or_build_index()
 
+
+    @staticmethod
+    def _normalize_for_embedding(text: str) -> str:
+        """
+        Replace named entities with placeholders so embeddings capture query
+        intent rather than entity identity.
+
+        Examples:
+            "Summarize the principal investment strategy for the Vanguard Dividend Appreciation Fund."
+            → "Summarize the principal investment strategy for the [fund]."
+
+            "Return the net assets for VTI."
+            → "Return the net assets for [ticker]."
+
+            "What did Apple Inc. report in its 10-K?"
+            → "What did [company] report in its 10-K?"
+        """
+        text = _RE_FUND.sub('[fund]', text)
+        text = _RE_COMPANY.sub('[company]', text)
+        text = _RE_TICKER.sub('[ticker]', text)
+        return re.sub(r'\s+', ' ', text).strip()
 
     def _calculate_file_hash(self, filepath: Path) -> str:
         """Generates a unique MD5 fingerprint of the file content."""
@@ -134,7 +183,9 @@ class DynamicFewShotSelector:
         with open(self.examples_path, "r") as f:
             data = json.load(f)
             
-        texts = [item["question"] for item in data]
+        # Embed normalised text so retrieval is driven by intent, not entity names.
+        # Original questions are preserved in metadata for display and prompt injection.
+        texts = [self._normalize_for_embedding(item["question"]) for item in data]
         metadatas = [{"question": item["question"], "cypher": item["cypher"]} for item in data]
         
         # 2. Clear old index folder safely
@@ -163,7 +214,7 @@ class DynamicFewShotSelector:
 
         # Use MMR for diversity
         docs = self.vector_store.max_marginal_relevance_search(
-            query, k=self.k, fetch_k=10
+            self._normalize_for_embedding(query), k=self.k, fetch_k=10
         )
         return [doc.metadata for doc in docs]
     
@@ -212,15 +263,14 @@ class DynamicFewShotSelector:
         if not self.vector_store:
             raise RuntimeError("Vector store not initialized. Index loading failed.")
 
+        # Normalise the query (same transform applied at index-build time) so the
+        # search vector is in the same intent-focused space as the stored vectors.
+        normalised_query = self._normalize_for_embedding(query)
+
         start_time = time.time()
-        if query_vector is not None:
-            docs_and_scores = self.vector_store.similarity_search_with_score_by_vector(
-                query_vector, k=self.k
-            )
-        else:
-            docs_and_scores = self.vector_store.similarity_search_with_score(
-                query, k=self.k
-            )
+        docs_and_scores = self.vector_store.similarity_search_with_score(
+            normalised_query, k=self.k
+        )
         search_time = time.time() - start_time
         print(f"⏱ Example search took {search_time:.3f}s")
 

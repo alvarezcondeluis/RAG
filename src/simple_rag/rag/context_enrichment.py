@@ -410,7 +410,7 @@ def resolve_document_provenance(
         doc_cypher = (
             f"MATCH {match_fragment}\n"
             f"RETURN d.accessionNumber AS accessionNumber, d.url AS documentUrl,\n"
-            f"       d.form AS documentType, d.filingDate AS filingDate,\n"
+            f"       d.type AS documentType, d.filingDate AS filingDate,\n"
             f"       d.reportingDate AS reportingDate\n"
             f"ORDER BY d.filingDate DESC LIMIT 1"
         )

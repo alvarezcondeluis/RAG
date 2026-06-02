@@ -10,7 +10,7 @@ Company filings (10-K):
 
 Fund profiles (Profile):
     Section:Objective, Section:PerformanceCommentary,
-    Section:RiskFactor (fund-level), Section:Strategy
+    Section:Risk (fund-level), Section:Strategy
 
 Each chunk gets a stable id, the text, the category, and a parent title.
 Duplicate source texts (same content across multiple Neo4j nodes, e.g. the
@@ -104,7 +104,7 @@ _CHUNK_QUERIES = {
         LIMIT $per_label
     """,
     "RiskFactor_Fund": """
-        MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:RiskFactor)-[:HAS_CHUNK]->(c:Chunk)
+        MATCH (fund:Fund)-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Risk)-[:HAS_CHUNK]->(c:Chunk)
         WHERE c.text IS NOT NULL AND size(c.text) > 50
         RETURN elementId(c) AS id, c.text AS text, fund.name AS title,
                elementId(p) AS doc_id

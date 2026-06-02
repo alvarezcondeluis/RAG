@@ -13,7 +13,28 @@ logger = logging.getLogger(__name__)
 
 class FundCreationOperations(Neo4jDatabaseBase):
     """Fund creation, managers, financial highlights, and allocation operations."""
-    
+
+    @staticmethod
+    def _normalize_name(value: Any) -> str:
+        """
+        Normalize name fields that may be lists or strings.
+
+        Args:
+            value: String, list, or None
+
+        Returns:
+            Clean string (first element if list, stripped whitespace)
+        """
+        if value is None:
+            return "Unknown"
+        if isinstance(value, list):
+            # Take first non-empty element
+            for item in value:
+                if item:
+                    return str(item).strip()
+            return "Unknown"
+        return str(value).strip()
+
     def create_fund(self, fund: FundData):
         """
         Create a Fund and a time-specific Profile, linking all chunks to the Profile.
@@ -120,7 +141,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
             // Section node groups chunks; each Chunk holds text + embedding
 
             FOREACH (_ IN CASE WHEN size($risk_list) > 0 THEN [1] ELSE [] END |
-                MERGE (prof)-[:HAS_SECTION]->(risk_sec:Section:RiskFactor)
+                MERGE (prof)-[:HAS_SECTION]->(risk_sec:Section:Risk)
                 SET risk_sec.title = 'Risk Factors'
                 FOREACH (r_item IN $risk_list |
                     MERGE (risk_sec)-[:HAS_CHUNK]->(rc:Chunk {id: r_item.id})
@@ -151,11 +172,11 @@ class FundCreationOperations(Neo4jDatabaseBase):
             params = {
                 # Static Fund
                 "ticker": fund.ticker,
-                "name": fund.name or "Unknown",
-                "trust": fund.registrant or "Unknown",
-                "provider": fund.provider or "Unknown",
-                "exchange": fund.security_exchange or "N/A",
-                "share_class": fund.share_class or "N/A",
+                "name": self._normalize_name(fund.name),
+                "trust": self._normalize_name(fund.registrant),
+                "provider": self._normalize_name(fund.provider),
+                "exchange": self._normalize_name(fund.security_exchange) if fund.security_exchange else "N/A",
+                "share_class": self._normalize_name(fund.share_class) if fund.share_class else "N/A",
                 "cik": getattr(fund, 'cik', None),
                 
                 # Profile

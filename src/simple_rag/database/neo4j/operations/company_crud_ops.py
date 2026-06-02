@@ -762,6 +762,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             chunk_list = []
             for c in chunks:
                 chunk_list.append({
+                    "id": c.get("id"),
                     "title": c["title"],
                     "text": c["text"],
                     "embedding": c.get("embedding"),
@@ -776,13 +777,18 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                   -[:HAS_SECTION]->(sec:Section {sectionType: $section_type})
             WITH sec
             UNWIND $chunks AS chunk
-            MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk:SectionChunk {text: chunk.text})
-            SET sc.title        = chunk.title,
-                sc.embedding    = chunk.embedding,
-                sc.chunkType    = chunk.sectionType,
-                sc.subsection   = chunk.subsection,
-                sc.chunkIndex   = chunk.chunkIndex,
-                sc.sectionName  = chunk.sectionName
+            MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk:SectionChunk {id: chunk.id})
+            SET sc.text        = chunk.text,
+                sc.title       = chunk.title,
+                sc.chunkType   = chunk.sectionType,
+                sc.subsection  = chunk.subsection,
+                sc.chunkIndex  = chunk.chunkIndex,
+                sc.sectionName = chunk.sectionName,
+                sc.embedding   = CASE
+                    WHEN chunk.embedding IS NOT NULL AND size(chunk.embedding) > 0
+                    THEN chunk.embedding
+                    ELSE sc.embedding
+                END
             RETURN count(sc) AS created
             """
 

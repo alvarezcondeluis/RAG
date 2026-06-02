@@ -15,9 +15,9 @@ from langchain_core.output_parsers import StrOutputParser
 from simple_rag.rag.dynamic_few_shot import DynamicFewShotSelector
 from simple_rag.rag.entity_resolver import EntityResolver
 from simple_rag.rag.groq_wrapper import GroqWrapper
-from simple_rag.rag.post_processing.cypher_validator import CypherValidator
-from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
-from simple_rag.rag.prompt_templates import CYPHER_GENERATION_TEMPLATE, CYPHER_RETRY_TEMPLATE, CYPHER_RETRY_TEMPLATE_LEAN
+from simple_rag.rag.post_processing.cypher_validator import CypherValidator, ValidationResult
+from simple_rag.rag.schema_definitions import DETAILED_SCHEMA, DETAILED_SCHEMA_V2
+from simple_rag.rag.prompt_templates import CYPHER_GENERATION_TEMPLATE, CYPHER_RETRY_TEMPLATE, CYPHER_RETRY_TEMPLATE_LEAN, CYPHER_GENERATION_TEMPLATE2
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class CypherTranslator:
         model_name: str = "llama3.1:8b",
         api_url: str = OLLAMA_DEFAULT_URL,
         auto_start_ollama: bool = True,
-        backend: Literal["ollama", "huggingface", "groq", "openai"] = "ollama",
+        backend: Literal["ollama", "huggingface", "groq", "openai", "openrouter"] = "ollama",
         device: str = "cuda",
         temperature: float = DEFAULT_TEMPERATURE,
         use_entity_resolver: bool = True,
@@ -59,6 +59,7 @@ class CypherTranslator:
         groq_api_key: Optional[str] = None,
         openai_compatible_host: str = OPENAI_COMPATIBLE_DEFAULT_HOST,
         openai_compatible_port: int = OPENAI_COMPATIBLE_DEFAULT_PORT,
+        ctx_size: int = 0,
         max_validation_retries: int = DEFAULT_VALIDATION_RETRIES,
         llama_cpp_host: Optional[str] = None,
         llama_cpp_port: Optional[int] = None,
@@ -66,6 +67,8 @@ class CypherTranslator:
         retry_strategy: str = "full",
         use_few_shot: bool = True,
         use_groq_fallback: bool = True,
+        openrouter_fallback_model: Optional[str] = None,
+        use_cypher_validator: bool = True,
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -109,7 +112,9 @@ class CypherTranslator:
         
         self.openai_compatible_host = openai_compatible_host
         self.openai_compatible_port = openai_compatible_port
+        self.ctx_size = ctx_size
         self.max_validation_retries = max_validation_retries
+        self.use_cypher_validator = use_cypher_validator
         self.model_name = model_name
         self.api_url = api_url
         self.ollama_process = None
@@ -156,9 +161,33 @@ class CypherTranslator:
         self.validator = CypherValidator(neo4j_driver=neo4j_driver, block_writes=True)
         print("✓ CypherValidator initialized")
 
-        # Groq 70B fallback LLM — used as last resort when all retries are exhausted
+        # Fallback LLM — used as last resort when all retries are exhausted.
+        # Supports two providers: Groq (use_groq_fallback=True) or OpenRouter (openrouter_fallback_model=<model_id>).
+        # OpenRouter takes precedence when both are specified.
         self.fallback_llm = None
-        if use_groq_fallback:
+        self._fallback_label = "fallback"  # display name used in log messages
+        if openrouter_fallback_model:
+            _or_key = os.environ.get("OPEN_ROUTER_API_KEY")
+            if _or_key:
+                try:
+                    self.fallback_llm = ChatOpenAI(
+                        model=openrouter_fallback_model,
+                        api_key=_or_key,
+                        base_url="https://openrouter.ai/api/v1",
+                        temperature=0.1,
+                        max_tokens=512,
+                        default_headers={
+                            "HTTP-Referer": "https://github.com/sec-filings-intelligence",
+                            "X-Title": "SEC Filings Intelligence",
+                        },
+                    )
+                    self._fallback_label = f"OpenRouter ({openrouter_fallback_model})"
+                    print(f"✓ OpenRouter fallback initialized: {openrouter_fallback_model} (last-resort after retries)")
+                except Exception as e:
+                    print(f"⚠ OpenRouter fallback unavailable: {e}")
+            else:
+                print("⚠ OPEN_ROUTER_API_KEY not set — OpenRouter fallback disabled")
+        elif use_groq_fallback:
             _fallback_key = os.environ.get("GROQ_API_KEY")
             _is_already_groq70b = (
                 backend == "groq" and "70b" in model_name.lower()
@@ -172,6 +201,7 @@ class CypherTranslator:
                         temperature=0.1,
                         max_tokens=512,
                     )
+                    self._fallback_label = "Groq 70B"
                     print("✓ Groq 70B fallback initialized (last-resort after retries)")
                 except Exception as e:
                     print(f"⚠ Groq 70B fallback unavailable: {e}")
@@ -188,25 +218,29 @@ class CypherTranslator:
         self.detailed_schema = DETAILED_SCHEMA  # always the full schema — never overwritten by slicing
         self.schema = DETAILED_SCHEMA           # may be temporarily replaced by a schema slice
         self.last_initial_prompt: Optional[str] = None  # prompt used on the first LLM call (captured for debugging)
+        self.last_retry_prompts: list = []             # prompts used on each retry attempt (only populated when _capture_prompts=True)
+        self._capture_prompts: bool = False            # set True by benchmark.debug() only — keeps run() overhead-free
         self.last_validation_failures: list = []  # validator rule tags that fired during the last translate() call
         self.last_total_prompt_tokens: int = 0  # cumulative token estimate across all LLM calls (initial + retries)
+        self.last_completion_tokens: int = 0    # estimated tokens in all LLM responses for this translate() call
+        self.last_schema_tokens: int = 0        # estimated tokens consumed by the schema slice in the initial prompt
         
         # Use imported prompt templates
         self.prompt = PromptTemplate(
             input_variables=["schema", "examples", "entity_context", "question"],
-            template=CYPHER_GENERATION_TEMPLATE
+            template=CYPHER_GENERATION_TEMPLATE2
         )
         
         self.retry_strategy = retry_strategy
         if retry_strategy == "lean":
             self.retry_prompt = PromptTemplate(
-                input_variables=["failed_query", "validation_errors", "error_examples"],
+                input_variables=["examples", "failed_query", "validation_errors", "error_examples"],
                 template=CYPHER_RETRY_TEMPLATE_LEAN,
             )
             print(f"✓ Retry strategy: lean (no schema, ~400 tokens per retry)")
         else:
             self.retry_prompt = PromptTemplate(
-                input_variables=["schema", "entity_context", "question", "failed_query", "validation_errors", "error_examples"],
+                input_variables=["schema", "entity_context", "examples", "question", "failed_query", "validation_errors", "error_examples"],
                 template=CYPHER_RETRY_TEMPLATE,
             )
             print(f"✓ Retry strategy: full (schema injected, ~3k tokens per retry)")
@@ -222,6 +256,8 @@ class CypherTranslator:
             self._init_groq_chain()
         elif self.backend == "openai":
             self._init_openai_chain()
+        elif self.backend == "openrouter":
+            self._init_openrouter_chain()
         else:
             raise ValueError(
                 f"Unknown backend: {backend}. "
@@ -235,7 +271,7 @@ class CypherTranslator:
         Sends a lightweight dummy request to force the LLM to load into VRAM.
         This ensures the first real user query doesn't lag.
         """
-        if self.backend in ["openai", "groq"]:
+        if self.backend in ["openai", "groq", "openrouter"]:
             return
             
         print("🔥 Warming up LLM (loading into memory)...")
@@ -372,18 +408,22 @@ class CypherTranslator:
             raise RuntimeError(f"Failed to initialize Groq chain: {e}") from e
 
     def _init_openai_chain(self):
-        """Initialize LangChain with an OpenAI-compatible server (LM Studio, llama.cpp, vLLM, etc.)."""
+        """Initialize LangChain with an OpenAI-compatible server (llama.cpp, vLLM, etc.)."""
         try:
             base_url = f"http://{self.openai_compatible_host}:{self.openai_compatible_port}/v1"
+            # num_ctx is a llama.cpp per-request extension; ignored by other servers
+            model_kwargs = {"num_ctx": self.ctx_size} if self.ctx_size > 0 else {}
             self.llm = ChatOpenAI(
                 model=self.model_name,
                 base_url=base_url,
                 api_key="not-needed",
                 temperature=self.temperature,
                 max_tokens=DEFAULT_MAX_TOKENS,
+                model_kwargs=model_kwargs,
             )
             self.chain = self.prompt | self.llm | StrOutputParser()
-            print(f"✓ OpenAI-compatible backend initialized → {base_url}")
+            ctx_info = f", ctx_size={self.ctx_size}" if self.ctx_size > 0 else ""
+            print(f"✓ OpenAI-compatible backend initialized → {base_url}{ctx_info}")
         except requests.exceptions.ConnectionError:
             raise RuntimeError(
                 f"Failed to connect to OpenAI-compatible server at {base_url}\n"
@@ -391,6 +431,28 @@ class CypherTranslator:
             )
         except Exception as e:
             raise RuntimeError(f"Failed to initialize OpenAI-compatible chain: {e}") from e
+
+    def _init_openrouter_chain(self):
+        """Initialize LangChain with OpenRouter as the primary text2cypher backend."""
+        api_key = os.environ.get("OPEN_ROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPEN_ROUTER_API_KEY environment variable not set.")
+        try:
+            self.llm = ChatOpenAI(
+                model=self.model_name,
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=self.temperature,
+                max_tokens=DEFAULT_MAX_TOKENS,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/sec-filings-intelligence",
+                    "X-Title": "SEC Filings Intelligence",
+                },
+            )
+            self.chain = self.prompt | self.llm | StrOutputParser()
+            print(f"✓ OpenRouter backend initialized → {self.model_name}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize OpenRouter chain: {e}") from e
 
     def test_connection(self) -> bool:
         """
@@ -411,8 +473,8 @@ class CypherTranslator:
                 else:
                     print(f"✗ OpenAI-compatible server returned status {response.status_code}")
                     return False
-            elif self.backend == "groq":
-                print("✓ Groq backend configured (API-based, no connection test needed)")
+            elif self.backend in ("groq", "openrouter"):
+                print(f"✓ {self.backend.capitalize()} backend configured (API-based, no connection test needed)")
                 return True
             elif self.backend == "huggingface":
                 print("✓ HuggingFace backend configured (local model, no connection test needed)")
@@ -613,7 +675,7 @@ class CypherTranslator:
                 return llm_response.content
             return str(llm_response)
 
-    def translate(self, user_query: str, temperature: Optional[float] = None, query_vector=None) -> Optional[str]:
+    def translate(self, user_query: str, temperature: Optional[float] = None) -> Optional[str]:
         """
         Translate natural language query to Cypher query using LangChain.
         
@@ -640,7 +702,8 @@ class CypherTranslator:
         # Step 1: Resolve entities in the query
         entity_context = ""
         processed_query = user_query
-        
+        resolved_entities = {}
+
         if self.entity_resolver:
             
             resolved_entities = self.entity_resolver.extract_entities(user_query)
@@ -672,9 +735,11 @@ class CypherTranslator:
                 entity_summary = ", ".join([f"{t}:{n}" for t, n in sorted(entity_list, key=lambda x: (str(x[0]), str(x[1])))])
                 print(f"🔍 Entities: {entity_summary}")
         
-        # Step 2: Get few-shot examples (reuse pre-computed vector to avoid duplicate Nomic inference)
+        # Step 2: Get few-shot examples.
+        # query_vector is NOT forwarded — the index uses intent-normalised vectors so
+        # a raw pre-computed vector from Nomic/MiniLM would be in the wrong space.
         if self.use_few_shot:
-            examples_str = self.selector.get_formatted_context(user_query, query_vector=query_vector)
+            examples_str = self.selector.get_formatted_context(user_query)
             n_examples = len(examples_str.split('Example'))-1
             print(f"📚 Examples: {n_examples} retrieved")
             if examples_str.strip():
@@ -707,6 +772,12 @@ class CypherTranslator:
 
             full_prompt = _build_prompt(examples_str)
             self.last_initial_prompt = full_prompt  # stored for benchmark error reporting
+            self.last_completion_tokens = 0
+            # Schema slice token contribution: measure only the schema section of the prompt
+            schema_section = self.prompt.format(
+                schema=self.schema, examples="", entity_context="", question=""
+            )
+            self.last_schema_tokens = len(schema_section) // 4
 
             response = None
             current_examples = examples_str
@@ -742,19 +813,68 @@ class CypherTranslator:
                     return None
 
             cypher_query = self._clean_cypher(response)
-            
+
             if not cypher_query:
                 print("⚠ Empty Cypher query generated")
                 return None
-            
+
+            if self.use_cypher_validator:
+                _cypher_before_rules = cypher_query
+
+                cypher_query, _stripped = CypherValidator.strip_spurious_ticker_filters(
+                    cypher_query, user_query, resolved_entities
+                )
+                if _stripped:
+                    print("⚡ Auto-stripped spurious Company ticker filter (not in question or entity resolver)")
+
+                cypher_query, _replaced = CypherValidator.replace_fund_name_with_resolved_ticker(
+                    cypher_query, resolved_entities
+                )
+                if _replaced:
+                    print("⚡ Auto-replaced Fund {name: '...'} exact filter with resolved ticker")
+
+                cypher_query, _stripped = CypherValidator.strip_filing10k_year_filter(cypher_query)
+                if _stripped:
+                    print("⚡ Auto-stripped Filing10K {year} filter (year lives on REPORTS_IN, not Filing10K)")
+
+                cypher_query, _stripped = CypherValidator.strip_has_average_returns_year_filter(cypher_query)
+                if _stripped:
+                    print("⚡ Auto-stripped HAS_AVERAGE_RETURNS {year} filter (return1y/5y/10y already encode the period)")
+
+                cypher_query, _stripped = CypherValidator.strip_portfolio_intermediary_for_allocation(cypher_query)
+                if _stripped:
+                    print("⚡ Auto-stripped [:HAS_PORTFOLIO]->(Portfolio) hop before HAS_SECTOR/REGION_ALLOCATION (allocation is direct Fund→Sector/Region)")
+
+                cypher_query, _stripped = CypherValidator.strip_vector_where_filters(cypher_query)
+                if _stripped:
+                    print("⚡ Auto-stripped year/CONTAINS filters from vector query")
+
+                cypher_query, _injected = CypherValidator.inject_chunk_id(cypher_query)
+                if _injected:
+                    print("⚡ Auto-injected chunk.id AS chunkId into vector query RETURN")
+
+                cypher_query, _boosted = CypherValidator.boost_vector_candidate_count(cypher_query)
+                if _boosted:
+                    print("⚡ Auto-boosted vector candidate count to 50")
+
+                if cypher_query != _cypher_before_rules:
+                    print(f"  BEFORE: {_cypher_before_rules}")
+                    print(f"  AFTER:  {cypher_query}")
+
             print(f"✓ Generated Cypher (attempt 1): {cypher_query}")
-            
+
             # Step 4: Validate + retry loop
             self.last_validation_failures = []
+            if self._capture_prompts:
+                self.last_retry_prompts = []
             self.last_retry_attempts = 0
             self.last_total_prompt_tokens = len(full_prompt) // 4  # initial call
+            self.last_completion_tokens += len(response) // 4 if response else 0
+            validation_result = ValidationResult(is_valid=True, original_query=cypher_query)
             for attempt in range(1, self.max_validation_retries + 1):
                 self.last_retry_attempts = attempt
+                if not self.use_cypher_validator:
+                    break  # skip validation loop entirely
                 validation_result = self.validator.validate(cypher_query)
 
                 if validation_result.is_valid:
@@ -777,7 +897,19 @@ class CypherTranslator:
                 if attempt >= self.max_validation_retries:
                     print(f"❌ Max validation retries ({self.max_validation_retries}) reached. Returning last query.")
                     break
-                
+
+                # Short-circuit: if ALL errors are variable collisions, fix directly
+                # without calling the LLM (the model consistently re-introduces this mistake).
+                all_collision_errors = all(
+                    "VARIABLE COLLISION" in e for e in validation_result.syntax_errors
+                ) and validation_result.syntax_errors and not validation_result.schema_errors
+                if all_collision_errors:
+                    fixed = self._fix_variable_collisions(cypher_query)
+                    if fixed != cypher_query:
+                        print(f"⚡ Short-circuit: auto-fixed variable collision (skipping LLM retry)")
+                        cypher_query = fixed
+                        continue
+
                 # Check Groq rate limits before retrying
                 if self.backend == "groq" and not self._check_groq_rate_limits():
                     print("❌ Cannot retry: Groq rate limits exceeded")
@@ -793,6 +925,7 @@ class CypherTranslator:
                 
                 if self.retry_strategy == "lean":
                     retry_prompt_text = self.retry_prompt.format(
+                        examples=current_examples,
                         failed_query=cypher_query,
                         validation_errors=error_summary,
                         error_examples=error_specific_examples,
@@ -801,6 +934,7 @@ class CypherTranslator:
                     retry_prompt_text = self.retry_prompt.format(
                         schema=self.detailed_schema,
                         entity_context=entity_context,
+                        examples=current_examples,
                         question=processed_query,
                         failed_query=cypher_query,
                         validation_errors=error_summary,
@@ -809,29 +943,76 @@ class CypherTranslator:
 
                 token_est = len(retry_prompt_text) // 4
                 self.last_total_prompt_tokens += token_est
+                if self._capture_prompts:
+                    self.last_retry_prompts.append(retry_prompt_text)
 
                 retry_response = self._invoke_llm(retry_prompt_text)
+                self.last_completion_tokens += len(retry_response) // 4 if retry_response else 0
                 cypher_query = self._clean_cypher(retry_response)
-                
+
                 if not cypher_query:
                     print("⚠ Empty Cypher query on retry")
                     break
-                
+
+                if self.use_cypher_validator:
+                    _cypher_before_rules = cypher_query
+
+                    cypher_query, _stripped = CypherValidator.strip_spurious_ticker_filters(
+                        cypher_query, user_query, resolved_entities
+                    )
+                    if _stripped:
+                        print("⚡ Auto-stripped spurious Company ticker filter (retry)")
+
+                    cypher_query, _replaced = CypherValidator.replace_fund_name_with_resolved_ticker(
+                        cypher_query, resolved_entities
+                    )
+                    if _replaced:
+                        print("⚡ Auto-replaced Fund {name: '...'} exact filter with resolved ticker (retry)")
+
+                    cypher_query, _stripped = CypherValidator.strip_filing10k_year_filter(cypher_query)
+                    if _stripped:
+                        print("⚡ Auto-stripped Filing10K {year} filter (retry)")
+
+                    cypher_query, _stripped = CypherValidator.strip_has_average_returns_year_filter(cypher_query)
+                    if _stripped:
+                        print("⚡ Auto-stripped HAS_AVERAGE_RETURNS {year} filter (retry)")
+
+                    cypher_query, _stripped = CypherValidator.strip_portfolio_intermediary_for_allocation(cypher_query)
+                    if _stripped:
+                        print("⚡ Auto-stripped [:HAS_PORTFOLIO]->(Portfolio) hop before allocation (retry)")
+
+                    cypher_query, _stripped = CypherValidator.strip_vector_where_filters(cypher_query)
+                    if _stripped:
+                        print("⚡ Auto-stripped year/CONTAINS filters from vector query (retry)")
+
+                    cypher_query, _injected = CypherValidator.inject_chunk_id(cypher_query)
+                    if _injected:
+                        print("⚡ Auto-injected chunk.id AS chunkId into vector query RETURN (retry)")
+
+                    cypher_query, _boosted = CypherValidator.boost_vector_candidate_count(cypher_query)
+                    if _boosted:
+                        print("⚡ Auto-boosted vector candidate count to 50 (retry)")
+
+                    if cypher_query != _cypher_before_rules:
+                        print(f"  BEFORE: {_cypher_before_rules}")
+                        print(f"  AFTER:  {cypher_query}")
+
                 print(f"✓ Generated Cypher (attempt {attempt + 1}): {cypher_query}")
             
-            # Groq 70B fallback — fires only if retries were exhausted and query is still invalid
+            # Fallback LLM — fires only if retries were exhausted and query is still invalid
             if self.fallback_llm is not None and not validation_result.is_valid:
-                print("🆘 All retries exhausted — escalating to Groq 70B fallback...")
+                print(f"🆘 All retries exhausted — escalating to {self._fallback_label} fallback...")
                 try:
                     from simple_rag.rag.prompt_templates import CYPHER_RETRY_TEMPLATE
                     from langchain_core.prompts import PromptTemplate
                     _full_retry_prompt = PromptTemplate(
-                        input_variables=["schema", "entity_context", "question", "failed_query", "validation_errors", "error_examples"],
+                        input_variables=["schema", "entity_context", "examples", "question", "failed_query", "validation_errors", "error_examples"],
                         template=CYPHER_RETRY_TEMPLATE,
                     )
                     fallback_prompt = _full_retry_prompt.format(
                         schema=self.detailed_schema,
                         entity_context=entity_context,
+                        examples=current_examples,
                         question=processed_query,
                         failed_query=cypher_query,
                         validation_errors=error_summary,
@@ -842,10 +1023,10 @@ class CypherTranslator:
                     if fallback_cypher:
                         fallback_validation = self.validator.validate(fallback_cypher)
                         status = "✅ valid" if fallback_validation.is_valid else "⚠ still invalid"
-                        print(f"🆘 Groq 70B fallback result ({status}): {fallback_cypher}")
+                        print(f"🆘 {self._fallback_label} fallback result ({status}): {fallback_cypher}")
                         cypher_query = fallback_cypher
                 except Exception as e:
-                    print(f"⚠ Groq 70B fallback failed: {e}")
+                    print(f"⚠ {self._fallback_label} fallback failed: {e}")
 
             # Restore original temperature
             if temperature is not None and self.backend in ["ollama", "groq"]:
@@ -1003,7 +1184,7 @@ CORRECT: MATCH (chunk)<-[:HAS_CHUNK]-(s:Section)<-[:HAS_SECTION]-(f:Filing10K)
 CORRECT pattern for vector search traversal:
   CALL db.index.vector.queryNodes('chunkEmbeddingIndex', 10, $queryVector) YIELD node AS chunk, score
   MATCH (chunk)<-[:HAS_CHUNK]-(s:Section:RiskFactor)<-[:HAS_SECTION]-(f:Filing10K)<-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'})
-  RETURN chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5
+  RETURN chunk.id, chunk.text AS text, r.year AS filingYear, score ORDER BY score DESC LIMIT 5
 
 RULE: Every incoming relationship arrow must be written as <-[:TYPE]- never as -<[:TYPE]-.
 """)
@@ -1047,10 +1228,15 @@ RULE: Every incoming relationship arrow must be written as <-[:TYPE]- never as -
         # 3. Clean up accidental double spaces created by the removal
         query = re.sub(r'\s+', ' ', query).strip()
 
-        # 4. Auto-inject DISTINCT when multi-hop traversal could cause duplicate rows
+        # 4. Fix variable collision: same name used for both a relationship and a node.
+        # e.g. -[it:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction) → -[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)
+        # Strategy: keep the node variable (used in RETURN/WHERE), anonymise the relationship.
+        query = self._fix_variable_collisions(query)
+
+        # 5. Auto-inject DISTINCT when multi-hop traversal could cause duplicate rows
         query = self._auto_distinct(query)
 
-        # 5. Auto-fix undefined relationship variables.
+        # 6. Auto-fix undefined relationship variables.
         # If the query references r.property (or rel.property, h.property, etc.) in
         # RETURN/WHERE/ORDER BY but the relationship pattern is anonymous (e.g. [:REL_TYPE]),
         # inject the variable name into the first anonymous relationship pattern.
@@ -1058,6 +1244,34 @@ RULE: Every incoming relationship arrow must be written as <-[:TYPE]- never as -
         query = self._fix_undefined_rel_vars(query)
 
         return query
+
+    def _fix_variable_collisions(self, query: str) -> str:
+        """
+        Detect and fix variable name collisions where the same identifier is used
+        for both a named relationship and a node in the same query.
+
+        Example collision (fatal Cypher syntax error):
+            -[it:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)
+
+        Fix: anonymise the relationship bracket — the node variable is preserved
+        because it is the one referenced in RETURN/WHERE/ORDER BY:
+            -[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction)
+        """
+        # Named relationships: -[varName:REL_TYPE]-> or <-[varName:REL_TYPE]-
+        named_rel_pattern = re.compile(r'-\[([a-zA-Z_]\w*):([A-Z_][A-Z_0-9]*)\]', re.IGNORECASE)
+        # Named nodes: (varName:Label) or (varName {
+        named_node_vars = set(re.findall(r'\(\s*([a-zA-Z_]\w*)\s*[:{]', query))
+
+        def _anonymise_if_collision(m: re.Match) -> str:
+            var, rel_type = m.group(1), m.group(2)
+            if var in named_node_vars:
+                return f'-[:{rel_type}]'
+            return m.group(0)
+
+        fixed = named_rel_pattern.sub(_anonymise_if_collision, query)
+        if fixed != query:
+            print(f"⚡ Auto-fixed variable collision (relationship variable anonymised)")
+        return fixed
 
     def _fix_undefined_rel_vars(self, query: str) -> str:
         """

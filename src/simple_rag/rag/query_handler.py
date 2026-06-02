@@ -19,9 +19,10 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from simple_rag.rag.query.query_classification import QueryClassifier, QueryCategory, LABELS
 from simple_rag.rag.text2cypher import CypherTranslator
-from simple_rag.rag.schema_definitions import DETAILED_SCHEMA
-from simple_rag.rag.schema_slices import SCHEMA_SLICES, get_merged_schema
+from simple_rag.rag.schema_definitions import DETAILED_SCHEMA, DETAILED_SCHEMA_V2
+from simple_rag.rag.schema_slices import get_schema_for_category, get_merged_schema, DEFAULT_SCHEMA_VERSION
 from simple_rag.rag.context_enrichment import ContextEnricher
+from simple_rag.rag.post_processing.cypher_validator import ResultValidator
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class QueryHandler:
         enable_query_embedding: bool = True,
         default_k: int = 5,
         few_shot_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
+        schema_version: str = DEFAULT_SCHEMA_VERSION,
         **cypher_kwargs,
     ):
         # ── Classifier ──────────────────────────────────────────────
@@ -94,6 +96,12 @@ class QueryHandler:
 
         self.neo4j_driver = neo4j_driver
         self.confidence_threshold = confidence_threshold
+        self.schema_version = schema_version
+
+        # Patch translator's full schema so retries also use the right version
+        if schema_version == "v2":
+            self.translator.detailed_schema = DETAILED_SCHEMA_V2
+            self.translator.schema = DETAILED_SCHEMA_V2
 
         # ── Query embedder (eager — every query is embedded so vector search is always available) ──
         self.enable_query_embedding = enable_query_embedding
@@ -102,7 +110,7 @@ class QueryHandler:
         self._embedder_model = embedder_model
         # Only reuse the pre-computed query vector for few-shot if both models are identical.
         # If they differ, dimensions/semantics won't match the FAISS index.
-        self._few_shot_reuse_vector = (few_shot_embedding_model == embedder_model)
+
         self._embedding_cache: Dict[str, List[float]] = {}
         if enable_query_embedding:
             if embedder is not None:
@@ -214,11 +222,11 @@ class QueryHandler:
 
         if len(active_labels) == 1:
             selected_schema_name = active_labels[0]
-            schema_slice = SCHEMA_SLICES.get(active_labels[0], "")
+            schema_slice = get_schema_for_category(active_labels[0], version=self.schema_version)
             print(f"→ Single label: {active_labels[0]} ({confidence:.2%})")
         else:
             selected_schema_name = " + ".join(active_labels)
-            schema_slice = get_merged_schema(active_labels)
+            schema_slice = get_merged_schema(active_labels, version=self.schema_version)
             print(f"🔀 Multi-label: [{', '.join(active_labels)}] — merging schemas")
 
         # Step 3 — build result container
@@ -240,12 +248,11 @@ class QueryHandler:
             effective_schema = schema_slice
             print(f"📐 Schema: slice ({selected_schema_name})")
         else:
-            effective_schema = DETAILED_SCHEMA
+            effective_schema = DETAILED_SCHEMA_V2 if self.schema_version == "v2" else DETAILED_SCHEMA
             
         start_translation = time.time()
         cypher = self._translate_with_schema(
             user_query, effective_schema, temperature=temperature,
-            query_vector=query_embedding if self._few_shot_reuse_vector else None,
         )
         translation_time = time.time() - start_translation
         result.cypher = cypher
@@ -260,6 +267,23 @@ class QueryHandler:
             if query_embedding is not None:
                 params["queryVector"] = query_embedding
             result.data = self._execute(cypher, parameters=params)
+
+        # Step 5a — result-level semantic validation with one retry
+        # Catches data-quality issues (e.g. all expenseRatio = 0.0) that only
+        # become visible after execution, outside the syntax/schema retry loop.
+        if execute and result.data is not None:
+            result_issue = ResultValidator.validate(cypher, result.data)
+            if result_issue is not None:
+                print(f"⚠️  Result validation [{result_issue.triggered_rule}] — retrying with constraint...")
+                error_hint = result_issue.all_errors[0]
+                augmented_query = f"{user_query}\n[DATA QUALITY CONSTRAINT: {error_hint}]"
+                retry_cypher = self._translate_with_schema(
+                    augmented_query, effective_schema, temperature=temperature,
+                        )
+                if retry_cypher:
+                    result.cypher = retry_cypher
+                    result.data = self._execute(retry_cypher, parameters=params)
+                    print("✅ Result-validated retry complete")
 
         # Step 6 — context enrichment (supplementary queries for richer LLM context)
         if execute and result.data is not None:
@@ -284,7 +308,6 @@ class QueryHandler:
         user_query: str,
         schema_slice: str,
         temperature: Optional[float] = None,
-        query_vector=None,
     ) -> Optional[str]:
         """
         Temporarily swap the translator's schema, call translate(),
@@ -293,7 +316,7 @@ class QueryHandler:
         original_schema = self.translator.schema
         try:
             self.translator.schema = schema_slice
-            return self.translator.translate(user_query, temperature=temperature, query_vector=query_vector)
+            return self.translator.translate(user_query, temperature=temperature)
         finally:
             self.translator.schema = original_schema
 

@@ -1,4 +1,5 @@
 import sys
+import re
 import time
 import json
 import statistics
@@ -14,6 +15,45 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SRC_ROOT = SCRIPT_DIR.parent.parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+
+# ── Schema knowledge for static adherence checks ──────────────────────────────
+_KNOWN_NODE_LABELS = {
+    "Provider", "Trust", "Fund", "ShareClass", "Document", "Profile",
+    "Section", "Objective", "PerformanceCommentary", "Risk", "RiskFactor", "Strategy",
+    "Chunk", "Image", "Table", "Person", "AverageReturns", "Sector", "Region",
+    "Portfolio", "Holding", "AssetCategory", "Company", "Filing10K",
+    "Financials", "FinancialMetric", "Segment", "CompensationPackage",
+    "InsiderTransaction", "FinancialHighlight", "BusinessInformation",
+    "LegalProceeding", "ManagementDiscussion", "Properties",
+}
+
+_KNOWN_REL_TYPES = {
+    "MANAGES", "ISSUES", "HAS_SHARE_CLASS", "EXTRACTED_FROM", "DEFINED_BY",
+    "HAS_SECTION", "HAS_CHUNK", "HAS_CHART", "HAS_TABLE", "MANAGED_BY",
+    "HAS_AVERAGE_RETURNS", "HAS_SECTOR_ALLOCATION", "HAS_REGION_ALLOCATION",
+    "HAS_PORTFOLIO", "HAS_HOLDING", "OF_ASSET_TYPE", "REPRESENTS",
+    "HAS_FINANCIAL_HIGHLIGHT", "REPORTS_IN", "HAS_FINANCIALS", "HAS_METRIC",
+    "HAS_SEGMENT", "HAS_CEO", "RECEIVED_COMPENSATION", "AWARDED_BY",
+    "DISCLOSED_IN", "HAS_INSIDER_TRANSACTION", "MADE_BY",
+}
+
+
+def _check_schema_adherence(cypher: str) -> tuple[bool, list[str]]:
+    """Static regex check: does the Cypher use only known node labels and relationship types?"""
+    if not cypher:
+        return True, []
+    violations = []
+    # Node labels: (:Label), (var:Label), (:Label:Label2)
+    for label_group in re.findall(r'\([\w]*:([\w:]+)[\s{)]', cypher):
+        for label in label_group.split(':'):
+            if label and label not in _KNOWN_NODE_LABELS:
+                violations.append(f"Unknown node label: '{label}'")
+    # Relationship types: [:TYPE], [var:TYPE], [*..TYPE]
+    for rel_type in re.findall(r'\[[\w]*:([\w]+)[\s{*\]]', cypher):
+        if rel_type not in _KNOWN_REL_TYPES:
+            violations.append(f"Unknown rel type: '{rel_type}'")
+    return len(violations) == 0, violations
 
 
 class _BenchmarkLogger:
@@ -37,7 +77,7 @@ class _BenchmarkLogger:
         self._file.close()
 
 
-from simple_rag.rag.query_handler import QueryHandler, QueryResult
+from simple_rag.rag.query_handler import QueryHandler
 from simple_rag.database.neo4j.neo4j import Neo4jDatabase
 
 
@@ -68,6 +108,13 @@ class TestResult:
     schema_text: str = ""              # actual schema text passed to LLM (truncated for display)
     attempt_count: int = 0             # number of LLM calls (1 = no retry, >1 = retried)
     needed_retry: bool = False         # convenience flag
+    # ── New metrics ──────────────────────────────────────────────────────────
+    outcome: str = ""                  # pass | empty_result | incorrect_result | error | pipeline_error | routing
+    gen_record_count: int = 0
+    exp_record_count: int = 0
+    count_ratio: float = 0.0           # gen_count / max(exp_count, 1) — 1.0 is ideal
+    schema_adherent: bool = True
+    schema_violations: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -87,6 +134,14 @@ class PipelineStats:
     avg_attempts: float = 0.0          # average # of LLM calls per query
     category_breakdown: Dict[str, Dict[str, float]] = field(default_factory=dict)
     complexity_breakdown: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # ── New metrics ──────────────────────────────────────────────────────────
+    first_attempt_passed: int = 0
+    first_attempt_accuracy: float = 0.0
+    outcome_breakdown: Dict[str, int] = field(default_factory=dict)
+    avg_count_ratio: float = 0.0
+    schema_adherence_rate: float = 0.0
+    schema_violations_total: int = 0
+    per_category_outcomes: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
 class Text2CypherBenchmark:
@@ -289,6 +344,14 @@ class Text2CypherBenchmark:
             result.llm_prompt = getattr(self.handler.translator, 'last_initial_prompt', '') or ''
             result.prompt_token_estimate = len(result.llm_prompt) // 4
 
+            # Static schema adherence check (no DB needed)
+            if result.generated_cypher:
+                adherent, violations = _check_schema_adherence(result.generated_cypher)
+                result.schema_adherent = adherent
+                result.schema_violations = violations
+                if violations:
+                    print(f"⚠️  Schema violations detected: {violations}")
+
             # Capture attempt count (LLM calls during this query)
             result.attempt_count = self._llm_call_count
             result.needed_retry = self._llm_call_count > 1
@@ -303,12 +366,14 @@ class Text2CypherBenchmark:
             if handle_result.error:
                 result.error_type = f"Pipeline Error ({handle_result.category})"
                 result.error_message = handle_result.error
+                result.outcome = "pipeline_error"
                 print(f"❌ Pipeline failed: {handle_result.error}")
                 return result
 
             if handle_result.requires_vector_search and not handle_result.cypher:
                 result.error_type = "Routing"
                 result.error_message = f"Query routed to vector search (category: {handle_result.category})"
+                result.outcome = "routing"
                 print(f"ℹ️  Routed to Vector Search (skipping Cypher benchmark for this item)")
                 return result
 
@@ -337,6 +402,9 @@ class Text2CypherBenchmark:
 
             result.generated_results = gen_records
             result.expected_results = exp_records
+            result.gen_record_count = len(gen_records)
+            result.exp_record_count = len(exp_records)
+            result.count_ratio = len(gen_records) / max(len(exp_records), 1)
 
             print(f"\n🔍 ROUTING: {result.category} ({result.confidence:.2%})")
             print(f"📐 Schema slice: {result.schema_name or '—'}")
@@ -377,18 +445,21 @@ class Text2CypherBenchmark:
             if is_match:
                 result.success = True
                 result.is_semantically_correct = True
+                result.outcome = "pass"
                 match_label = "Exact" if match_type == 'exact' else ("Small subset" if match_type == 'small_subset' else "Partial")
                 print(f"\n✅ PASS - {match_label} match")
             else:
                 result.success = False
                 result.error_type = "Incorrect Result"
                 result.error_message = f"Got {len(gen_records)} records, expected {len(exp_records)}"
+                result.outcome = "empty_result" if len(gen_records) == 0 and len(exp_records) > 0 else "incorrect_result"
                 print(f"\n❌ FAIL - Result mismatch")
 
         except Exception as e:
             result.success = False
             result.error_type = "Syntax/Execution Error"
             result.error_message = str(e)
+            result.outcome = "error"
             print(f"\n❌ FAIL - Execution error: {str(e)[:100]}")
 
         print(f"⏱️  Timings: Generation={result.generation_time_ms:.0f}ms | Execution={result.execution_time_ms:.0f}ms")
@@ -461,6 +532,20 @@ class Text2CypherBenchmark:
 
         benchmark_logger.close()
         print(f"\n✅ Report saved → {report_path}")
+
+        # Save structured JSON results for llm_judge.py
+        json_stem = report_path.stem
+        if self.detailed_results:
+            self._save_json_results(
+                self.detailed_results,
+                reports_dir / f"{json_stem}_detailed.json",
+            )
+        if self.sliced_results:
+            self._save_json_results(
+                self.sliced_results,
+                reports_dir / f"{json_stem}_sliced.json",
+            )
+
         self.cleanup()
 
     def _compute_stats(self, results: List[TestResult], name: str) -> PipelineStats:
@@ -506,6 +591,30 @@ class Text2CypherBenchmark:
                 "passed": comp_passed,
                 "accuracy": (comp_passed / len(comp_results)) * 100 if comp_results else 0,
             }
+
+        # ── New metrics ───────────────────────────────────────────────────────
+        # First-attempt accuracy (no retries)
+        stats.first_attempt_passed = sum(1 for r in results if r.success and r.attempt_count == 1)
+        stats.first_attempt_accuracy = (stats.first_attempt_passed / stats.total) * 100 if stats.total else 0.0
+
+        # Outcome breakdown
+        stats.outcome_breakdown = dict(Counter(r.outcome for r in results if r.outcome))
+
+        # Count ratio (only for queries that executed — skip routing/pipeline_error)
+        ratios = [r.count_ratio for r in results if r.outcome not in ("routing", "pipeline_error", "error", "")]
+        stats.avg_count_ratio = statistics.mean(ratios) if ratios else 0.0
+
+        # Schema adherence
+        adherent_count = sum(1 for r in results if r.schema_adherent and r.generated_cypher)
+        queries_with_cypher = sum(1 for r in results if r.generated_cypher)
+        stats.schema_adherence_rate = (adherent_count / queries_with_cypher) * 100 if queries_with_cypher else 0.0
+        stats.schema_violations_total = sum(len(r.schema_violations) for r in results)
+
+        # Per-category outcome breakdown
+        for cat in set(r.category for r in results if r.category):
+            cat_results = [r for r in results if r.category == cat]
+            stats.per_category_outcomes[cat] = dict(Counter(r.outcome for r in cat_results if r.outcome))
+
         return stats
 
     def print_comparison_report(self):
@@ -533,6 +642,23 @@ class Text2CypherBenchmark:
         print(f"{'Queries needing retry':<35} {det.retry_count:<25} {sli.retry_count:<25}")
         print(f"{'Retry rate':<35} {det.retry_rate:>22.2f} % {sli.retry_rate:>22.2f} %")
         print(f"{'Avg LLM calls per query':<35} {det.avg_attempts:>23.2f}  {sli.avg_attempts:>23.2f}")
+        print("-" * 90)
+        print(f"{'First-attempt accuracy':<35} {det.first_attempt_accuracy:>22.2f} % {sli.first_attempt_accuracy:>22.2f} %")
+        print(f"{'Avg count ratio (gen/exp)':<35} {det.avg_count_ratio:>23.2f}  {sli.avg_count_ratio:>23.2f}")
+        print(f"{'Schema adherence rate':<35} {det.schema_adherence_rate:>22.2f} % {sli.schema_adherence_rate:>22.2f} %")
+        print(f"{'Schema violations (total)':<35} {det.schema_violations_total:<25} {sli.schema_violations_total:<25}")
+
+        # Outcome breakdown
+        print(f"\n{'─'*90}")
+        print("🔎 OUTCOME BREAKDOWN")
+        print("─" * 90)
+        all_outcomes = sorted(set(list(det.outcome_breakdown.keys()) + list(sli.outcome_breakdown.keys())))
+        print(f"{'Outcome':<30} {'Detailed':<25} {'Sliced':<25}")
+        print("-" * 90)
+        for outcome in all_outcomes:
+            d_cnt = det.outcome_breakdown.get(outcome, 0)
+            s_cnt = sli.outcome_breakdown.get(outcome, 0)
+            print(f"{outcome:<30} {d_cnt:<25} {s_cnt:<25}")
 
         # Token savings
         if det.total_prompt_tokens > 0:
@@ -579,6 +705,20 @@ class Text2CypherBenchmark:
             delta = s_acc - d_acc
             print(f"{cat:<25} {total:<10} {d_acc:>17.1f} % {s_acc:>17.1f} % {delta:>+8.1f}%")
 
+        # Per-category failure mode breakdown (sliced results — most informative)
+        if sli.per_category_outcomes:
+            print(f"\n{'─'*90}")
+            print("🔬 FAILURE MODE BY CATEGORY (SLICED)")
+            print("─" * 90)
+            outcome_cols = ["pass", "empty_result", "incorrect_result", "error", "pipeline_error", "routing"]
+            header = f"{'Category':<25}" + "".join(f"{o:<18}" for o in outcome_cols)
+            print(header)
+            print("-" * 90)
+            for cat in sorted(sli.per_category_outcomes.keys()):
+                outcomes = sli.per_category_outcomes[cat]
+                row = f"{cat:<25}" + "".join(f"{outcomes.get(o, 0):<18}" for o in outcome_cols)
+                print(row)
+
         # Recommendation
         print(f"\n{'='*90}")
         print("📋 RECOMMENDATION")
@@ -619,6 +759,19 @@ class Text2CypherBenchmark:
         print(f"{'Queries needing retry':<35} {s.retry_count} / {s.total}")
         print(f"{'Retry rate':<35} {s.retry_rate:.2f} %")
         print(f"{'Avg LLM calls per query':<35} {s.avg_attempts:.2f}")
+        print("-" * 90)
+        print(f"{'First-attempt accuracy':<35} {s.first_attempt_accuracy:.2f} %")
+        print(f"{'Avg count ratio (gen/exp)':<35} {s.avg_count_ratio:.2f}")
+        print(f"{'Schema adherence rate':<35} {s.schema_adherence_rate:.2f} %")
+        print(f"{'Schema violations (total)':<35} {s.schema_violations_total}")
+
+        # Outcome breakdown
+        print(f"\n{'─'*90}")
+        print("🔎 OUTCOME BREAKDOWN")
+        print("─" * 90)
+        for outcome, count in sorted(s.outcome_breakdown.items()):
+            pct = count / s.total * 100 if s.total else 0
+            print(f"  {outcome:<30} {count:<8} ({pct:.1f}%)")
 
         # Per-complexity
         print(f"\n{'─'*90}")
@@ -639,6 +792,18 @@ class Text2CypherBenchmark:
         for cat in sorted(s.category_breakdown.keys()):
             d = s.category_breakdown[cat]
             print(f"{cat:<25} {d['total']:<10} {d['accuracy']:>12.1f} %")
+
+        # Per-category failure modes
+        if s.per_category_outcomes:
+            print(f"\n{'─'*90}")
+            print("🔬 FAILURE MODE BY CATEGORY")
+            print("─" * 90)
+            outcome_cols = ["pass", "empty_result", "incorrect_result", "error", "pipeline_error", "routing"]
+            print(f"{'Category':<25}" + "".join(f"{o:<18}" for o in outcome_cols))
+            print("-" * 90)
+            for cat in sorted(s.per_category_outcomes.keys()):
+                outcomes = s.per_category_outcomes[cat]
+                print(f"{cat:<25}" + "".join(f"{outcomes.get(o, 0):<18}" for o in outcome_cols))
 
     # ── Classifier results summary ────────────────────────────────────────────
     def print_classifier_summary(self):
@@ -806,6 +971,46 @@ class Text2CypherBenchmark:
             print(f"{'='*60}")
 
         return summary
+
+    def _save_json_results(self, results: List[TestResult], json_path: Path) -> None:
+        """Save structured results to JSON for downstream use (e.g. llm_judge.py)."""
+        records = []
+        for r in results:
+            records.append({
+                "question_id": r.question_id,
+                "question": r.question,
+                "complexity": r.complexity,
+                "category": r.category,
+                "schema_mode": r.schema_mode,
+                "schema_name": r.schema_name,
+                "confidence": round(r.confidence, 4),
+                "active_labels": r.active_labels,
+                "outcome": r.outcome,
+                "success": r.success,
+                "attempt_count": r.attempt_count,
+                "needed_retry": r.needed_retry,
+                "generated_cypher": r.generated_cypher,
+                "expected_cypher": r.expected_cypher,
+                "generated_results": r.generated_results[:20],
+                "expected_results": r.expected_results[:20],
+                "gen_record_count": r.gen_record_count,
+                "exp_record_count": r.exp_record_count,
+                "count_ratio": round(r.count_ratio, 3),
+                "schema_adherent": r.schema_adherent,
+                "schema_violations": r.schema_violations,
+                "error_type": r.error_type,
+                "error_message": r.error_message,
+                "generation_time_ms": round(r.generation_time_ms, 1),
+                "execution_time_ms": round(r.execution_time_ms, 1),
+                "prompt_token_estimate": r.prompt_token_estimate,
+                # Placeholder for llm_judge.py output
+                "judge_verdict": None,
+                "judge_reasoning": None,
+            })
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2, ensure_ascii=False)
+        print(f"📄 JSON results saved → {json_path}")
 
     def cleanup(self):
         try:

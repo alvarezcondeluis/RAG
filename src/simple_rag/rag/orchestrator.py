@@ -42,6 +42,9 @@ class PipelineConfig:
     answer_provider_name: str = "groq"
     answer_model: str = "llama-3.3-70b-versatile"
 
+    # Schema version
+    schema_version: str = "v1"   # "v1" = verbose, "v2" = compact (~50% fewer tokens)
+
     # Pipeline toggles
     use_schema_injection: bool = True
     enable_entity_resolution: bool = True
@@ -214,6 +217,7 @@ def _init_pipeline(config: PipelineConfig):
         neo4j_driver=driver,
         cypher_backend=config.cypher_backend,
         cypher_model=config.cypher_model,
+        schema_version=config.schema_version,
         **cypher_kwargs,
     )
 
