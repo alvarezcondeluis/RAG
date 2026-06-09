@@ -7,9 +7,28 @@ CEO/compensation, and insider transactions.
 from typing import Optional, List, Dict, Any
 from datetime import date
 import logging
+import re
 from ..base import Neo4jDatabaseBase
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_person_name(name: str) -> str:
+    """Canonical form for Person node names to prevent near-duplicate nodes.
+
+    Rules applied (in order):
+      1. Strip leading/trailing whitespace.
+      2. Collapse any run of whitespace to a single space.
+      3. Remove a period that immediately follows a single uppercase letter
+         (i.e. middle initials like "D." → "D"), while leaving suffixes like
+         "Jr.", "Sr.", "III" untouched.
+    """
+    if not name:
+        return name
+    name = name.strip()
+    name = re.sub(r'\s+', ' ', name)
+    name = re.sub(r'\b([A-Z])\.\B', r'\1', name)   # "D." → "D" only mid-name
+    return name
 
 
 class CompanyCrudOperations(Neo4jDatabaseBase):
@@ -510,6 +529,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             Created CompensationPackage node or None if failed
         """
         try:
+            ceo_name = _normalize_person_name(ceo_name)
             # Create Person node for CEO
             person_query = """
             MERGE (p:Person {name: $ceo_name})
@@ -634,6 +654,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             Created InsiderTransaction node or None if failed
         """
         try:
+            insider_name = _normalize_person_name(insider_name)
             # Create Person node
             person_query = """
             MERGE (p:Person {name: $insider_name})
@@ -644,9 +665,22 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
             
             self._execute_write(person_query, {"insider_name": insider_name})
             
+            # Synthetic unique ID — compound key that survives re-ingestion without creating duplicates.
+            # Format: TICKER_InsiderName_YYYY-MM-DD_TYPE_SHARES (spaces → underscores).
+            # shares is included to disambiguate multiple transactions of the same type on the same day.
+            if not company_ticker or not insider_name or not transaction_date:
+                logger.warning("Skipping insider transaction: missing required fields "
+                                "(ticker=%s, name=%s, date=%s)", company_ticker, insider_name, transaction_date)
+                return None
+            txn_type_slug  = (transaction_type or "UNKNOWN").replace(" ", "_")
+            shares_slug    = str(int(shares)) if shares is not None else "0"
+            txn_id = (
+                f"{company_ticker}_{insider_name}_{transaction_date}_{txn_type_slug}_{shares_slug}"
+            ).replace(" ", "_")
+
             # Create Document node for Form 4
-            form4_accession = f"{company_ticker}_{insider_name}_{transaction_date}_Form4".replace(" ", "_")
-            
+            form4_accession = f"{txn_id}_Form4"
+
             doc_query = """
             MERGE (doc:Document {accessionNumber: $accession_number})
             ON CREATE SET
@@ -666,28 +700,35 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                 "filing_date": transaction_date
             })
 
-            # Create InsiderTransaction node
+            # Create InsiderTransaction node — one node per unique transaction.
+            # MERGE on the synthetic id so re-running ingestion is idempotent.
+            # All data properties go in SET (none used as merge keys) so null
+            # values never cause a Neo4j MERGE error.
             transaction_query = """
             MATCH (c:Company {ticker: $ticker})
             MATCH (p:Person {name: $insider_name})
             MATCH (doc:Document {accessionNumber: $accession_number})
-            
-            MERGE (c)-[:HAS_INSIDER_TRANSACTION]->(it:InsiderTransaction {transactionDate: $transaction_date, transactionType: $transaction_type})
-            SET it.position = $position,
-                it.shares = $shares,
-                it.price = $price,
-                it.value = $value,
-                it.remainingShares = $remaining_shares
-            
+
+            MERGE (it:InsiderTransaction {id: $txn_id})
+            SET it.transactionDate  = $transaction_date,
+                it.transactionType  = $transaction_type,
+                it.position         = $position,
+                it.shares           = $shares,
+                it.price            = $price,
+                it.value            = $value,
+                it.remainingShares  = $remaining_shares
+
+            MERGE (c)-[:HAS_INSIDER_TRANSACTION]->(it)
             MERGE (it)-[:MADE_BY]->(p)
             MERGE (it)-[:EXTRACTED_FROM]->(doc)
             RETURN it
             """
-            
+
             result = self._execute_write(transaction_query, {
                 "ticker": company_ticker,
                 "insider_name": insider_name,
                 "accession_number": form4_accession,
+                "txn_id": txn_id,
                 "transaction_date": transaction_date,
                 "position": position,
                 "transaction_type": transaction_type,
@@ -716,13 +757,13 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
         report_period_end: Optional[date] = None,
     ) -> int:
         """
-        Batch-create SectionChunk nodes linked to their parent Section node.
+        Batch-create Chunk nodes linked to their parent Section node.
         Architecture:
-            Filing10K → Section (full text) → [:HAS_CHUNK] → SectionChunk (chunk 0)
-                                                           → SectionChunk (chunk 1)
-                                                           → SectionChunk (chunk 2)
+            Filing10K → Section (full text) → [:HAS_CHUNK] → Chunk (chunk 0)
+                                                           → Chunk (chunk 1)
+                                                           → Chunk (chunk 2)
         Each chunk stores text, metadata, and an embedding vector for
-        similarity search via the ``section_chunk_vector_index``.
+        similarity search via the chunkEmbeddingIndex.
 
         Args:
             company_ticker: Company ticker symbol (e.g. "AAPL")
@@ -735,17 +776,17 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                     chunk_index, filing_cik, filing_date, section_name
 
         Returns:
-            Number of SectionChunk nodes created/updated
+            Number of Chunk nodes created/updated
         """
         year = (report_period_end or filing_date).year
 
         try:
-            # Step 1: Always write full_text onto the Section node, regardless of chunks.
+            # Step 1: Always write text onto the Section node, regardless of chunks.
             if full_text:
                 full_text_query = """
                 MATCH (c:Company {ticker: $ticker})-[:REPORTS_IN {year: $year}]->(f:Filing10K)
                       -[:HAS_SECTION]->(sec:Section {sectionType: $section_type})
-                SET sec.fullText = $full_text
+                SET sec.text = $full_text
                 RETURN sec
                 """
                 self._execute_write(full_text_query, {
@@ -777,7 +818,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
                   -[:HAS_SECTION]->(sec:Section {sectionType: $section_type})
             WITH sec
             UNWIND $chunks AS chunk
-            MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk:SectionChunk {id: chunk.id})
+            MERGE (sec)-[:HAS_CHUNK]->(sc:Chunk {id: chunk.id})
             SET sc.text        = chunk.text,
                 sc.title       = chunk.title,
                 sc.chunkType   = chunk.sectionType,
@@ -801,7 +842,7 @@ class CompanyCrudOperations(Neo4jDatabaseBase):
 
             created = result[0]["created"] if result else 0
             if created:
-                print(f"✅ Added {created} SectionChunk nodes for {company_ticker}/{section_name}")
+                print(f"✅ Added {created} Chunk nodes for {company_ticker}/{section_name}")
             return created
 
         except Exception as e:

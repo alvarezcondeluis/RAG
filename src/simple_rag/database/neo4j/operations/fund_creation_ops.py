@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 import logging
 from ..base import Neo4jDatabaseBase
 from src.simple_rag.models.fund import FundData
+from .company_crud_ops import _normalize_person_name
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 "trust": self._normalize_name(fund.registrant),
                 "provider": self._normalize_name(fund.provider),
                 "exchange": self._normalize_name(fund.security_exchange) if fund.security_exchange else "N/A",
-                "share_class": self._normalize_name(fund.share_class) if fund.share_class else "N/A",
+                "share_class": fund.share_class.value if fund.share_class else "N/A",
                 "cik": getattr(fund, 'cik', None),
                 
                 # Profile
@@ -233,7 +234,8 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 if not manager:
                     print(f"⚠️ Skipping manager without name: {manager}")
                     continue
-                
+
+                manager = {**manager, "name": _normalize_person_name(manager["name"])}
                 # Create Person node and link to fund
                 query = """
                 MATCH (f:Fund {ticker: $fund_ticker})
