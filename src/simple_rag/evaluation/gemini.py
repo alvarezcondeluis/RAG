@@ -44,15 +44,24 @@ class GeminiChatModel(BaseChatModel):
                 )
             )
             
-            # Create ChatResult
+            # Extract token usage from response metadata
+            usage = {}
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                um = response.usage_metadata
+                usage = {
+                    'prompt_token_count': getattr(um, 'prompt_token_count', 0) or 0,
+                    'candidates_token_count': getattr(um, 'candidates_token_count', 0) or 0,
+                    'total_token_count': getattr(um, 'total_token_count', 0) or 0,
+                }
+
             message = AIMessage(content=response.text)
             generation = ChatGeneration(message=message)
-            return ChatResult(generations=[generation])
+            return ChatResult(generations=[generation], llm_output=usage)
         except Exception as e:
             # Handle blocked or failed responses
             error_message = AIMessage(content=f"Error generating response: {str(e)}")
             generation = ChatGeneration(message=error_message)
-            return ChatResult(generations=[generation])
+            return ChatResult(generations=[generation], llm_output={})
     
     @property
     def _llm_type(self) -> str:

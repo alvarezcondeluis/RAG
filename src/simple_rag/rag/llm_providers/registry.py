@@ -138,7 +138,10 @@ class ProviderRegistry:
 
         if not models:
             print("  \033[91mNo models available from this provider.\033[0m")
-            raise RuntimeError(f"No models available from {selected['display']}")
+            manual = input("  Enter model name manually (or press Enter to go back): ").strip()
+            if not manual:
+                raise RuntimeError(f"No models available from {selected['display']}")
+            return provider, manual
 
         # Show up to 30 models
         display_models = models[:30]

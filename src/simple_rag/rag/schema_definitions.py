@@ -14,7 +14,7 @@ DETAILED_SCHEMA = """
 (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund)
 # === FUND NODE PROPERTIES ===
 (:Fund {
-    ticker,              # Symbol like 'VTI' (use for matching symbols)
+    ticker,              # Symbol like 'AAPL' (use for matching symbols)
     name,                
     cik,                 # Central Index Key (SEC identifier)
     securityExchange     # Exchange like 'NASDAQ', 'NYSE'
@@ -24,7 +24,7 @@ DETAILED_SCHEMA = """
 # - Trust.name -> use CALL db.index.fulltext.queryNodes('trustNameIndex', 'search_term')
 # - Fund.name -> use CALL db.index.fulltext.queryNodes('fundNameIndex', 'search_term')
 # - Person.name -> use CALL db.index.fulltext.queryNodes('personNameIndex', 'search_term')
-# For exact ticker matching, use {ticker: 'VTI'} (no index needed)
+# For exact ticker matching, use {ticker: 'TICKER'} (no index needed)
 
 # === FUND RELATIONSHIPS ===
 # Share Classes
@@ -44,10 +44,10 @@ DETAILED_SCHEMA = """
 # ⚠️ WARNING: Risk and Strategy sections have text: NULL on the Section node.
 # Full content lives ONLY in child :Chunk nodes. NEVER return s.text for these — always use HAS_CHUNK.
 # CORRECT PATTERN (Fund Profile Risk):
-#   MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Risk)-[:HAS_CHUNK]->(chunk:Chunk)
+#   MATCH (f:Fund {ticker: $ticker})-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Risk)-[:HAS_CHUNK]->(chunk:Chunk)
 #   RETURN s.title AS sectionTitle, chunk.text AS chunkContent ORDER BY chunk.id ASC
 # CORRECT PATTERN (Fund Profile Strategy):
-#   MATCH (f:Fund {ticker: 'VTI'})-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Strategy)-[:HAS_CHUNK]->(chunk:Chunk)
+#   MATCH (f:Fund {ticker: $ticker})-[:DEFINED_BY]->(p:Profile)-[:HAS_SECTION]->(s:Section:Strategy)-[:HAS_CHUNK]->(chunk:Chunk)
 #   RETURN s.title AS sectionTitle, chunk.text AS chunkContent ORDER BY chunk.id ASC
 (:Profile)-[:HAS_SECTION]->(:Section:Risk {text: null, title})       # text is NULL — use HAS_CHUNK
 (:Profile)-[:HAS_SECTION]->(:Section:Strategy {text: null, title})   # text is NULL — use HAS_CHUNK
@@ -65,7 +65,7 @@ DETAILED_SCHEMA = """
 
 # Average Returns (versioned by year)
 (:Fund)-[:HAS_AVERAGE_RETURNS {year}]->(:AverageReturns {return1y, return5y, return10y, returnInception})
-
+# Filter by the ones that are not null when asked for specific return
 # Allocations (by year)
 (:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, year}]->(:Sector {name})
 (:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
@@ -174,15 +174,13 @@ DETAILED_SCHEMA = """
 #     → :Section:Objective directly (embedding lives on the section, no chunks).
 #     Traverse <-[:HAS_SECTION]-(:Profile) <-[:DEFINED_BY]-(:Fund).
 
-# ENTITY FILTERS IN VECTOR SEARCH (critical):
-#   Add {ticker: 'XYZ'} or WHERE f.ticker = 'XYZ' after a vector YIELD ONLY IF:
-#     (a) the Entity Context shows score ~100 for that entity (exact match), AND
-#     (b) the ticker or entity name appears explicitly in the question text.
-#   If score and retrieved name matches the fund of the query then use that ticker to filter.
-#   NEVER use CONTAINS on ticker/name properties after a vector YIELD.
-#   BAD: `YIELD chunk ... (f:Fund) WHERE f.name CONTAINS 'Total Market'`
-#   BAD: `(f:Fund {ticker: 'EFAV'})` when score=92 and "EFAV" not in the question.
-#   GOOD: `(f:Fund {ticker: 'VTI'})` when score=100 and "VTI" is in the question.
+# ENTITY FILTERS (critical — applies to ALL query types, not just vector search):
+#   Add a ticker or name filter ONLY IF the ticker/name appears in the Entity Context block above.
+#   If Entity Context is empty → NEVER add any ticker or name filter. Search globally.
+#   NEVER infer a ticker from the schema examples or from your training data.
+#   BAD: `WHERE f.name CONTAINS 'Total Market'` (name fragment, not from Entity Context)
+#   BAD: `(f:Fund {ticker: 'EFAV'})` when Entity Context is empty or doesn't mention EFAV
+#   GOOD: `(f:Fund {ticker: 'XYZ'})` only when Entity Context explicitly contains ticker XYZ
 
 # === IMPORTANT NOTES ===
 # 1. netAssets, expenseRatio, advisoryFees are on FinancialHighlight, NOT on Fund
@@ -199,7 +197,7 @@ DETAILED_SCHEMA_V2 = """
 # FUND MANAGEMENT
 # ═══════════════════════════════════════════════════════════════
 (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund {
-    ticker,           # exact symbol — use {ticker: 'VTI'} directly, no index needed
+    ticker,           # exact symbol — use {ticker: 'TICKER'} directly, no index needed
     name,             # full name   — use fundNameIndex for fuzzy/partial search
     cik,
     securityExchange  # 'NASDAQ', 'NYSE', …
@@ -214,6 +212,7 @@ DETAILED_SCHEMA_V2 = """
 (:Fund)-[:HAS_TABLE {year}]->(:Table {content, title})
 (:Fund)-[:MANAGED_BY {year}]->(:Person {name})
 (:Fund)-[r:HAS_AVERAGE_RETURNS {year}]->(:AverageReturns {return1y, return5y, return10y, returnInception})
+# ⚠️ returnInception / return1y / return5y / return10y can be NULL — ALWAYS add WHERE ar.returnXxx IS NOT NULL when filtering or ordering by these fields
 (:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, year}]->(:Sector {name})
 (:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
 (:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId, count})  # count = total number of holdings
@@ -287,7 +286,7 @@ DETAILED_SCHEMA_V2 = """
 #         <-[r:REPORTS_IN]-(c:Company {ticker: 'AAPL'})
 #   RETURN chunk.text AS text, r.year AS year, score ORDER BY score DESC LIMIT 5
 #
-# Entity filter after YIELD: add ONLY IF Entity Context score ≈ 100 AND ticker explicit in question.
+# Entity filter: add ONLY IF the ticker appears in the Entity Context block. If Entity Context is empty → no filter.
 
 # ═══════════════════════════════════════════════════════════════
 # CRITICAL RULES

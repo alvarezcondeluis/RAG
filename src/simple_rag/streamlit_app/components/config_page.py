@@ -8,6 +8,7 @@ from simple_rag.rag.orchestrator import PipelineConfig, TEXT2CYPHER_BACKENDS
 from simple_rag.streamlit_app.pipeline_bridge import (
     get_available_providers,
     list_models_for_provider,
+    list_openai_compatible_models,
     init_pipeline,
 )
 
@@ -78,12 +79,22 @@ def render_config_page() -> None:
                     help="Could not fetch models. Enter model name manually.",
                 )
         elif cypher_backend == "openai":
-            cypher_model = st.text_input(
-                "Model",
-                value="qwen2.5-coder",
-                key="_cypher_model_openai",
-                help="Enter model name for OpenAI-compatible server",
-            )
+            # Defer model fetch until host/port are known — use cached value if available
+            _cached_openai_models = st.session_state.get("_openai_models_cache", [])
+            if _cached_openai_models:
+                cypher_model = st.selectbox(
+                    "Text2Cypher Model",
+                    options=_cached_openai_models,
+                    index=0,
+                    key="_cypher_model_openai_select",
+                )
+            else:
+                cypher_model = st.text_input(
+                    "Text2Cypher Model",
+                    value="qwen2.5-coder",
+                    key="_cypher_model_openai",
+                    help="Fetch models by clicking 'Load Models' below after entering host/port.",
+                )
         else:
             cypher_model = st.text_input("Model", value="", key="_cypher_model_fallback")
 
@@ -101,13 +112,14 @@ def render_config_page() -> None:
         st.error("No LLM providers available. Check your API keys in `.env`.")
         return
 
-    # Show all providers with status indicators
+    # Build labels — registry providers + local OpenAI option
     provider_labels = {}
     for p in providers:
         dot = {"ok": "✅", "missing": "❌", "n/a": ""}.get(p["key_status"], "")
         provider_labels[p["name"]] = f"{p['display']} {dot}"
+    provider_labels["openai_local"] = "OpenAI Local (LM Studio) ✅"
 
-    available_names = [p["name"] for p in available]
+    available_names = [p["name"] for p in available] + ["openai_local"]
 
     col1, col2 = st.columns(2)
 
@@ -121,36 +133,72 @@ def render_config_page() -> None:
         )
 
     with col2:
-        answer_models = _fetch_models(answer_provider_name, "_answer_models_cache")
-        if answer_models:
-            answer_model_ids = [m.id for m in answer_models[:30]]
-            answer_model = st.selectbox(
-                "Model",
-                options=answer_model_ids,
-                index=0,
-                key="_answer_model_select",
-            )
+        if answer_provider_name == "openai_local":
+            _cached_openai_ans_models = st.session_state.get("_openai_models_cache", [])
+            if _cached_openai_ans_models:
+                answer_model = st.selectbox(
+                    "Model",
+                    options=_cached_openai_ans_models,
+                    index=0,
+                    key="_answer_model_openai_select",
+                )
+            else:
+                answer_model = st.text_input(
+                    "Model",
+                    value="",
+                    key="_answer_model_openai_input",
+                    help="Click 'Load Models' below after entering host/port.",
+                )
         else:
-            answer_model = st.text_input(
-                "Model",
-                value="",
-                key="_answer_model_input",
-                help="Could not fetch models. Enter model name manually.",
-            )
+            answer_models = _fetch_models(answer_provider_name, "_answer_models_cache")
+            if answer_models:
+                answer_model_ids = [m.id for m in answer_models[:30]]
+                answer_model = st.selectbox(
+                    "Model",
+                    options=answer_model_ids,
+                    index=0,
+                    key="_answer_model_select",
+                )
+            else:
+                answer_model = st.text_input(
+                    "Model",
+                    value="",
+                    key="_answer_model_input",
+                    help="Could not fetch models. Enter model name manually.",
+                )
 
-    # ── OpenAI-compatible server settings (shown only for openai backend) ────
+    # ── OpenAI-compatible server settings (shown when either backend uses local) ──
     openai_host = "localhost"
     openai_port = 1234
-    if cypher_backend == "openai":
+    if cypher_backend == "openai" or answer_provider_name == "openai_local":
         st.markdown(
-            '<div class="config-section-title">OpenAI-Compatible Server</div>',
+            '<div class="config-section-title">OpenAI-Compatible Server (LM Studio)</div>',
             unsafe_allow_html=True,
         )
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns([3, 2, 2])
         with col1:
             openai_host = st.text_input("Host", value="localhost", key="_openai_host")
         with col2:
             openai_port = st.text_input("Port", value="1234", key="_openai_port")
+        with col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Load Models", key="_load_openai_models"):
+                try:
+                    fetched = list_openai_compatible_models(
+                        openai_host, int(openai_port)
+                    )
+                    if fetched:
+                        st.session_state["_openai_models_cache"] = fetched
+                        st.success(f"{len(fetched)} model(s) loaded")
+                        st.rerun()
+                    else:
+                        st.warning("No models found — is LM Studio running?")
+                except Exception as e:
+                    st.error(f"Failed: {e}")
+
+    # When answer gen uses the local server, wire the model back into main_llm_model_openai
+    # so QueryHandler's fallback path also picks the right model
+    main_llm_model_openai = answer_model if answer_provider_name == "openai_local" else None
 
     # ── Pipeline Options ─────────────────────────────────────────────────────
     st.markdown(
@@ -195,7 +243,8 @@ def render_config_page() -> None:
 
     # ── Summary ──────────────────────────────────────────────────────────────
 
-    server_info = f"`{openai_host}:{openai_port}`" if cypher_backend == "openai" else "—"
+    _show_server = cypher_backend == "openai" or answer_provider_name == "openai_local"
+    server_info = f"`{openai_host}:{openai_port}`" if _show_server else "—"
     summary_md = f"""
 | Setting | Value |
 |---|---|
@@ -230,6 +279,7 @@ def render_config_page() -> None:
             retry_module=retry_module,
             retry_strategy=retry_strategy,
             embed_vector_queries=embed_vector_queries,
+            main_llm_model_openai=main_llm_model_openai,
         )
 
         with st.spinner("Initializing pipeline... Connecting to Neo4j and loading models."):

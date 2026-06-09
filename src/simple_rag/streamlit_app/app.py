@@ -142,9 +142,37 @@ def handle_real_query(query: str) -> None:
 
         if verbose and result.cypher:
             st.code(result.cypher, language="cypher")
+        if verbose and result.answer_messages:
+            with st.expander("Answer prompt (system + user)", expanded=False):
+                for msg in result.answer_messages:
+                    st.markdown(f"**`{msg['role'].upper()}`**")
+                    st.text(msg["content"])
 
         if result.error:
-            if result.error.startswith("NOT_RELATED:"):
+            if result.error.startswith("WRITE_BLOCKED:"):
+                op = result.error[len("WRITE_BLOCKED:"):].strip()
+                status.update(label="Security violation blocked", state="error")
+                st.markdown(
+                    f"""
+                    <div style="border:2px solid #ff4b4b;border-radius:8px;padding:1rem 1.25rem;
+                                background:#2a0a0a;color:#ff6b6b;font-family:monospace;">
+                        <div style="font-size:1.2rem;font-weight:700;margin-bottom:0.5rem;">
+                            🚨 DESTRUCTIVE OPERATION BLOCKED — <code>{op}</code>
+                        </div>
+                        <div style="color:#ffaaaa;line-height:1.6;">
+                            This system operates in <strong>READ-ONLY</strong> mode.<br>
+                            Your request generated a <strong>{op}</strong> operation against the database,
+                            which has been permanently blocked.<br><br>
+                            Write operations (<code>CREATE</code>, <code>DELETE</code>, <code>MERGE</code>,
+                            <code>SET</code>, <code>REMOVE</code>, <code>DROP</code>) are never permitted.<br>
+                            This incident has been logged.
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                user_message = f"Destructive operation ({op}) blocked. This system is read-only."
+            elif result.error.startswith("NOT_RELATED:"):
                 status.update(label="Out of scope", state="error")
                 user_message = result.error[len("NOT_RELATED:"):].strip()
                 st.markdown(
@@ -154,9 +182,10 @@ def handle_real_query(query: str) -> None:
             else:
                 status.update(label="No results", state="error")
                 st.warning(result.error)
+                user_message = result.error
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": result.error[len("NOT_RELATED:"):].strip() if result.error.startswith("NOT_RELATED:") else result.error,
+                "content": user_message,
             })
             return
 

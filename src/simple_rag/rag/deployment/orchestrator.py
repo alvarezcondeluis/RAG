@@ -3,7 +3,7 @@ Deployment orchestrator — runs the full boot sequence and blocks until shutdow
 
 Boot order (strict dependency chain):
     [1] Neo4j         → graph database
-    [2] LM Studio     → text2cypher LLM backend
+    [2] llama.cpp     → text2cypher LLM backend
     [3] Streamlit     → frontend (pipeline is initialised inside the app)
 
 Shutdown (Ctrl+C / SIGTERM):
@@ -21,7 +21,7 @@ from typing import Optional
 
 from simple_rag.rag.deployment.config import DeploymentConfig
 from simple_rag.rag.deployment.health import DeploymentReporter
-from simple_rag.rag.deployment.services import neo4j_service, lm_studio_service, streamlit_service
+from simple_rag.rag.deployment.services import neo4j_service, llama_cpp_service, streamlit_service
 
 
 def deploy(config: DeploymentConfig) -> None:
@@ -47,13 +47,13 @@ def deploy(config: DeploymentConfig) -> None:
         reporter.print_summary(config.streamlit.port)
         sys.exit(1)
 
-    # ── 2. LM Studio ──────────────────────────────────────────────────────────
-    lm_status = reporter.register("LM Studio")
+    # ── 2. llama.cpp ──────────────────────────────────────────────────────────
+    lm_status = reporter.register("llama.cpp")
     reporter.update(lm_status)
     try:
-        lm_studio_service.ensure_ready(config.lm_studio, config.timeouts, lm_status)
+        llama_cpp_service.ensure_ready(config.llama_cpp, config.timeouts, lm_status)
         reporter.update(lm_status)
-    except lm_studio_service.LMStudioServiceError as exc:
+    except llama_cpp_service.LlamaCppServiceError as exc:
         lm_status.mark_failed(str(exc).splitlines()[0])
         reporter.update(lm_status)
         _shutdown(streamlit_proc, neo4j_was_started, config)

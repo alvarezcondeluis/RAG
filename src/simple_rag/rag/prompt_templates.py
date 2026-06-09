@@ -48,6 +48,10 @@ CRITICAL RULES:
 24. VECTOR PRE-FILTERING: Do NOT pre-filter with a separate MATCH before the CALL. Put all entity filters in the MATCH that comes AFTER the YIELD.
     BAD: MATCH (c:Company {{ticker:'GOOG'}})-[:REPORTS_IN]->(f:Filing10K) WITH c,f LIMIT 1 CALL db.index.vector...
     GOOD: CALL db.index.vector... YIELD node AS chunk, score MATCH (chunk)<-[:HAS_CHUNK]-...<-[r:REPORTS_IN]-(c:Company {{ticker:'GOOG'}})
+25. DATE LITERALS: Neo4j stores dates as Date objects, NOT strings. When filtering by a specific date value, ALWAYS wrap the literal with date('YYYY-MM-DD'). Never compare a date property to a plain string.
+    BAD:  WHERE it.transactionDate = '2025-10-29'
+    GOOD: WHERE it.transactionDate = date('2025-10-29')
+    This applies to ALL date properties: transactionDate, filingDate, reportingDate, date, etc.
 
 Examples:
 {examples}
@@ -60,12 +64,6 @@ CYPHER_GENERATION_TEMPLATE2 = """You are a Neo4j Cypher expert. Convert the ques
 
 Schema:
 {schema}
-
-
-Examples:
-{examples}
-
-{entity_context}
 
 Rules:
 1. Output ONLY the Cypher query — no explanations, no markdown
@@ -80,6 +78,12 @@ Rules:
 10. If the entity extractor has identified the entity with a score similar to 100 do not use the index, use a ticker or name search.
 11. For queries with numeric filtering/ordering (highest, lowest, greatest, etc.), always exclude NULL values with WHERE clauses like `WHERE expenseRatio IS NOT NULL` or `WHERE expenseRatio > 0`.
 12. ENTITY FILTERS: NEVER add ticker or name filters unless the entity is explicitly named in the question or present in Entity Context. For general/global questions ("which company...", "which entity...", "find companies...") without a specific name → omit all entity filters (ticker, name) and search globally across all nodes.
+13. When asked about since inception or this year never filter by the year property just print the ordered results by the year
+
+{entity_context}
+
+Examples:
+{examples}
 
 Question: {question}
 

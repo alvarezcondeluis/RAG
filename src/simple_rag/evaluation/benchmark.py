@@ -212,6 +212,7 @@ class Text2CypherBenchmark:
         use_entity_resolver: bool = True,
         schema_version: str = "v1",
         openrouter_fallback_model: Optional[str] = None,
+        main_llm_model_openai: Optional[str] = None,
         use_cypher_validator: bool = True,
     ):
         self.test_path = Path(test_set_path)
@@ -233,6 +234,8 @@ class Text2CypherBenchmark:
         extra_kwargs["use_few_shot"] = use_few_shot
         if openrouter_fallback_model:
             extra_kwargs["openrouter_fallback_model"] = openrouter_fallback_model
+        if main_llm_model_openai:
+            extra_kwargs["main_llm_model_openai"] = main_llm_model_openai
         extra_kwargs["use_cypher_validator"] = use_cypher_validator
 
         # Initialize the QueryHandler (Classification → Schema Slice → Cypher)

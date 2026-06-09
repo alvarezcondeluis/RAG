@@ -53,6 +53,7 @@ class PipelineQueryResult:
     charts: list = field(default_factory=list)
     tabular: list = field(default_factory=list)
     error: Optional[str] = None
+    answer_messages: Optional[list] = None
 
 
 # ── Registry singleton ───────────────────────────────────────────────────────
@@ -89,6 +90,12 @@ def get_text2cypher_backends() -> list[tuple[str, str, str]]:
     return list(TEXT2CYPHER_BACKENDS)
 
 
+def list_openai_compatible_models(host: str = "localhost", port: int = 1234) -> list[str]:
+    """Fetch model IDs from an OpenAI-compatible server (e.g. LM Studio)."""
+    from simple_rag.rag.orchestrator import fetch_openai_compatible_models
+    return fetch_openai_compatible_models(host, port)
+
+
 # ── Pipeline lifecycle ───────────────────────────────────────────────────────
 
 def init_pipeline(config: PipelineConfig) -> PipelineState:
@@ -117,6 +124,8 @@ def init_pipeline(config: PipelineConfig) -> PipelineState:
     if config.cypher_backend == "openai":
         cypher_kwargs["openai_compatible_host"] = config.openai_compatible_host
         cypher_kwargs["openai_compatible_port"] = config.openai_compatible_port
+    if config.main_llm_model_openai:
+        cypher_kwargs["main_llm_model_openai"] = config.main_llm_model_openai
 
     handler = QueryHandler(
         neo4j_driver=driver,
@@ -128,9 +137,17 @@ def init_pipeline(config: PipelineConfig) -> PipelineState:
 
     # Answer LLM provider
     registry = _get_registry()
-    answer_provider = registry.get_provider(
-        config.answer_provider_name, model_id=config.answer_model
-    )
+    if config.answer_provider_name == "openai_local":
+        from simple_rag.rag.llm_providers.openrouter_provider import OpenRouterProvider
+        answer_provider = OpenRouterProvider(
+            base_url=f"http://{config.openai_compatible_host}:{config.openai_compatible_port}/v1",
+            api_key="local",
+            model_id=config.answer_model,
+        )
+    else:
+        answer_provider = registry.get_provider(
+            config.answer_provider_name, model_id=config.answer_model
+        )
 
     return PipelineState(
         config=config,
@@ -278,4 +295,5 @@ def process_query(
         token_stream=token_stream,
         charts=charts,
         tabular=tabular,
+        answer_messages=messages,
     )

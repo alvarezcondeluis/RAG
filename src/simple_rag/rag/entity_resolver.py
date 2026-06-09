@@ -257,10 +257,16 @@ class EntityResolver:
         # Step 1.5: Pre-flight exact ticker detection
         # Run BEFORE fuzzy matching so exact tickers always get score 100.0 and skip
         # the noisy fund fuzzy search (which scores ~87 for any fund containing "fund").
+        # Only consider words that are ALREADY all-caps in the original query: tickers
+        # like "VTI" or "AAPL" are written in caps by users; lowercase words like "made"
+        # must never be uppercased and mistaken for the MADE ticker.
         import re as _re
-        _query_upper_words = set(
-            _re.sub(r'[^A-Z0-9]', '', _re.sub(r"'S$", '', w)) for w in query.upper().split()
-        )
+        _query_upper_words: set = set()
+        for _w in query.split():
+            _w_stripped = _re.sub(r"'[Ss]$", "", _w)          # remove possessive
+            _w_clean = _re.sub(r"[^A-Za-z0-9]", "", _w_stripped)  # strip punctuation
+            if _w_clean and _w_clean == _w_clean.upper() and len(_w_clean) >= 2:
+                _query_upper_words.add(_w_clean)
         _query_upper_words.discard("")
 
         found_exact_tickers: set = set()

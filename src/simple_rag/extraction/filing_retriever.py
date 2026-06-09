@@ -27,6 +27,7 @@ import logging
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -1269,3 +1270,53 @@ class FilingRetriever:
             max_workers=max_workers,
         )
         return parser.process_companies(tickers, max_form4_date=max_form4_date)
+
+    # ------------------------------------------------------------------
+    # Raw download (no parsing)
+    # ------------------------------------------------------------------
+
+    def download_filing_text(
+        self,
+        ticker: str,
+        output_path: str,
+        *,
+        form: str = "10-K",
+    ) -> str:
+        """Download the latest filing of a given form type and save raw text.
+
+        No parsing is performed — the document is written exactly as received
+        from EDGAR.  Useful for building evaluation datasets or baseline
+        comparisons without any structured extraction overhead.
+
+        Args:
+            ticker:      Ticker symbol (e.g. ``"AAPL"``) or CIK number.
+            output_path: Destination file path. Parent directories are created
+                         automatically if they do not exist.
+            form:        SEC form type (default ``"10-K"``; also ``"N-CSR"``,
+                         ``"497K"``, ``"NPORT-P"``, etc.).
+
+        Returns:
+            The raw text string that was written to *output_path*.
+
+        Raises:
+            ValueError: If no filings of the requested form are found.
+        """
+        company = Company(ticker)
+        filings = company.get_filings(form=form)
+
+        if not filings:
+            raise ValueError(f"No {form} filings found for {ticker!r}")
+
+        latest = filings.latest()
+        raw_text = latest.text() if hasattr(latest, "text") else str(latest.obj())
+
+        dest = Path(output_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(raw_text, encoding="utf-8")
+
+        logger.info(
+            "[%s] Saved %s filing (%s) → %s  (%d chars)",
+            ticker, form, getattr(latest, "filing_date", "?"), output_path, len(raw_text),
+        )
+        print(f"Saved {form} for {ticker} ({getattr(latest, 'filing_date', '?')}) → {output_path}  [{len(raw_text):,} chars]")
+        return raw_text

@@ -91,12 +91,12 @@ Rules:
 - CORRECT if numeric values match within reasonable precision (e.g. 0.03 vs 0.030)
 - CORRECT if the generated result returns more records than the reference (e.g. extra chunks, extra companies) as long as the relevant answer is present within those records
 - CORRECT if the generated result is a better or more complete answer than the reference
-- INCORRECT if the generated result is empty and the question has a meaningful answer
+- INCORRECT if the generated result is empty and the expected result is not.
 - INCORRECT if the generated result contains only wrong values (wrong fund, wrong company, wrong metric) and the correct entity's data is absent
 - INCORRECT if the generated result is completely off-topic and cannot answer the question at all
 
 Answer on the first line with exactly YES (correct) or NO (incorrect).
-Then write one sentence explaining your reasoning.
+You MUST write exactly one sentence of justification on the second line — this is required and must not be omitted.
 """
 
 
@@ -189,108 +189,156 @@ def _build_txt_report(
     yes_count: int,
     no_count: int,
     errors: int,
-    false_negatives: int,
-    false_positives: int,
     rule_accuracy: float,
     judge_accuracy: float,
     provider: str,
     model: str,
     source_file: str,
     auto_yes_count: int = 0,
+    auto_no_count: int = 0,
     null_expected_count: int = 0,
 ) -> str:
-    SEP  = "=" * 80
-    SEP2 = "-" * 80
+    SEP   = "=" * 80
+    SEP2  = "-" * 80
+    SEP3  = "·" * 80
     lines: List[str] = []
 
-    lines += [
-        SEP,
-        "LLM-AS-JUDGE REPORT",
-        SEP,
-        f"Source file       : {source_file}",
-        f"Provider          : {provider.upper()} / {model}",
-        f"Entries judged    : {yes_count + no_count}  (errors: {errors})",
-        f"Auto-passed       : {auto_yes_count}  (identical results — no LLM call)",
-        f"Skipped           : {null_expected_count}  (null expected results)",
-        "",
-    ]
-
-    # ── Per-question entries ──────────────────────────────────────────────────
-    for entry in sorted(results_by_id.values(), key=lambda r: r["question_id"]):
-        qid     = entry["question_id"]
-        verdict = entry.get("judge_verdict")
-        if verdict is None:
-            continue  # not judged (routing / pipeline_error / skipped)
-
-        rule_ok  = entry.get("success", False)
-        outcome_tag = entry.get("outcome", "")
-
-        flip = ""
-        if verdict == "YES" and not rule_ok:
-            flip = "  [FALSE NEGATIVE — rule failed, judge passed]"
-        elif verdict == "NO" and rule_ok:
-            flip = "  [FALSE POSITIVE — rule passed, judge failed]"
-
-        lines += [
-            SEP,
-            f"Q{qid}  |  Judge: {verdict}{flip}  |  Rule-based: {'PASS' if rule_ok else 'FAIL (' + outcome_tag + ')'}",
-            SEP2,
-        ]
-
-        # Question
-        lines += ["QUESTION:", f"  {entry.get('question', '')}", ""]
-
-        # Cypher
-        exp_cypher = _cap(entry.get("expected_cypher") or "(none)", _CYPHER_CAP)
-        gen_cypher = _cap(entry.get("generated_cypher") or "(none)", _CYPHER_CAP)
-        lines += [
-            "EXPECTED CYPHER:",
-            f"  {exp_cypher}",
-            "",
-            "GENERATED CYPHER:",
-            f"  {gen_cypher}",
-            "",
-        ]
-
-        # Results
-        exp_records = entry.get("expected_results", [])
-        gen_records = entry.get("generated_results", [])
-        lines += [
-            f"EXPECTED RESULTS  ({len(exp_records)} record(s)):",
-            _format_records(exp_records),
-            "",
-            f"GENERATED RESULTS  ({len(gen_records)} record(s)):",
-            _format_records(gen_records),
-            "",
-        ]
-
-        # Judge verdict + reasoning
-        reasoning = entry.get("judge_reasoning", "")
-        lines += [
-            f"JUDGE VERDICT: {verdict}",
-            f"REASONING: {reasoning}",
-            "",
-        ]
-
-    # ── Summary ───────────────────────────────────────────────────────────────
+    # ── Cover ─────────────────────────────────────────────────────────────────
     judged = yes_count + no_count
     delta  = judge_accuracy - rule_accuracy
 
     lines += [
         SEP,
-        "JUDGE SUMMARY",
+        "  LLM-AS-JUDGE REPORT",
         SEP,
-        f"  Entries judged          : {judged}",
-        f"    Judge YES             : {yes_count}  ({yes_count/judged*100:.1f}%)" if judged else "    Judge YES             : 0",
-        f"    Judge NO              : {no_count}  ({no_count/judged*100:.1f}%)"  if judged else "    Judge NO              : 0",
-        f"    Errors                : {errors}",
-        SEP2,
-        f"  False negatives (rule FAIL, judge YES) : {false_negatives}",
-        f"  False positives (rule PASS, judge NO)  : {false_positives}",
-        SEP2,
-        f"  Rule-based accuracy     : {rule_accuracy:.2f}%",
-        f"  Judge-corrected accuracy: {judge_accuracy:.2f}%",
-        f"  Delta                   : {delta:+.2f}%  ({'rule undercounts' if delta > 0 else 'rule overcounts' if delta < 0 else 'identical'})",
+        f"  Source file       : {source_file}",
+        f"  Provider          : {provider.upper()} / {model}",
+        f"  Entries judged    : {judged}  (errors: {errors})",
+        f"  Auto-passed       : {auto_yes_count}  (identical results — no LLM call)",
+        f"  Auto-failed       : {auto_no_count}  (empty generated, non-empty expected — no LLM call)",
+        f"  Skipped           : {null_expected_count}  (null expected results)",
+        SEP,
+        "",
+    ]
+
+    # ── Bucket entries ────────────────────────────────────────────────────────
+    judged_entries = [
+        e for e in results_by_id.values()
+        if e.get("judge_verdict") is not None
+    ]
+
+    correct        = sorted([e for e in judged_entries if e.get("judge_verdict") == "YES" and     e.get("success", False)], key=lambda e: e["question_id"])
+    false_negs     = sorted([e for e in judged_entries if e.get("judge_verdict") == "YES" and not e.get("success", False)], key=lambda e: e["question_id"])
+    false_poss     = sorted([e for e in judged_entries if e.get("judge_verdict") == "NO"  and     e.get("success", False)], key=lambda e: e["question_id"])
+    true_negs      = sorted([e for e in judged_entries if e.get("judge_verdict") == "NO"  and not e.get("success", False)], key=lambda e: e["question_id"])
+    error_entries  = sorted([e for e in judged_entries if e.get("judge_verdict") == "ERROR"],      key=lambda e: e["question_id"])
+
+    def _entry_block(entry: Dict, icon: str) -> List[str]:
+        qid         = entry["question_id"]
+        verdict     = entry.get("judge_verdict", "")
+        rule_ok     = entry.get("success", False)
+        outcome_tag = entry.get("outcome", "")
+        rule_label  = "PASS" if rule_ok else f"FAIL ({outcome_tag})"
+        reasoning   = entry.get("judge_reasoning", "")
+
+        exp_cypher = _cap(entry.get("expected_cypher") or "(none)", _CYPHER_CAP)
+        gen_cypher = _cap(entry.get("generated_cypher") or "(none)", _CYPHER_CAP)
+        exp_records = entry.get("expected_results", [])
+        gen_records = entry.get("generated_results", [])
+
+        block = [
+            SEP2,
+            f"  {icon} Q{qid:<4}  |  Judge: {verdict}  |  Rule-based: {rule_label}",
+            SEP3,
+            f"  QUESTION : {entry.get('question', '')}",
+            "",
+            f"  EXPECTED CYPHER:",
+            f"    {exp_cypher}",
+            "",
+            f"  GENERATED CYPHER:",
+            f"    {gen_cypher}",
+            "",
+            f"  EXPECTED RESULTS  ({len(exp_records)} record(s)):",
+        ]
+        for line in _format_records(exp_records).splitlines():
+            block.append(f"    {line}")
+        block += [
+            "",
+            f"  GENERATED RESULTS  ({len(gen_records)} record(s)):",
+        ]
+        for line in _format_records(gen_records).splitlines():
+            block.append(f"    {line}")
+        block += [
+            "",
+            f"  REASONING : {reasoning}",
+            "",
+        ]
+        return block
+
+    def _section_header(title: str, count: int, icon: str) -> List[str]:
+        return [
+            SEP,
+            f"  {icon}  {title}  ({count} entr{'y' if count == 1 else 'ies'})",
+            SEP,
+            "",
+        ]
+
+    # ── Section 1 : Correct (TP) ──────────────────────────────────────────────
+    lines += _section_header("CORRECT  —  rule PASS & judge YES", len(correct), "✅")
+    if correct:
+        for e in correct:
+            lines += _entry_block(e, "✅")
+    else:
+        lines += ["  (none)", ""]
+
+    # ── Section 2 : False Negatives ───────────────────────────────────────────
+    lines += _section_header("FALSE NEGATIVES  —  rule FAIL, judge YES", len(false_negs), "⚠️ ")
+    if false_negs:
+        for e in false_negs:
+            lines += _entry_block(e, "⚠️ ")
+    else:
+        lines += ["  (none)", ""]
+
+    # ── Section 3 : False Positives ───────────────────────────────────────────
+    lines += _section_header("FALSE POSITIVES  —  rule PASS, judge NO", len(false_poss), "🔶")
+    if false_poss:
+        for e in false_poss:
+            lines += _entry_block(e, "🔶")
+    else:
+        lines += ["  (none)", ""]
+
+    # ── Section 4 : True Negatives ────────────────────────────────────────────
+    lines += _section_header("TRUE NEGATIVES  —  rule FAIL & judge NO", len(true_negs), "❌")
+    if true_negs:
+        for e in true_negs:
+            lines += _entry_block(e, "❌")
+    else:
+        lines += ["  (none)", ""]
+
+    # ── Section 5 : Errors ────────────────────────────────────────────────────
+    if error_entries:
+        lines += _section_header("ERRORS  —  judge call failed", len(error_entries), "💥")
+        for e in error_entries:
+            lines += _entry_block(e, "💥")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    lines += [
+        SEP,
+        "  SUMMARY",
+        SEP,
+        f"  {'Category':<45}  {'Count':>6}  {'%':>7}",
+        f"  {SEP2}",
+        f"  {'✅  Correct       (rule PASS, judge YES)':<45}  {len(correct):>6}  {len(correct)/judged*100:>6.1f}%" if judged else f"  {'✅  Correct':<45}  {'0':>6}",
+        f"  {'⚠️   False negatives (rule FAIL, judge YES)':<45}  {len(false_negs):>6}  {len(false_negs)/judged*100:>6.1f}%" if judged else f"  {'⚠️   False negatives':<45}  {'0':>6}",
+        f"  {'🔶  False positives (rule PASS, judge NO)':<45}  {len(false_poss):>6}  {len(false_poss)/judged*100:>6.1f}%" if judged else f"  {'🔶  False positives':<45}  {'0':>6}",
+        f"  {'❌  True negatives  (rule FAIL, judge NO)':<45}  {len(true_negs):>6}  {len(true_negs)/judged*100:>6.1f}%" if judged else f"  {'❌  True negatives':<45}  {'0':>6}",
+        f"  {'💥  Errors':<45}  {errors:>6}",
+        f"  {SEP2}",
+        f"  {'TOTAL judged':<45}  {judged:>6}",
+        "",
+        f"  Rule-based accuracy      : {rule_accuracy:.2f}%",
+        f"  Judge-corrected accuracy : {judge_accuracy:.2f}%",
+        f"  Delta                    : {delta:+.2f}%  ({'rule undercounts' if delta > 0 else 'rule overcounts' if delta < 0 else 'identical'})",
         SEP,
     ]
 
@@ -329,6 +377,7 @@ def run_judge(
     skippable_outcomes = {"routing", "pipeline_error"}
 
     auto_yes_count = 0
+    auto_no_count  = 0
     null_expected_count = 0
 
     for r in results:
@@ -341,6 +390,11 @@ def run_judge(
             r["judge_verdict"] = "YES"
             r["judge_reasoning"] = "Auto-pass: generated results are identical to expected results."
             auto_yes_count += 1
+        # Auto-NO: generated is empty but expected is not — no need to call the LLM
+        elif not gen and exp:
+            r["judge_verdict"] = "NO"
+            r["judge_reasoning"] = f"Auto-fail: generated result is empty but expected result has {len(exp)} record(s)."
+            auto_no_count += 1
 
     to_judge = [
         r for r in results
@@ -364,6 +418,7 @@ def run_judge(
     print(f"{'='*70}")
     print(f"Total results loaded : {len(results)}")
     print(f"  Auto-passed (identical results) : {auto_yes_count}")
+    print(f"  Auto-failed (empty generated)   : {auto_no_count}")
     print(f"  Skipped (null expected results) : {null_expected_count}")
     print(f"Entries to judge     : {len(to_judge)}")
     if failed_only:
@@ -459,6 +514,7 @@ def run_judge(
     print(f"{'='*70}")
     print(f"Judged entries (LLM)    : {judged}")
     print(f"  Auto-passed (identical): {auto_yes_count}")
+    print(f"  Auto-failed  (empty)   : {auto_no_count}")
     print(f"  Skipped (null expected): {null_expected_count}")
     if judged:
         print(f"  Judge YES             : {yes_count} ({yes_count/judged*100:.1f}%)")
@@ -486,14 +542,13 @@ def run_judge(
         yes_count=yes_count,
         no_count=no_count,
         errors=errors,
-        false_negatives=false_negatives,
-        false_positives=false_positives,
         rule_accuracy=rule_accuracy,
         judge_accuracy=judge_accuracy,
-        provider=provider,
+        provider=provider, 
         model=model,
         source_file=results_path.name,
         auto_yes_count=auto_yes_count,
+        auto_no_count=auto_no_count,
         null_expected_count=null_expected_count,
     )
     txt_path.write_text(txt_report, encoding="utf-8")

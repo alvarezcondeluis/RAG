@@ -107,9 +107,12 @@ Modelfile
 *.pkl
 checkpoints/
 src/simple_rag/rag/query/models/query_classifier/
-notebooks/funds_backup.pkl
-notebooks/edgar_cache/funds/funds_total.pkl
-notebooks/edgar_cache/companies/companies.pkl
-src/simple_rag/rag/query/models/query_classifier/model_head.pkl
+notebooks/edgar_cache/
+CLAUDE.md
+graphify-out/
+src/simple_rag/evaluation/query/benchmark_report*.txt
+src/simple_rag/evaluation/query/benchmark_report_confusion_*.png
 src/simple_rag/rag/examples/faiss_index/index.pkl
+src/simple_rag/rag/query/models/query_classifier/model_head.pkl
 src/src/simple_rag/evaluation/query/benchmark_report.txt
+src/simple_rag/rag/query/models/query_classifier/model_head.pkl

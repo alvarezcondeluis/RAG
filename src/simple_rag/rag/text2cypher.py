@@ -68,7 +68,9 @@ class CypherTranslator:
         use_few_shot: bool = True,
         use_groq_fallback: bool = True,
         openrouter_fallback_model: Optional[str] = None,
+        main_llm_model_openai: Optional[str] = None,
         use_cypher_validator: bool = True,
+        prompt_template_version: str = "v2",
     ):
         """
         LangChain-based LLM wrapper for text-to-Cypher translation.
@@ -161,9 +163,7 @@ class CypherTranslator:
         self.validator = CypherValidator(neo4j_driver=neo4j_driver, block_writes=True)
         print("✓ CypherValidator initialized")
 
-        # Fallback LLM — used as last resort when all retries are exhausted.
-        # Supports two providers: Groq (use_groq_fallback=True) or OpenRouter (openrouter_fallback_model=<model_id>).
-        # OpenRouter takes precedence when both are specified.
+     
         self.fallback_llm = None
         self._fallback_label = "fallback"  # display name used in log messages
         if openrouter_fallback_model:
@@ -187,6 +187,21 @@ class CypherTranslator:
                     print(f"⚠ OpenRouter fallback unavailable: {e}")
             else:
                 print("⚠ OPEN_ROUTER_API_KEY not set — OpenRouter fallback disabled")
+        elif main_llm_model_openai:
+            # Second local model on the same OpenAI-compatible server (e.g. LM Studio multi-model)
+            try:
+                _fallback_base_url = f"http://{openai_compatible_host}:{openai_compatible_port}/v1"
+                self.fallback_llm = ChatOpenAI(
+                    model=main_llm_model_openai,
+                    base_url=_fallback_base_url,
+                    api_key="not-needed",
+                    temperature=0.1,
+                    max_tokens=DEFAULT_MAX_TOKENS,
+                )
+                self._fallback_label = f"local:{main_llm_model_openai}"
+                print(f"✓ Local fallback initialized: {main_llm_model_openai} @ {_fallback_base_url}")
+            except Exception as e:
+                print(f"⚠ Local fallback unavailable: {e}")
         elif use_groq_fallback:
             _fallback_key = os.environ.get("GROQ_API_KEY")
             _is_already_groq70b = (
@@ -221,15 +236,18 @@ class CypherTranslator:
         self.last_retry_prompts: list = []             # prompts used on each retry attempt (only populated when _capture_prompts=True)
         self._capture_prompts: bool = False            # set True by benchmark.debug() only — keeps run() overhead-free
         self.last_validation_failures: list = []  # validator rule tags that fired during the last translate() call
+        self.last_write_blocked_op: Optional[str] = None  # set when a write op is blocked mid-retry
         self.last_total_prompt_tokens: int = 0  # cumulative token estimate across all LLM calls (initial + retries)
         self.last_completion_tokens: int = 0    # estimated tokens in all LLM responses for this translate() call
         self.last_schema_tokens: int = 0        # estimated tokens consumed by the schema slice in the initial prompt
         
         # Use imported prompt templates
+        _template = CYPHER_GENERATION_TEMPLATE if prompt_template_version == "v1" else CYPHER_GENERATION_TEMPLATE2
         self.prompt = PromptTemplate(
             input_variables=["schema", "examples", "entity_context", "question"],
-            template=CYPHER_GENERATION_TEMPLATE2
+            template=_template,
         )
+        print(f"✓ Prompt template: {prompt_template_version}")
         
         self.retry_strategy = retry_strategy
         if retry_strategy == "lean":
@@ -709,9 +727,9 @@ class CypherTranslator:
             resolved_entities = self.entity_resolver.extract_entities(user_query)
             print("Resolved Entities: ", resolved_entities)
             if resolved_entities:
-                # Build entity context with explicit instructions
-                entity_context = "RESOLVED ENTITIES (Use these EXACT names in your Cypher query):\n"
-                
+                # Build entity context with explicit filter instructions
+                entity_context = "RESOLVED ENTITIES — use the most appropiate one:\n"
+
                 # Sort by entity type for consistent output
                 entity_list = []
                 for entity_name, entity_type in resolved_entities.items():
@@ -720,15 +738,48 @@ class CypherTranslator:
                     import re
                     pattern = re.compile(re.escape(entity_name), re.IGNORECASE)
                     processed_query = pattern.sub(f"'{entity_name}'", processed_query, count=1)
-                
-                # Add to context
-                # Sort by string representation to handle non-comparable types (e.g., dicts)
+
+                # Find the highest score across all resolved entities so we can mark the best one.
+                best_score = max(
+                    (info.get("score", 0) if isinstance(info, dict) else 0)
+                    for info, _ in entity_list
+                )
+
+                covered_tickers: set = set()
                 for entity_type, entity_name in sorted(entity_list, key=lambda x: (str(x[0]), str(x[1]))):
-                    entity_context += f"  - {entity_type}: {entity_name}\n"
-                
-               
+                    t = entity_type.get("type", "") if isinstance(entity_type, dict) else str(entity_type)
+                    info = entity_type if isinstance(entity_type, dict) else {}
+                    score = info.get("score", None) if isinstance(info, dict) else None
+                    score_tag = f" (score: {score:.1f})" if score is not None else ""
+                    strong = " ★ STRONG MATCH" if score is not None and score == best_score else ""
+
+                    if t == "Fund":
+                        ticker = info.get("ticker", entity_name)
+                        covered_tickers.add(ticker)
+                        entity_context += f"  - Fund '{entity_name}'{score_tag}{strong}: filter by .ticker = '{ticker}'\n"
+                    elif t == "Company":
+                        ticker = info.get("ticker", "")
+                        covered_tickers.add(ticker)
+                        if ticker:
+                            entity_context += (
+                                f"  - Company '{entity_name}' (ticker: '{ticker}'){score_tag}{strong}: "
+                                f"filter Holding or Company by .ticker = '{ticker}'  [NOT by .name]\n"
+                            )
+                        else:
+                            entity_context += f"  - Company '{entity_name}'{score_tag}{strong}\n"
+                    elif t == "Ticker":
+                        # Skip Ticker entries that are already covered by a Fund/Company line above
+                        company = info.get("company", "")
+                        fund = info.get("fund", "")
+                        if not company and not fund:
+                            entity_context += f"  - Ticker '{entity_name}'{score_tag}{strong}: filter by .ticker = '{entity_name}'\n"
+                    elif t in ("Provider", "Trust"):
+                        entity_context += f"  - {t}: '{entity_name}'{score_tag}{strong}\n"
+                    else:
+                        entity_context += f"  - {t}: '{entity_name}'{score_tag}{strong}\n"
+
                 entity_context += f"Processed Question: {processed_query}\n"
-                entity_context += "\nIMPORTANT: Use the exact entity names shown above in your Cypher query.\n"
+                entity_context += "\nIMPORTANT: Use the filter values shown above — do not use company/fund names as property values.\n"
                 
                 # Compact entity resolution output
                 # Sort by string representation to handle non-comparable types (e.g., dicts)
@@ -865,6 +916,7 @@ class CypherTranslator:
 
             # Step 4: Validate + retry loop
             self.last_validation_failures = []
+            self.last_write_blocked_op = None
             if self._capture_prompts:
                 self.last_retry_prompts = []
             self.last_retry_attempts = 0
@@ -884,6 +936,16 @@ class CypherTranslator:
                 # Record which rule fired for benchmark analytics
                 if validation_result.triggered_rule:
                     self.last_validation_failures.append(validation_result.triggered_rule)
+
+                # Hard stop: write operations are never fixable by retrying
+                if validation_result.triggered_rule == "WRITE_OPERATION":
+                    upper = cypher_query.upper()
+                    self.last_write_blocked_op = next(
+                        (kw.strip() for kw in self.validator.BLOCKED_WRITE_KEYWORDS if kw.strip() in upper),
+                        "WRITE",
+                    )
+                    print(f"🚨 WRITE OPERATION BLOCKED ({self.last_write_blocked_op}) — aborting all retries immediately")
+                    return None
 
                 # Validation failed
                 error_summary = "\n".join(

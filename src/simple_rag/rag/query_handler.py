@@ -91,6 +91,7 @@ class QueryHandler:
             model_name=cypher_model,
             backend=cypher_backend,
             few_shot_embedding_model=few_shot_embedding_model,
+            prompt_template_version=schema_version,
             **cypher_kwargs,
         )
 
@@ -258,7 +259,11 @@ class QueryHandler:
         result.cypher = cypher
 
         if cypher is None:
-            result.error = "Failed to generate Cypher query."
+            blocked_op = getattr(self.translator, "last_write_blocked_op", None)
+            if blocked_op:
+                result.error = f"WRITE_BLOCKED:{blocked_op}"
+            else:
+                result.error = "Failed to generate Cypher query."
             return result
 
         # Step 5 — optionally execute (always pass $queryVector + $k; Neo4j ignores unused params)

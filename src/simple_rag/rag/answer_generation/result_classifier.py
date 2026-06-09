@@ -24,7 +24,7 @@ class ResultType(str, Enum):
 # Key sets for heuristic detection
 _SVG_KEYS = {"svg", "chart", "image"}
 _HOLDINGS_KEYS = {"shares", "marketValue", "weight", "isin", "lei"}
-_TEXT_KEYS = {"text", "embedding", "fullText"}
+_TEXT_KEYS = {"text", "embedding"}
 _FINANCIAL_KEYS = {"expenseRatio", "totalReturn", "netAssets", "turnoverRate", "costsPer10k"}
 _HIGHLIGHT_KEYS = {"turnover", "netIncomeRatio", "netAssetsValueBeginning", "netAssetsValueEnd"}
 _PEOPLE_KEYS = {"ceoCompensation", "totalCompensation", "ceoActuallyPaid", "transactionType"}

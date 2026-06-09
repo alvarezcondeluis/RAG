@@ -7,6 +7,7 @@ Usage:
     uv run python -m simple_rag.rag.deployment --neo4j-start-mode docker
     uv run python -m simple_rag.rag.deployment --answer-provider groq --answer-model llama-3.3-70b-versatile
     uv run python -m simple_rag.rag.deployment --port 8502 --no-browser
+    uv run python -m simple_rag.rag.deployment --model /models/qwen2.5-coder-7b-q8_0.gguf --ctx-size 16384
 """
 
 from __future__ import annotations
@@ -67,19 +68,39 @@ Examples:
         help="How to start Neo4j if not running (overrides deployment.yaml)",
     )
 
-    # LM Studio
-    lm = p.add_argument_group("LM Studio")
+    # llama.cpp server
+    lm = p.add_argument_group("llama.cpp server")
     lm.add_argument(
-        "--lm-studio-model",
-        metavar="MODEL_ID",
+        "--model",
+        metavar="PATH",
         default=None,
-        help="LM Studio model ID to verify/wait for (e.g. lmstudio-community/Qwen2.5-Coder-7B-Instruct-GGUF)",
+        help="Path to the GGUF model file (e.g. /models/qwen2.5-coder-7b-q8_0.gguf)",
     )
     lm.add_argument(
-        "--lm-studio-url",
+        "--url",
         metavar="URL",
         default=None,
-        help="LM Studio base URL (default: http://localhost:1234)",
+        help="llama-server base URL (default: http://localhost:8080)",
+    )
+    lm.add_argument(
+        "--ctx-size",
+        type=int,
+        default=None,
+        metavar="N",
+        help="KV-cache / context window size in tokens (default: 8192)",
+    )
+    lm.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        metavar="F",
+        help="Sampling temperature (default: 0.0 = greedy)",
+    )
+    lm.add_argument(
+        "--draft-model",
+        metavar="PATH",
+        default=None,
+        help="Path to draft GGUF for speculative decoding (optional)",
     )
 
     # Answer LLM
@@ -105,8 +126,10 @@ def main() -> None:
     overrides: dict = {}
     if args.neo4j_start_mode:
         overrides["neo4j_start_mode"] = args.neo4j_start_mode
-    if args.lm_studio_model:
-        overrides["lm_studio_model"] = args.lm_studio_model
+    if args.model:
+        overrides["llama_cpp_model"] = args.model
+    if args.url:
+        overrides["llama_cpp_url"] = args.url
     if args.answer_provider:
         overrides["answer_provider"] = args.answer_provider
     if args.answer_model:
@@ -116,12 +139,16 @@ def main() -> None:
 
     config = load_config(yaml_path=args.config, overrides=overrides)
 
+    # Apply inference parameter overrides directly on config
+    if args.ctx_size is not None:
+        config.llama_cpp.ctx_size = args.ctx_size
+    if args.temperature is not None:
+        config.llama_cpp.temperature = args.temperature
+    if args.draft_model:
+        config.llama_cpp.draft_model = args.draft_model
+
     if args.no_browser:
         config.streamlit.open_browser = False
-
-    # Apply lm_studio_url override (not handled in load_config generically)
-    if args.lm_studio_url:
-        config.lm_studio.base_url = args.lm_studio_url
 
     deploy(config)
 

@@ -16,6 +16,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 from dotenv import load_dotenv
@@ -56,6 +57,7 @@ class PipelineConfig:
     retry_module: bool = True
     retry_strategy: str = "full"
     embed_vector_queries: bool = False
+    main_llm_model_openai: Optional[str] = None  # second LM Studio model for answer gen / fallback
 
 
 # ── Interactive setup ────────────────────────────────────────────────────────
@@ -65,6 +67,17 @@ TEXT2CYPHER_BACKENDS = [
     ("groq", "Groq", "llama-3.3-70b-versatile"),
     ("ollama", "Ollama (local)", "tomasonjo/llama3-text2cypher-demo:8b_4bit"),
 ]
+
+
+def fetch_openai_compatible_models(host: str, port: int) -> list[str]:
+    """Return model IDs from an OpenAI-compatible server (e.g. LM Studio)."""
+    import requests as _req
+    try:
+        r = _req.get(f"http://{host}:{port}/v1/models", timeout=3)
+        r.raise_for_status()
+        return [m["id"] for m in r.json().get("data", [])]
+    except Exception:
+        return []
 
 
 def _ask_choice(prompt: str, options: list[str], default: int = 1) -> int:
@@ -156,19 +169,94 @@ def setup_pipeline() -> PipelineConfig:
         except Exception:
             config.cypher_model = default_model
     elif backend_key == "openai":
-        model_name = input("> Enter model name (or press Enter for default): ").strip()
-        config.cypher_model = model_name if model_name else "qwen2.5-coder"
+        host = input("> Server host [localhost]: ").strip() or "localhost"
+        port_raw = input("> Server port [1234]: ").strip()
+        port = int(port_raw) if port_raw.isdigit() else 1234
+        config.openai_compatible_host = host
+        config.openai_compatible_port = port
+
+        available_models = fetch_openai_compatible_models(host, port)
+        if available_models:
+            print(f"\n  Available models on {host}:{port}:")
+            for i, m in enumerate(available_models, 1):
+                print(f"  [{i}] {m}")
+
+            print("\n── Text2Cypher model (Cypher generation) ──")
+            idx = _ask_choice("> Select model: ", available_models)
+            config.cypher_model = available_models[idx]
+        else:
+            print(f"  Could not reach {host}:{port} — enter model name manually.")
+            config.cypher_model = input("> Text2Cypher model name: ").strip() or "qwen2.5-coder"
+            available_models = []
 
     print(f"  ✓ Text2Cypher: {backend_display} / {config.cypher_model}")
 
     # ── 2. Answer generation LLM ─────────────────────────────────
-    answer_provider, answer_model = registry.interactive_select(
-        prompt_label="Answer Generation LLM"
-    )
-    config.answer_provider_name = answer_provider.provider_name.lower()
-    config.answer_model = answer_model
+    print("\n─── Answer Generation LLM ───")
+    reg_providers = [p for p in registry.available_providers() if p["key_status"] != "missing"]
+    # Inject OpenAI-compatible option when LM Studio models are available
+    if backend_key == "openai" and available_models:
+        reg_providers.append({
+            "name": "openai_local",
+            "display": "OpenAI-compatible (LM Studio)",
+            "key_status": "n/a",
+        })
+    for i, p in enumerate(reg_providers, 1):
+        status_icon = {
+            "ok": "\033[92m✓\033[0m",
+            "n/a": "\033[93m●\033[0m",
+            "missing": "\033[91m✗\033[0m",
+        }.get(p["key_status"], "?")
+        extra = " \033[93m(⚠ VRAM limited)\033[0m" if p["name"] == "ollama" else ""
+        print(f"  [{i}] {p['display']:<30s} (API key: {status_icon}){extra}")
 
-    # ── 3. Pipeline options ──────────────────────────────────────
+    idx = _ask_choice("> Select Answer Generation LLM: ", [p["name"] for p in reg_providers])
+    selected_ans = reg_providers[idx]
+
+    if selected_ans["name"] == "openai_local":
+        print(f"\n  Available models on {config.openai_compatible_host}:{config.openai_compatible_port}:")
+        for i, m in enumerate(available_models, 1):
+            print(f"  [{i}] {m}")
+        idx2 = _ask_choice("> Select model: ", available_models)
+        config.answer_provider_name = "openai_local"
+        config.answer_model = available_models[idx2]
+    else:
+        answer_provider = registry.get_provider(selected_ans["name"])
+        print(f"\n  Fetching models from {selected_ans['display']}...")
+        models = answer_provider.list_models()
+        if models:
+            display_models = models[:30]
+            for i, m in enumerate(display_models, 1):
+                ctx = f" ({m.context_window:,} ctx)" if m.context_window else ""
+                print(f"  [{i}] {m.id}{ctx}")
+            if len(models) > 30:
+                print(f"  ... and {len(models) - 30} more")
+            idx2 = _ask_choice("> Select model: ", [m.id for m in display_models])
+            config.answer_model = display_models[idx2].id
+        else:
+            manual = input("  Enter model name manually: ").strip()
+            config.answer_model = manual
+        config.answer_provider_name = selected_ans["name"]
+
+    print(f"  ✓ Answer LLM: {config.answer_provider_name} / {config.answer_model}")
+
+    # ── 3. Main LLM model (local fallback for text2cypher retries) ─
+    if backend_key == "openai" and available_models and config.answer_provider_name != "openai_local":
+        print("\n─── Main LLM Model (OpenAI-compatible, retry fallback) ───")
+        print(f"  Available models on {config.openai_compatible_host}:{config.openai_compatible_port}:")
+        for i, m in enumerate(available_models, 1):
+            print(f"  [{i}] {m}")
+        default_idx = min(2, len(available_models))
+        idx3 = _ask_choice("> Select fallback model (Enter to skip): ", available_models, default=default_idx)
+        config.main_llm_model_openai = available_models[idx3]
+    elif backend_key == "openai" and config.answer_provider_name == "openai_local":
+        # Answer model IS the local model — reuse it as fallback too
+        config.main_llm_model_openai = config.answer_model
+
+    if config.main_llm_model_openai:
+        print(f"  ✓ Main LLM:    openai / {config.main_llm_model_openai}")
+
+    # ── 4. Pipeline options ──────────────────────────────────────
     print("\n─── Pipeline Options ───")
     config.use_schema_injection = _ask_yn("  Use schema injection? (recommended)")
     config.enable_entity_resolution = _ask_yn("  Enable entity resolution?")
@@ -178,6 +266,8 @@ def setup_pipeline() -> PipelineConfig:
     # ── Summary ──────────────────────────────────────────────────
     print(f"\n{'─' * 48}")
     print(f"  Text2Cypher:       {config.cypher_backend} / {config.cypher_model}")
+    if config.main_llm_model_openai:
+        print(f"  Main LLM:          openai / {config.main_llm_model_openai}")
     print(f"  Answer LLM:        {config.answer_provider_name} / {config.answer_model}")
     print(f"  Schema injection:  {'ON' if config.use_schema_injection else 'OFF'}")
     print(f"  Entity resolution: {'ON' if config.enable_entity_resolution else 'OFF'}")
@@ -212,6 +302,11 @@ def _init_pipeline(config: PipelineConfig):
         cypher_kwargs["use_entity_resolution"] = False
     if not config.enable_few_shot:
         cypher_kwargs["use_few_shot"] = False
+    if config.cypher_backend == "openai":
+        cypher_kwargs["openai_compatible_host"] = config.openai_compatible_host
+        cypher_kwargs["openai_compatible_port"] = config.openai_compatible_port
+    if config.main_llm_model_openai:
+        cypher_kwargs["main_llm_model_openai"] = config.main_llm_model_openai
 
     handler = QueryHandler(
         neo4j_driver=driver,
@@ -223,9 +318,17 @@ def _init_pipeline(config: PipelineConfig):
 
     # Answer LLM provider
     registry = ProviderRegistry()
-    answer_provider = registry.get_provider(
-        config.answer_provider_name, model_id=config.answer_model
-    )
+    if config.answer_provider_name == "openai_local":
+        from simple_rag.rag.llm_providers.openrouter_provider import OpenRouterProvider
+        answer_provider = OpenRouterProvider(
+            base_url=f"http://{config.openai_compatible_host}:{config.openai_compatible_port}/v1",
+            api_key="local",
+            model_id=config.answer_model,
+        )
+    else:
+        answer_provider = registry.get_provider(
+            config.answer_provider_name, model_id=config.answer_model
+        )
 
     return handler, answer_provider, driver
 
@@ -274,7 +377,20 @@ def run_loop(config: PipelineConfig):
                     print(f"  \033[90mCypher pipeline: {cypher_time:.2f}s\033[0m")
 
                 if result.error:
-                    print(f"\n  \033[91m⚠ {result.error}\033[0m")
+                    if result.error.startswith("WRITE_BLOCKED:"):
+                        op = result.error[len("WRITE_BLOCKED:"):].strip()
+                        print(
+                            f"\n"
+                            f"  \033[41m\033[97m  🚨 DESTRUCTIVE OPERATION BLOCKED  \033[0m\n"
+                            f"  \033[91m{'─' * 60}\033[0m\n"
+                            f"  \033[91m  Operation: \033[1m{op}\033[0m\n"
+                            f"  \033[91m  This system is READ-ONLY. The generated query contained\033[0m\n"
+                            f"  \033[91m  a {op} statement and was permanently blocked.\033[0m\n"
+                            f"  \033[91m  No data was modified. This incident has been logged.\033[0m\n"
+                            f"  \033[91m{'─' * 60}\033[0m"
+                        )
+                    else:
+                        print(f"\n  \033[91m⚠ {result.error}\033[0m")
                     continue
 
                 if result.data is None:

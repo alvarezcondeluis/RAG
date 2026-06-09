@@ -32,25 +32,35 @@ class Neo4jConfig:
 
 
 @dataclass
-class LMStudioConfig:
-    base_url: str = "http://localhost:1234"
-    # Model ID as shown in LM Studio (e.g. "lmstudio-community/Qwen2.5-Coder-7B-Instruct-GGUF")
-    model_id: str = ""
-    # "auto"   → launch LM Studio CLI (requires lm_studio_executable to be set)
+class LlamaCppConfig:
+    base_url: str = "http://localhost:8080"
+    model_id: str = "/home/luis/Desktop/code/RAG/models/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"
+    # "auto"   → launch llama-server subprocess (requires executable to be set)
     # "manual" → assume already running, block with instructions if unreachable
     start_mode: Literal["auto", "manual"] = "manual"
-    executable: str = ""   # path to LM Studio CLI binary
+    executable: str = ""   # path to llama-server binary
+
+    # ── Inference parameters ──────────────────────────────────────────────────
+    temperature: float = 0.05      # sampling temperature (0 = greedy/deterministic)
+    ctx_size: int = 5000           # KV-cache / context window size (tokens)
+
+    # ── Speculative decoding (optional) ───────────────────────────────────────
+    draft_model: str = "/home/luis/Desktop/code/RAG/models/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF"
+    draft_max: int = 8             # max speculative tokens per step
 
 
 @dataclass
 class PipelineConfig:
     # Text2Cypher
-    cypher_backend: str = "openai"   # openai-compatible = LM Studio
+    cypher_backend: str = "openai"   # openai-compatible = llama.cpp server
     cypher_model: str = "qwen2.5-coder"
 
     # Answer generation provider
     answer_provider: str = "groq"
     answer_model: str = "llama-3.3-70b-versatile"
+
+    # Schema version: "v1" = verbose, "v2" = compact (~50% fewer tokens)
+    schema_version: str = "v1"
 
     # Toggles — mirror orchestrator.PipelineConfig
     use_schema_injection: bool = True
@@ -75,7 +85,7 @@ class TimeoutConfig:
 @dataclass
 class DeploymentConfig:
     neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
-    lm_studio: LMStudioConfig = field(default_factory=LMStudioConfig)
+    llama_cpp: LlamaCppConfig = field(default_factory=LlamaCppConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     streamlit: StreamlitConfig = field(default_factory=StreamlitConfig)
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
@@ -112,17 +122,22 @@ def load_config(yaml_path: Optional[str] = None, overrides: Optional[dict] = Non
             config.neo4j.compose_dir = n.get("compose_dir", config.neo4j.compose_dir)
             config.neo4j.container_name = n.get("container_name", config.neo4j.container_name)
 
-            lm = data.get("lm_studio", {})
-            config.lm_studio.base_url = lm.get("base_url", config.lm_studio.base_url)
-            config.lm_studio.model_id = lm.get("model_id", config.lm_studio.model_id)
-            config.lm_studio.start_mode = lm.get("start_mode", config.lm_studio.start_mode)
-            config.lm_studio.executable = lm.get("executable", config.lm_studio.executable)
+            lc = data.get("llama_cpp", {})
+            config.llama_cpp.base_url = lc.get("base_url", config.llama_cpp.base_url)
+            config.llama_cpp.model_id = lc.get("model_id", config.llama_cpp.model_id)
+            config.llama_cpp.start_mode = lc.get("start_mode", config.llama_cpp.start_mode)
+            config.llama_cpp.executable = lc.get("executable", config.llama_cpp.executable)
+            config.llama_cpp.temperature = lc.get("temperature", config.llama_cpp.temperature)
+            config.llama_cpp.ctx_size = lc.get("ctx_size", config.llama_cpp.ctx_size)
+            config.llama_cpp.draft_model = lc.get("draft_model", config.llama_cpp.draft_model)
+            config.llama_cpp.draft_max = lc.get("draft_max", config.llama_cpp.draft_max)
 
             pl = data.get("pipeline", {})
             config.pipeline.cypher_backend = pl.get("cypher_backend", config.pipeline.cypher_backend)
             config.pipeline.cypher_model = pl.get("cypher_model", config.pipeline.cypher_model)
             config.pipeline.answer_provider = pl.get("answer_provider", config.pipeline.answer_provider)
             config.pipeline.answer_model = pl.get("answer_model", config.pipeline.answer_model)
+            config.pipeline.schema_version = pl.get("schema_version", config.pipeline.schema_version)
             config.pipeline.use_schema_injection = pl.get("use_schema_injection", config.pipeline.use_schema_injection)
             config.pipeline.enable_entity_resolution = pl.get("enable_entity_resolution", config.pipeline.enable_entity_resolution)
             config.pipeline.enable_few_shot = pl.get("enable_few_shot", config.pipeline.enable_few_shot)
@@ -149,8 +164,10 @@ def load_config(yaml_path: Optional[str] = None, overrides: Optional[dict] = Non
     if overrides:
         if overrides.get("neo4j_start_mode"):
             config.neo4j.start_mode = overrides["neo4j_start_mode"]
-        if overrides.get("lm_studio_model"):
-            config.lm_studio.model_id = overrides["lm_studio_model"]
+        if overrides.get("llama_cpp_model"):
+            config.llama_cpp.model_id = overrides["llama_cpp_model"]
+        if overrides.get("llama_cpp_url"):
+            config.llama_cpp.base_url = overrides["llama_cpp_url"]
         if overrides.get("port"):
             config.streamlit.port = overrides["port"]
         if overrides.get("answer_provider"):

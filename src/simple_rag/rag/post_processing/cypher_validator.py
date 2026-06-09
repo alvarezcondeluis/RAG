@@ -100,8 +100,6 @@ class CypherValidator:
         "Chunk": {"title", "text", "embedding", "chunkType", "chunkIndex",
                   "subsection", "sectionType", "sectionName", "ticker", "filingDate",
                   "wordCount"},
-        "SectionChunk": {"title", "text", "embedding", "chunkType", "chunkIndex",
-                         "subsection", "sectionName", "ticker", "filingDate"},
         "Filing10K": set(),
         "Section": {"title", "text", "embedding", "sectionType", "secItem"},
         "Risk":       {"title", "text", "embedding"},
@@ -159,13 +157,13 @@ class CypherValidator:
         "EXTRACTED_FROM": {("Fund", "Document"), ("Profile", "Document"),
                            ("Portfolio", "Document"), ("Filing10K", "Document"),
                            ("InsiderTransaction", "Document")},
-        "HAS_CHUNK": {("Section", "Chunk"), ("Section", "SectionChunk"),
+        "HAS_CHUNK": {("Section", "Chunk"),
                       ("Risk", "Chunk"),
-                      ("RiskFactor", "Chunk"), ("RiskFactor", "SectionChunk"),
-                      ("BusinessInformation", "Chunk"), ("BusinessInformation", "SectionChunk"),
-                      ("LegalProceeding", "Chunk"), ("LegalProceeding", "SectionChunk"),
-                      ("ManagementDiscussion", "Chunk"), ("ManagementDiscussion", "SectionChunk"),
-                      ("Properties", "Chunk"), ("Properties", "SectionChunk"),
+                      ("RiskFactor", "Chunk"),
+                      ("BusinessInformation", "Chunk"),
+                      ("LegalProceeding", "Chunk"),
+                      ("ManagementDiscussion", "Chunk"),
+                      ("Properties", "Chunk"),
                       ("Strategy", "Chunk"), ("Objective", "Chunk"),
                       ("PerformanceCommentary", "Chunk")},
         "OF_ASSET_TYPE": {("Holding", "AssetCategory")},
@@ -192,6 +190,35 @@ class CypherValidator:
         "HAS_PORTFOLIO": {"date"},
         "EXTRACTED_FROM": {"date"},
     }
+
+    # Relationship direction auto-fixes.
+    # Each entry: (wrong_regex, replacement, rel_name, reason)
+    # Applied unconditionally before any validation step.
+    # Only include relationships whose reversed form is NEVER semantically valid
+    # (i.e. the LLM always writes them in the canonical direction but sometimes
+    # flips the arrow accidentally).
+    DIRECTION_FIXES: list = [
+        # InsiderTransaction -[:MADE_BY]-> Person
+        # LLM error: (it:InsiderTransaction)<-[:MADE_BY]-(p:Person)
+        (r'<-\[:MADE_BY\]-(?!>)', '-[:MADE_BY]->', 'MADE_BY',
+         'InsiderTransaction-[:MADE_BY]->Person (not reversed)'),
+        # Company -[:HAS_INSIDER_TRANSACTION]-> InsiderTransaction
+        # LLM error: (it:InsiderTransaction)<-[:HAS_INSIDER_TRANSACTION]-(c:Company)
+        (r'<-\[:HAS_INSIDER_TRANSACTION\]-(?!>)', '-[:HAS_INSIDER_TRANSACTION]->', 'HAS_INSIDER_TRANSACTION',
+         'Company-[:HAS_INSIDER_TRANSACTION]->InsiderTransaction (not reversed)'),
+        # Filing10K -[:HAS_SECTION]-> Section
+        (r'<-\[:HAS_SECTION\]-(?!>)', '-[:HAS_SECTION]->', 'HAS_SECTION',
+         'Filing10K/Profile-[:HAS_SECTION]->Section (not reversed)'),
+        # Filing10K -[:HAS_FINANCIALS]-> Financials
+        (r'<-\[:HAS_FINANCIALS\]-(?!>)', '-[:HAS_FINANCIALS]->', 'HAS_FINANCIALS',
+         'Filing10K-[:HAS_FINANCIALS]->Financials (not reversed)'),
+        # Section/Chunk relationships
+        (r'<-\[:HAS_CHUNK\]-(?!>)', '-[:HAS_CHUNK]->', 'HAS_CHUNK',
+         'Section-[:HAS_CHUNK]->Chunk (not reversed)'),
+        # Fund -[:HAS_FINANCIAL_HIGHLIGHT]-> FinancialHighlight
+        (r'<-\[:HAS_FINANCIAL_HIGHLIGHT\]-(?!>)', '-[:HAS_FINANCIAL_HIGHLIGHT]->', 'HAS_FINANCIAL_HIGHLIGHT',
+         'Fund-[:HAS_FINANCIAL_HIGHLIGHT]->FinancialHighlight (not reversed)'),
+    ]
 
     # Write operations that are blocked
     BLOCKED_WRITE_KEYWORDS = [
@@ -223,6 +250,22 @@ class CypherValidator:
         self.block_writes = block_writes
         self.use_syntax_check = use_syntax_check
 
+    def _fix_relationship_directions(self, query: str) -> tuple[str, list[str]]:
+        """
+        Auto-correct known relationship direction mistakes before validation.
+
+        Returns (fixed_query, list_of_fixes_applied).
+        Only rewrites relationships whose reversed form is never semantically
+        valid — so the fix is always safe to apply unconditionally.
+        """
+        fixes_applied = []
+        for pattern, replacement, rel_name, reason in self.DIRECTION_FIXES:
+            new_query, n = re.subn(pattern, replacement, query)
+            if n:
+                fixes_applied.append(f"DIRECTION_FIX [{rel_name}]: {reason} — fixed {n} occurrence(s)")
+                query = new_query
+        return query, fixes_applied
+
     def validate(self, query: str) -> ValidationResult:
         """
         Validate a Cypher query for syntax and schema compliance.
@@ -241,6 +284,12 @@ class CypherValidator:
             lines = query.split("\n")
             lines = [l for l in lines if not l.strip().startswith("```")]
             query = "\n".join(lines).strip()
+
+        # Auto-fix common relationship direction mistakes before any other check
+        query, direction_fixes = self._fix_relationship_directions(query)
+        for fix_msg in direction_fixes:
+            logger.info(fix_msg)
+            print(f"🔧 {fix_msg}")
 
         # Step 0: Catch EXPLAIN / PROFILE prefix — the model sometimes adds these debug keywords
         if re.match(r'^(EXPLAIN|PROFILE)\s+', query, re.IGNORECASE):
@@ -575,27 +624,79 @@ class CypherValidator:
 
         question_upper = question.upper()
 
-        # Match (varname:Company {ticker: 'XYZ'}) where ticker is the ONLY property
-        pattern = re.compile(
+        was_modified = False
+
+        def _should_strip(ticker: str) -> bool:
+            in_question = bool(re.search(rf'\b{re.escape(ticker)}\b', question_upper))
+            in_resolver = ticker in known_tickers
+            return not in_question and not in_resolver
+
+        # 1. Strip (varname:Company {ticker: 'XYZ'}) — single-property inline filter
+        pattern_company = re.compile(
             r'(\(\s*\w*\s*:Company\s*)\{\s*ticker\s*:\s*[\'"]([A-Z0-9]+)[\'"]\s*\}(\s*\))',
             re.IGNORECASE,
         )
 
-        was_modified = False
-
-        def _replace(m):
+        def _replace_company(m):
             nonlocal was_modified
-            node_prefix = m.group(1)
             ticker = m.group(2).upper()
-            closing = m.group(3)
-            in_question = bool(re.search(rf'\b{re.escape(ticker)}\b', question_upper))
-            in_resolver = ticker in known_tickers
-            if not in_question and not in_resolver:
+            if _should_strip(ticker):
                 was_modified = True
-                return node_prefix.rstrip() + closing
+                return m.group(1).rstrip() + m.group(3)
             return m.group(0)
 
-        cleaned = pattern.sub(_replace, cypher)
+        cleaned = pattern_company.sub(_replace_company, cypher)
+
+        # 2. Strip (varname:Fund {ticker: 'XYZ'}) — same spurious injection on Fund nodes
+        pattern_fund = re.compile(
+            r'(\(\s*\w*\s*:Fund\s*)\{\s*ticker\s*:\s*[\'"]([A-Z0-9]+)[\'"]\s*\}(\s*\))',
+            re.IGNORECASE,
+        )
+
+        def _replace_fund(m):
+            nonlocal was_modified
+            ticker = m.group(2).upper()
+            if _should_strip(ticker):
+                was_modified = True
+                return m.group(1).rstrip() + m.group(3)
+            return m.group(0)
+
+        cleaned = pattern_fund.sub(_replace_fund, cleaned)
+
+        # 3. Strip spurious WHERE/AND ticker conditions:
+        #    var.ticker = 'XYZ' AND ...   (leading condition)
+        #    ... AND var.ticker = 'XYZ'   (trailing or mid condition)
+
+        def _sub_leading_lambda(m):
+            nonlocal was_modified
+            ticker = m.group(2).upper()
+            if _should_strip(ticker):
+                was_modified = True
+                return m.group(1)  # keep just "WHERE "
+            return m.group(0)
+
+        cleaned = re.sub(
+            r'(WHERE\s+)\w+\.ticker\s*=\s*[\'"]([A-Z0-9]+)[\'"](\s+AND\s+)',
+            _sub_leading_lambda,
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        def _sub_trailing_where(m):
+            nonlocal was_modified
+            ticker = m.group(1).upper()
+            if _should_strip(ticker):
+                was_modified = True
+                return ''
+            return m.group(0)
+
+        cleaned = re.sub(
+            r'\s+AND\s+\w+\.ticker\s*=\s*[\'"]([A-Z0-9]+)[\'"]\b',
+            _sub_trailing_where,
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
         return cleaned, was_modified
 
     @staticmethod
@@ -767,6 +868,29 @@ class CypherValidator:
             re.IGNORECASE,
         )
         cleaned = pattern.sub(_strip_year, cypher)
+
+        # Also strip year filters placed on the AverageReturns NODE:
+        # (ar:AverageReturns {year: 2023}) → (ar:AverageReturns)
+        # AverageReturns has no year property — the LLM commonly makes this mistake.
+        # Only apply to AverageReturns node contexts
+        node_ctx_pattern = re.compile(
+            r'(:AverageReturns\s*)\{([^}]*\byear\s*:\s*(?:\d{4}|\$\w+)[^}]*)\}',
+            re.IGNORECASE,
+        )
+
+        def _strip_node_year_ctx(m):
+            label = m.group(1)
+            props_str = m.group(2)
+            remaining = re.sub(
+                r'\byear\s*:\s*(?:\d{4}|\$\w+)\s*(?:,\s*)?',
+                '',
+                props_str,
+                flags=re.IGNORECASE,
+            ).strip().strip(',').strip()
+            was_modified[0] = True
+            return label + ('{' + remaining + '}' if remaining else '')
+
+        cleaned = node_ctx_pattern.sub(_strip_node_year_ctx, cleaned)
         return cleaned, was_modified[0]
 
     @staticmethod
