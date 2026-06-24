@@ -8,6 +8,7 @@ When configured, queries go through the real RAG pipeline with streaming.
 import streamlit as st
 from pathlib import Path
 import sys
+import time
 import pandas as pd
 
 # Add parent directories to path for imports
@@ -43,6 +44,8 @@ def initialize_session_state():
         st.session_state.pipeline = None
     if "terms_accepted" not in st.session_state:
         st.session_state.terms_accepted = False
+    if "pending_example" not in st.session_state:
+        st.session_state.pending_example = None
 
 
 def render_header():
@@ -192,7 +195,26 @@ def handle_real_query(query: str) -> None:
         status.update(label="Analysis complete", state="complete", expanded=False)
 
     # Phase 2: Stream the answer
-    full_response = st.write_stream(result.token_stream)
+    # Escape bare $ so Streamlit's markdown renderer doesn't treat them as LaTeX delimiters.
+    # \$ in CommonMark renders as a literal $, so stored content is correct for history replay.
+    def _escape_dollars(stream):
+        for chunk in stream:
+            yield chunk.replace("$", r"\$")
+
+    t_gen = time.time()
+    full_response = st.write_stream(_escape_dollars(result.token_stream))
+    gen_time = time.time() - t_gen
+    dispatch_time = steps[0].elapsed if steps else 0.0
+
+    # Discrete timing line
+    st.markdown(
+        f'<div class="response-timing">'
+        f'⏱ translation&nbsp;{dispatch_time:.1f}s'
+        f'&ensp;·&ensp;'
+        f'generation&nbsp;{gen_time:.1f}s'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     # Phase 3: Rich results (charts, tables)
     if result.charts:
@@ -213,6 +235,8 @@ def handle_real_query(query: str) -> None:
             "confidence": result.confidence,
             "cypher": result.cypher,
             "result_type": result.result_type.value,
+            "dispatch_time": dispatch_time,
+            "gen_time": gen_time,
         },
     })
 
@@ -265,42 +289,49 @@ def main():
     # Display chat history
     chat_interface.display_messages(st.session_state.messages)
 
-    # Chat input
+    # Reserve the examples slot NOW so we can clear it synchronously before
+    # the pipeline blocks — prevents stale examples showing during LLM calls.
+    examples_slot = st.empty()
+
+    # Resolve active prompt: typed input takes priority, then a clicked example
+    active_prompt = None
     if prompt := st.chat_input("Ask about SEC filings, funds, or companies..."):
-        # Add user message
+        active_prompt = prompt
+    elif st.session_state.pending_example:
+        active_prompt = st.session_state.pending_example
+        st.session_state.pending_example = None
+
+    if active_prompt:
+        examples_slot.empty()  # clear examples immediately, before the blocking LLM call
         st.session_state.messages.append({
             "role": "user",
-            "content": prompt,
+            "content": active_prompt,
         })
-
-        # Display user message
         with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate response
+            st.markdown(active_prompt)
         with st.chat_message("assistant"):
             pipeline = st.session_state.get("pipeline")
             if pipeline and not config.MOCK_MODE:
-                handle_real_query(prompt)
+                handle_real_query(active_prompt)
             else:
-                handle_mock_query(prompt)
-
+                handle_mock_query(active_prompt)
         st.session_state.query_count += 1
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Query suggestions — empty state
-    if len(st.session_state.messages) == 0:
-        st.markdown(
-            '<div class="suggestion-label">&mdash; SUGGESTED QUERIES &mdash;</div>',
-            unsafe_allow_html=True,
-        )
-        cols = st.columns(3)
-        for i, example in enumerate(config.SAMPLE_QUERIES[:6]):
-            with cols[i % 3]:
-                if st.button(example, key=f"example_{i}", use_container_width=True):
-                    st.session_state.messages.append({"role": "user", "content": example})
-                    st.rerun()
+    # Query suggestions — only when no messages and nothing is being processed
+    if len(st.session_state.messages) == 0 and not active_prompt:
+        with examples_slot:
+            st.markdown(
+                '<div class="suggestion-label">&mdash; SUGGESTED QUERIES &mdash;</div>',
+                unsafe_allow_html=True,
+            )
+            cols = st.columns(3)
+            for i, example in enumerate(config.SAMPLE_QUERIES[:6]):
+                with cols[i % 3]:
+                    if st.button(example, key=f"example_{i}", use_container_width=True):
+                        st.session_state.pending_example = example
+                        st.rerun()
 
     if len(st.session_state.messages) > 0:
         _render_footer()

@@ -190,6 +190,7 @@ def process_query(
         ANSWER_SYSTEM_PROMPT,
         build_answer_prompt,
     )
+    from simple_rag.rag.answer_generation.result_enhancer import enhance
     from simple_rag.rag.context_enrichment import (
         format_enrichment_context,
         resolve_document_provenance,
@@ -239,33 +240,54 @@ def process_query(
             error="No results returned from the database.",
         )
 
-    # Step 2: Classify result type
-    result_type = pipeline.classifier.classify(result.data, result.category)
+    # Step 2: Enhance results (empty check + row truncation)
+    enhanced = enhance(result.data, query=query)
+    if enhanced.is_empty:
+        return steps, PipelineQueryResult(
+            category=result.category,
+            confidence=result.confidence,
+            cypher=result.cypher,
+            data=[],
+            result_type=ResultType.EMPTY,
+            enrichment_text="",
+            provenance_text="",
+            token_stream=iter([]),
+            error=enhanced.empty_message,
+        )
 
-    # Step 3: Enrichment + provenance
+    # Step 3: Classify result type
+    result_type = pipeline.classifier.classify(enhanced.records, result.category)
+
+    # Step 4: Enrichment + provenance
     t1 = time.time()
     enrichment_text = format_enrichment_context(result.enrichment)
     provenance_text = resolve_document_provenance(
         cypher=result.cypher or "",
         neo4j_driver=pipeline.driver,
-        main_results=result.data,
+        main_results=enhanced.records,
     )
     enrich_time = time.time() - t1
 
+    record_detail = f"{enhanced.original_count} records"
+    if enhanced.truncated:
+        record_detail += f" (showing {len(enhanced.records)})"
+    record_detail += f", type: {result_type.value}"
+
     steps.append(QueryStepUpdate(
         step="enrich",
-        detail=f"{len(result.data)} records, type: {result_type.value}",
+        detail=record_detail,
         elapsed=enrich_time,
     ))
 
-    # Step 4: Build prompt
+    # Step 5: Build prompt
     user_prompt = build_answer_prompt(
         user_query=query,
-        neo4j_results=result.data,
+        neo4j_results=enhanced.records,
         result_type=result_type,
         query_category=result.category,
         enrichment_context=enrichment_text,
         provenance_context=provenance_text,
+        truncation_note=enhanced.truncation_note,
     )
 
     messages = [
@@ -280,15 +302,15 @@ def process_query(
     charts = []
     tabular = []
     if result_type == ResultType.CHART_SVG:
-        charts = pipeline.classifier.extract_svg_data(result.data) or []
-    if result_type == ResultType.HOLDINGS_TABLE and len(result.data) > 0:
-        tabular = pipeline.classifier.extract_tabular_data(result.data) or []
+        charts = pipeline.classifier.extract_svg_data(enhanced.records) or []
+    if result_type == ResultType.HOLDINGS_TABLE and enhanced.records:
+        tabular = pipeline.classifier.extract_tabular_data(enhanced.records) or []
 
     return steps, PipelineQueryResult(
         category=result.category,
         confidence=result.confidence,
         cypher=result.cypher,
-        data=result.data,
+        data=enhanced.records,
         result_type=result_type,
         enrichment_text=enrichment_text,
         provenance_text=provenance_text,

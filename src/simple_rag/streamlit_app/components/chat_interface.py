@@ -36,12 +36,27 @@ def display_messages(messages: List[Dict[str, Any]]):
         content = message["content"]
         
         with st.chat_message(role):
-            st.markdown(content)
+            st.markdown(content.replace("$", r"\$") if content else "")
 
             # Display sources if available (for assistant messages)
             if role == "assistant" and message.get("sources"):
                 with st.expander(f"◆ Sources ({len(message['sources'])})"):
                     display_sources(message["sources"])
+
+            # Timing metadata (stored on live responses)
+            if role == "assistant":
+                meta = message.get("metadata", {})
+                d = meta.get("dispatch_time")
+                g = meta.get("gen_time")
+                if d is not None and g is not None:
+                    st.markdown(
+                        f'<div class="response-timing">'
+                        f'⏱ translation&nbsp;{d:.1f}s'
+                        f'&ensp;·&ensp;'
+                        f'generation&nbsp;{g:.1f}s'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
             # AI-generated content warning
             if role == "assistant":
