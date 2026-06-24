@@ -388,7 +388,7 @@ class EntityResolver:
             if sorted_matches:
                 top_score = sorted_matches[0][1]
                 # Raise threshold for aggregate queries to avoid injecting irrelevant entities
-                score_threshold = 95 if is_aggregate else 85
+                score_threshold = 87 if is_aggregate else 82
                 
                 if top_score >= score_threshold:
                     # Include all matches within 5 points of the top score

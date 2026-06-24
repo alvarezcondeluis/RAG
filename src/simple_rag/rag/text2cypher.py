@@ -872,12 +872,6 @@ class CypherTranslator:
             if self.use_cypher_validator:
                 _cypher_before_rules = cypher_query
 
-                cypher_query, _stripped = CypherValidator.strip_spurious_ticker_filters(
-                    cypher_query, user_query, resolved_entities
-                )
-                if _stripped:
-                    print("⚡ Auto-stripped spurious Company ticker filter (not in question or entity resolver)")
-
                 cypher_query, _replaced = CypherValidator.replace_fund_name_with_resolved_ticker(
                     cypher_query, resolved_entities
                 )
@@ -907,6 +901,14 @@ class CypherTranslator:
                 cypher_query, _boosted = CypherValidator.boost_vector_candidate_count(cypher_query)
                 if _boosted:
                     print("⚡ Auto-boosted vector candidate count to 50")
+
+                cypher_query, _fixed = CypherValidator.fix_portfolio_count_ordering(cypher_query)
+                if _fixed:
+                    print("⚡ Auto-fixed ORDER BY p.count → ORDER BY r.weight DESC on holdings query")
+
+                cypher_query, _injected = CypherValidator.inject_year_in_section_query(cypher_query)
+                if _injected:
+                    print("⚡ Auto-injected r.year into RETURN and ORDER BY for 10-K section query")
 
                 if cypher_query != _cypher_before_rules:
                     print(f"  BEFORE: {_cypher_before_rules}")
@@ -1018,12 +1020,6 @@ class CypherTranslator:
 
                 if self.use_cypher_validator:
                     _cypher_before_rules = cypher_query
-
-                    cypher_query, _stripped = CypherValidator.strip_spurious_ticker_filters(
-                        cypher_query, user_query, resolved_entities
-                    )
-                    if _stripped:
-                        print("⚡ Auto-stripped spurious Company ticker filter (retry)")
 
                     cypher_query, _replaced = CypherValidator.replace_fund_name_with_resolved_ticker(
                         cypher_query, resolved_entities

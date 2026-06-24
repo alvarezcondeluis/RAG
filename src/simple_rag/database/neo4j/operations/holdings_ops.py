@@ -65,6 +65,17 @@ class HoldingsOperations(Neo4jDatabaseBase):
 
         df['node_id'] = df.apply(generate_id, axis=1)
 
+        # Collapse duplicate rows that resolve to the same node_id (same ISIN/CUSIP/identity).
+        # This mirrors what Neo4j's MERGE already does, but makes the DataFrame consistent.
+        # Numeric positions (shares, market_value, weight_pct) are summed; all other fields
+        # take the first occurrence.
+        if df['node_id'].duplicated().any():
+            numeric_agg = {c: 'sum' for c in ['shares', 'market_value', 'weight_pct'] if c in df.columns}
+            first_agg = {c: 'first' for c in df.columns if c not in numeric_agg and c != 'node_id'}
+            df = df.groupby('node_id', sort=False).agg({**numeric_agg, **first_agg}).reset_index()
+            if verbose:
+                print(f"   ⚠️  {ticker}: Collapsed duplicate holdings in source data")
+
         def enrich_category(row):
             code = row.get('asset_category')
             cat = ASSET_CATEGORY_MAP.get(code) if code else None
@@ -88,7 +99,7 @@ class HoldingsOperations(Neo4jDatabaseBase):
             port.date = $report_date,
             port.createdAt = timestamp()
         MERGE (fund)-[r:HAS_PORTFOLIO]->(port)
-       
+
         // Create Document node and EXTRACTED_FROM relationship if metadata provided
         WITH port
         FOREACH (_ IN CASE WHEN $has_metadata THEN [1] ELSE [] END |

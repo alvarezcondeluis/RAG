@@ -14,7 +14,7 @@ DETAILED_SCHEMA = """
 (:Provider {name})-[:MANAGES]->(:Trust {name})-[:ISSUES]->(:Fund)
 # === FUND NODE PROPERTIES ===
 (:Fund {
-    ticker,              # Symbol like 'AAPL' (use for matching symbols)
+    ticker,              # Symbol like 'VOO' (use for matching symbols)
     name,                
     cik,                 # Central Index Key (SEC identifier)
     securityExchange     # Exchange like 'NASDAQ', 'NYSE'
@@ -63,9 +63,21 @@ DETAILED_SCHEMA = """
 # Management Team (year on the relationship)
 (:Fund)-[:MANAGED_BY {year}]->(:Person {name})
 
-# Average Returns (versioned by year)
+# ── Average Returns (trailing annualized periods — one snapshot per year) ──
+# Use when asked for "1-year return", "5-year return", "10-year return", "since inception return"
+# These are pre-computed trailing averages stored as a single snapshot, NOT per-year rows.
+# returnInception / return1y / return5y / return10y can be NULL — filter with IS NOT NULL.
 (:Fund)-[:HAS_AVERAGE_RETURNS {year}]->(:AverageReturns {return1y, return5y, return10y, returnInception})
-# Filter by the ones that are not null when asked for specific return
+
+# ── Annual Total Return per calendar year (historical, one row per year) ──
+# Use when asked for "average over N years", "year-by-year return", "historical returns",
+# "return in year X", "best/worst year". Return each year as a separate row and let the
+# caller compute any average — do NOT use avg([list]) in Cypher.
+# CORRECT PATTERN (last 5 years):
+#   MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight)
+#   WHERE fh.totalReturn IS NOT NULL
+#   RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn
+#   ORDER BY r.year DESC LIMIT 5
 # Allocations (by year)
 (:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, year}]->(:Sector {name})
 (:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
@@ -138,6 +150,9 @@ DETAILED_SCHEMA = """
 (:Section:ManagementDiscussion)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 (:Section:Properties)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 # === FINANCIAL METRICS & SEGMENTS ===
+# ⚠️ incomeStatement, balanceSheet, cashFlow are TEXT properties directly on Financials node.
+# Use fin.incomeStatement directly — do NOT look for a FinancialMetric with label 'IncomeStatement'.
+# FinancialMetric nodes hold individual line items (e.g. OperatingIncome, Revenue), NOT the full statements.
 (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
 (:Section:Financials)-[:HAS_METRIC]->(:FinancialMetric {label, value})
 (:FinancialMetric)-[:HAS_SEGMENT]->(:Segment {label, value, percentage})
@@ -211,12 +226,16 @@ DETAILED_SCHEMA_V2 = """
 (:Fund)-[:HAS_CHART {year}]->(:Image {category, svg, title})
 (:Fund)-[:HAS_TABLE {year}]->(:Table {content, title})
 (:Fund)-[:MANAGED_BY {year}]->(:Person {name})
+# HAS_AVERAGE_RETURNS → trailing annualized periods (one snapshot per year)
+# Use for: "1-year return", "5-year return", "10-year return", "since inception"
+# These are pre-computed trailing averages — NOT per-calendar-year rows.
+# ⚠️ return1y/5y/10y/Inception can be NULL — always add WHERE ar.returnXxx IS NOT NULL
 (:Fund)-[r:HAS_AVERAGE_RETURNS {year}]->(:AverageReturns {return1y, return5y, return10y, returnInception})
-# ⚠️ returnInception / return1y / return5y / return10y can be NULL — ALWAYS add WHERE ar.returnXxx IS NOT NULL when filtering or ordering by these fields
-(:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, year}]->(:Sector {name})
-(:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
-(:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId, count})  # count = total number of holdings
 
+# HAS_FINANCIAL_HIGHLIGHT → annual total return per calendar year (one row per year)
+# Use for: "average over N years", "year-by-year", "historical returns", "return in year X"
+# Return each year as a separate row; let the caller compute any average.
+# NEVER write avg([fh.return1y, fh.return5y]) — return rows and let the application average them.
 # ⚠️ year lives on the RELATIONSHIP — use r.year, NOT fh.year
 (:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT {year}]->(:FinancialHighlight {
     expenseRatio,            # ⚠️ 0.0 = missing — ALWAYS add AND fh.expenseRatio > 0
@@ -228,6 +247,9 @@ DETAILED_SCHEMA_V2 = """
     netIncomeRatio,
     advisoryFees
 })
+(:Fund)-[h:HAS_SECTOR_ALLOCATION {weight, year}]->(:Sector {name})
+(:Fund)-[h:HAS_REGION_ALLOCATION {weight, year}]->(:Region {name})
+(:Fund)-[:HAS_PORTFOLIO]->(:Portfolio {date, seriesId, count})  # count = total number of holdings
 # ⚠️ numberHoldings is NOT on FinancialHighlight — use (:Fund)-[:HAS_PORTFOLIO]->(p:Portfolio) RETURN p.count
 
 # PROFILE SECTIONS
@@ -260,6 +282,9 @@ DETAILED_SCHEMA_V2 = """
 (:Filing10K)-[:HAS_SECTION]->(:Section:ManagementDiscussion {title})         # text NULL → traverse HAS_CHUNK
 (:Section)-[:HAS_CHUNK]->(:Chunk {text, embedding, title})
 
+# ⚠️ incomeStatement / balanceSheet / cashFlow are TEXT properties on the Financials node itself.
+# Return fin.incomeStatement directly. Do NOT search for FinancialMetric {label: 'IncomeStatement'}.
+# FinancialMetric nodes hold individual numeric line items (e.g. OperatingIncome, Revenue).
 (:Filing10K)-[:HAS_FINANCIALS]->(:Section:Financials {incomeStatement, balanceSheet, cashFlow, fiscalYear})
 (:Section:Financials)-[:HAS_METRIC]->(:FinancialMetric {label, value})-[:HAS_SEGMENT]->(:Segment {label, value, percentage})
 
@@ -293,6 +318,9 @@ DETAILED_SCHEMA_V2 = """
 # ═══════════════════════════════════════════════════════════════
 # R1  expenseRatio     — always add AND fh.expenseRatio > 0  (0.0 means missing data, not free)
 # R2  year on FH       — always [r:HAS_FINANCIAL_HIGHLIGHT {year}] → r.year, never fh.year
+# R2b average returns  — AverageReturns.return1y/5y/10y = trailing annualized snapshots
+#                        FinancialHighlight.totalReturn = actual return for that calendar year
+#                        For "average over N years": return one row per year, let caller average
 # R3  numberHoldings   — Portfolio.count, not any FinancialHighlight property
 # R4  turnover         — absolute value: 2 = 2%, not 0.02
 # R5  rel variable     — only use -[r:REL]-> if you need r.property in RETURN/WHERE/ORDER BY

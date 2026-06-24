@@ -14,23 +14,14 @@ from simple_rag.rag.answer_generation.result_classifier import ResultType
 ANSWER_SYSTEM_PROMPT = """You are a senior financial analyst assistant specializing in SEC filings, mutual funds, and ETFs. You help investors understand fund and company data from official SEC EDGAR filings.
 
 GUIDELINES:
-1. Always cite specific numbers from the data provided. Never fabricate figures.
-2. Present financial metrics with proper formatting ($X.XB for billions, $X.XM for millions, X.XX% for percentages), net assets value end or beginning is the absolute price of the fund.
-3. When comparing values, note the reporting period or date when available.
-4. Flag any data limitations or caveats (e.g., "as of the most recent filing").
-5. If the data does not contain enough information to fully answer the question, say so explicitly rather than guessing.
-6. Do NOT reference the database, Cypher queries, or knowledge graph — speak as if you naturally know this from the SEC filings.
-7. Use professional but accessible language suitable for retail investors.
-8. Structure your response clearly: lead with the direct answer, then provide context.
-9. When data includes multiple entities, present them in a clear comparison format.
-10. For numerical data, round appropriately (2 decimal places for percentages, whole numbers for large dollar amounts).
-11. When source document information is provided, ALWAYS end your response with a "Sources" line citing the filing type, date, accession number, and URL. Never omit this attribution.
-12. If the query is about a specific fund, never mention other funds unless explicitly asked.
-13. Be complete in your answers.
-14. IMPORTANT: NEVER ASNWER WITH INFORMATION THAT IS NOT PROVIDED IN THE CONTEXT.
-15. If many numerical data is given show it first in a markdown table format and then comment the data.
-16. Entity names or tickers show them in bold."""
-
+1. Cite exact figures from the provided data. If the data is insufficient to answer fully, say so explicitly — never guess or fabricate.
+2. NEVER answer with information that is not present in the provided context.
+3. Do NOT reference the database, Cypher queries, or knowledge graph — speak as if you naturally know this from the SEC filings.
+4. Structure responses in markdown: lead with the direct answer. For multiple numerical records use a markdown table first, then commentary. For multiple entities use a comparison format.
+5. If the query is about a specific fund, do not mention other funds unless explicitly asked.
+6. When source documents are provided, ALWAYS end your response with a "Sources" line citing filing type, date, accession number, and URL. Never omit this.
+7. Net assets value beginning/end is the absolute per-share price of the fund, not total AUM.
+"""
 # ── Schema context descriptions ──────────────────────────────────────────────
 
 _SCHEMA_CONTEXT = {
@@ -99,38 +90,43 @@ def build_answer_prompt(
     query_category: str = "",
     enrichment_context: str = "",
     provenance_context: str = "",
+    truncation_note: str = "",
 ) -> str:
     """Build the user prompt for answer generation.
 
     Args:
         user_query: The original investor question.
-        neo4j_results: Raw results from Neo4j (list of dicts).
+        neo4j_results: Raw results from Neo4j (list of dicts), already truncated
+                       by result_enhancer if necessary.
         result_type: Classified result type.
         query_category: SetFit category (e.g. "fund_basic").
-        enrichment_context: Pre-formatted supplementary context from enrichment
-                            queries (fund overview, managers, returns, etc.).
+        enrichment_context: Pre-formatted supplementary context.
+        provenance_context: Source document attribution text.
+        truncation_note: Non-empty when result_enhancer truncated the records;
+                         injected into the prompt so the LLM knows about omitted rows.
 
     Returns:
         Formatted user prompt string.
     """
-    # Schema context
     schema_context = _SCHEMA_CONTEXT.get(
         query_category,
         "Financial data from SEC filings stored in the knowledge graph."
     )
 
-    # Format results — strip embeddings and SVGs from the text representation
+    # Format results — strip embeddings and SVGs
     skip_keys = {"embedding", "svg"}
     formatted_rows = []
-    for row in neo4j_results[:50]:  # Cap at 50 rows to avoid huge prompts
+    for row in neo4j_results:
         cleaned = {k: v for k, v in row.items() if k not in skip_keys}
         formatted_rows.append(str(cleaned))
     results_text = "\n".join(formatted_rows) if formatted_rows else "(no data)"
 
-    # Type-specific instructions
+    # Append truncation note directly after results when present
+    if truncation_note:
+        results_text += f"\n\n{truncation_note}"
+
     instructions = _TYPE_INSTRUCTIONS.get(result_type, _TYPE_INSTRUCTIONS[ResultType.GENERIC])
 
-    # Build enrichment block if present
     enrichment_block = ""
     if enrichment_context:
         enrichment_block = f"""
@@ -139,7 +135,6 @@ Additional context about the entities mentioned (use this to provide a richer, m
 {enrichment_context}
 """
 
-    # Build provenance block if present
     provenance_block = ""
     if provenance_context:
         provenance_block = f"""
@@ -147,10 +142,6 @@ Additional context about the entities mentioned (use this to provide a richer, m
 IMPORTANT — Source Attribution:
 The following source document(s) were used to retrieve this data. You MUST include a "Sources" section at the very end of your response citing these documents.
 {provenance_context}
-
-Format the sources section exactly like this:
----
-*Sources: [Filing Type] filed [Filing Date], Accession No. [accessionNumber] ([URL])*
 """
 
     prompt = f"""The investor asked: "{user_query}"

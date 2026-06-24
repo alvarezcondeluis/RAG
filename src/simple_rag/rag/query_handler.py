@@ -123,6 +123,7 @@ class QueryHandler:
                     model_name=embedder_model,
                     trust_remote_code=True,
                     cache_folder="./cache",
+                    device="cpu",
                 )
                 print(f"✓ Query embedder loaded: {embedder_model}")
 

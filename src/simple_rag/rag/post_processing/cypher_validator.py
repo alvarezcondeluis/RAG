@@ -250,6 +250,49 @@ class CypherValidator:
         self.block_writes = block_writes
         self.use_syntax_check = use_syntax_check
 
+    def _fix_avg_list_literal(self, query: str) -> tuple[str, list[str]]:
+        """
+        Rewrite avg([a, b, c]) → (a + b + c) / 3.0 before validation.
+        Neo4j's avg() only accepts aggregation over a stream, not a list literal.
+        """
+        fixes = []
+        def _replace(m):
+            inner = m.group(1)
+            items = [x.strip() for x in inner.split(',')]
+            n = len(items)
+            expr = ' + '.join(items)
+            fixes.append(f"AVG_LIST_FIX: avg([{inner}]) → ({expr}) / {n}.0")
+            return f"({expr}) / {n}.0"
+        new_query = re.sub(r'\bavg\s*\(\s*\[([^\]]+)\]\s*\)', _replace, query, flags=re.IGNORECASE)
+        return new_query, fixes
+
+    # Properties stored as native floats in Neo4j — toFloat() is a no-op but
+    # prevents the query planner from using range indexes for ORDER BY / WHERE.
+    _NATIVE_FLOAT_PROPS = {
+        "r.weight", "r.marketValue", "r.shares",
+        "fh.expenseRatio", "fh.totalReturn", "fh.netAssets",
+        "fh.turnover", "fh.advisoryFees", "fh.netIncomeRatio",
+        "fh.netAssetsValueBeginning", "fh.netAssetsValueEnd",
+        "ar.return1y", "ar.return5y", "ar.return10y", "ar.returnInception",
+        "ra.weight", "sa.weight", "h.weight",
+    }
+
+    def _fix_redundant_tofloat(self, query: str) -> tuple[str, list[str]]:
+        """Remove toFloat() wrapping on properties already stored as floats.
+
+        toFloat() on an already-float property is a no-op semantically but it
+        prevents Neo4j's query planner from using range indexes for ORDER BY
+        and WHERE comparisons, causing full relationship scans on large portfolios.
+        """
+        fixes: list[str] = []
+        for prop in self._NATIVE_FLOAT_PROPS:
+            pattern = rf'\btoFloat\s*\(\s*({re.escape(prop)})\s*\)'
+            def _repl(m: re.Match, p: str = prop) -> str:
+                fixes.append(f"TOFLOAT_FIX: removed redundant toFloat({p})")
+                return p
+            query = re.sub(pattern, _repl, query, flags=re.IGNORECASE)
+        return query, fixes
+
     def _fix_relationship_directions(self, query: str) -> tuple[str, list[str]]:
         """
         Auto-correct known relationship direction mistakes before validation.
@@ -290,6 +333,24 @@ class CypherValidator:
         for fix_msg in direction_fixes:
             logger.info(fix_msg)
             print(f"🔧 {fix_msg}")
+
+        # Auto-fix avg([list]) → arithmetic mean expression
+        query, avg_fixes = self._fix_avg_list_literal(query)
+        for fix_msg in avg_fixes:
+            logger.info(fix_msg)
+            print(f"🔧 {fix_msg}")
+
+        # Auto-fix redundant toFloat() on properties already stored as floats
+        query, tofloat_fixes = self._fix_redundant_tofloat(query)
+        for fix_msg in tofloat_fixes:
+            logger.info(fix_msg)
+            print(f"🔧 {fix_msg}")
+
+        # Inject Provider and Trust for single-fund queries if not already present
+        query, pt_modified = CypherValidator.inject_fund_provider_trust(query)
+        if pt_modified:
+            logger.info("PROVIDER_TRUST_INJECT: added provider/trust context to fund query")
+            print("🔧 PROVIDER_TRUST_INJECT: provider and trust added to RETURN")
 
         # Step 0: Catch EXPLAIN / PROFILE prefix — the model sometimes adds these debug keywords
         if re.match(r'^(EXPLAIN|PROFILE)\s+', query, re.IGNORECASE):
@@ -597,109 +658,6 @@ class CypherValidator:
         return result
 
     @staticmethod
-    def strip_spurious_ticker_filters(
-        cypher: str,
-        question: str,
-        resolved_entities: dict | None = None,
-    ) -> tuple:
-        """
-        Remove {ticker: 'XYZ'} filters from Company node patterns when XYZ was not
-        mentioned in the question and was not identified by the entity resolver.
-
-        Only targets the simple single-property case: (c:Company {ticker: 'XYZ'}).
-        Multi-property maps (e.g. {ticker: 'XYZ', name: '...'}) are left untouched.
-
-        Returns (cleaned_cypher: str, was_modified: bool).
-        """
-        if resolved_entities is None:
-            resolved_entities = {}
-
-        known_tickers: set = set()
-        for entity_name, entity_info in resolved_entities.items():
-            if isinstance(entity_info, dict):
-                if entity_info.get("type") == "Ticker":
-                    known_tickers.add(entity_name.upper())
-                if entity_info.get("ticker"):
-                    known_tickers.add(str(entity_info["ticker"]).upper())
-
-        question_upper = question.upper()
-
-        was_modified = False
-
-        def _should_strip(ticker: str) -> bool:
-            in_question = bool(re.search(rf'\b{re.escape(ticker)}\b', question_upper))
-            in_resolver = ticker in known_tickers
-            return not in_question and not in_resolver
-
-        # 1. Strip (varname:Company {ticker: 'XYZ'}) — single-property inline filter
-        pattern_company = re.compile(
-            r'(\(\s*\w*\s*:Company\s*)\{\s*ticker\s*:\s*[\'"]([A-Z0-9]+)[\'"]\s*\}(\s*\))',
-            re.IGNORECASE,
-        )
-
-        def _replace_company(m):
-            nonlocal was_modified
-            ticker = m.group(2).upper()
-            if _should_strip(ticker):
-                was_modified = True
-                return m.group(1).rstrip() + m.group(3)
-            return m.group(0)
-
-        cleaned = pattern_company.sub(_replace_company, cypher)
-
-        # 2. Strip (varname:Fund {ticker: 'XYZ'}) — same spurious injection on Fund nodes
-        pattern_fund = re.compile(
-            r'(\(\s*\w*\s*:Fund\s*)\{\s*ticker\s*:\s*[\'"]([A-Z0-9]+)[\'"]\s*\}(\s*\))',
-            re.IGNORECASE,
-        )
-
-        def _replace_fund(m):
-            nonlocal was_modified
-            ticker = m.group(2).upper()
-            if _should_strip(ticker):
-                was_modified = True
-                return m.group(1).rstrip() + m.group(3)
-            return m.group(0)
-
-        cleaned = pattern_fund.sub(_replace_fund, cleaned)
-
-        # 3. Strip spurious WHERE/AND ticker conditions:
-        #    var.ticker = 'XYZ' AND ...   (leading condition)
-        #    ... AND var.ticker = 'XYZ'   (trailing or mid condition)
-
-        def _sub_leading_lambda(m):
-            nonlocal was_modified
-            ticker = m.group(2).upper()
-            if _should_strip(ticker):
-                was_modified = True
-                return m.group(1)  # keep just "WHERE "
-            return m.group(0)
-
-        cleaned = re.sub(
-            r'(WHERE\s+)\w+\.ticker\s*=\s*[\'"]([A-Z0-9]+)[\'"](\s+AND\s+)',
-            _sub_leading_lambda,
-            cleaned,
-            flags=re.IGNORECASE,
-        )
-
-        def _sub_trailing_where(m):
-            nonlocal was_modified
-            ticker = m.group(1).upper()
-            if _should_strip(ticker):
-                was_modified = True
-                return ''
-            return m.group(0)
-
-        cleaned = re.sub(
-            r'\s+AND\s+\w+\.ticker\s*=\s*[\'"]([A-Z0-9]+)[\'"]\b',
-            _sub_trailing_where,
-            cleaned,
-            flags=re.IGNORECASE,
-        )
-
-        return cleaned, was_modified
-
-    @staticmethod
     def replace_fund_name_with_resolved_ticker(
         cypher: str,
         resolved_entities: dict | None = None,
@@ -955,9 +913,11 @@ class CypherValidator:
                     was_modified[0] = True
                 else:
                     kept.append(p.strip())
+            # Always append a space: the regex consumes the trailing whitespace
+            # before CALL/MATCH/etc., so omitting it merges tokens (e.g. "NULLCALL").
             if not kept:
-                return ''
-            return 'WHERE ' + ' AND '.join(kept)
+                return ' '
+            return 'WHERE ' + ' AND '.join(kept) + ' '
 
         # Match WHERE clause up to the next major Cypher keyword
         cleaned = re.sub(
@@ -1018,6 +978,192 @@ class CypherValidator:
         )
         cleaned = pattern.sub(_bump, cypher)
         return cleaned, cleaned != cypher
+
+    @staticmethod
+    def fix_portfolio_count_ordering(cypher: str) -> tuple:
+        """
+        Fix holdings queries that sort by p.count (total portfolio size) instead of
+        r.weight (individual holding weight).
+
+        p.count is the same value for every holding in a portfolio, so ORDER BY p.count
+        produces arbitrary ordering. "Top holdings" always means ORDER BY r.weight DESC.
+
+        Transforms:
+          -[:HAS_HOLDING]->(h:Holding) ... ORDER BY p.count DESC
+          → -[r:HAS_HOLDING]->(h:Holding) ... ORDER BY r.weight DESC
+
+        Returns (fixed_cypher: str, was_modified: bool).
+        """
+        if 'HAS_HOLDING' not in cypher:
+            return cypher, False
+        if not re.search(r'\bORDER\s+BY\s+\w+\.count\b', cypher, re.IGNORECASE):
+            return cypher, False
+        # Only fix when a specific fund/company is targeted — without a filter p.count
+        # differs per portfolio and ordering by it is legitimate.
+        if not re.search(r':Fund\s*\{', cypher, re.IGNORECASE):
+            return cypher, False
+
+        was_modified = False
+
+        # Inject named variable on HAS_HOLDING if anonymous
+        if re.search(r'-\[:HAS_HOLDING\]->', cypher, re.IGNORECASE):
+            cypher = re.sub(r'-\[:HAS_HOLDING\]->', '-[r:HAS_HOLDING]->', cypher, count=1, flags=re.IGNORECASE)
+            was_modified = True
+
+        # Determine variable name on HAS_HOLDING
+        m = re.search(r'\[(\w+):HAS_HOLDING\]', cypher, re.IGNORECASE)
+        holding_var = m.group(1) if m else 'r'
+
+        # Replace ORDER BY <any_var>.count with ORDER BY <holding_var>.weight DESC
+        cleaned, n = re.subn(
+            r'\bORDER\s+BY\s+\w+\.count\b(\s+(?:ASC|DESC))?',
+            f'ORDER BY {holding_var}.weight DESC',
+            cypher,
+            flags=re.IGNORECASE,
+        )
+        if n > 0:
+            cypher = cleaned
+            was_modified = True
+
+        return cypher, was_modified
+
+    @staticmethod
+    def inject_year_in_section_query(cypher: str) -> tuple:
+        """
+        For structural 10-K section queries (REPORTS_IN → HAS_SECTION → HAS_CHUNK),
+        ensure r.year is included in RETURN and ORDER BY.
+
+        Without r.year the results from multiple filing years are mixed with no
+        way to distinguish them and the most recent year's chunks appear last.
+
+        Transforms:
+          (c:Company)-[:REPORTS_IN]->(f:Filing10K)-...->(chunk:Chunk)
+          RETURN s.title, chunk.text ORDER BY chunk.id ASC
+          →
+          (c:Company)-[r:REPORTS_IN]->(f:Filing10K)-...->(chunk:Chunk)
+          RETURN s.title, chunk.text, r.year AS year ORDER BY r.year DESC, chunk.id ASC
+
+        Returns (fixed_cypher: str, was_modified: bool).
+        """
+        if 'db.index.vector.queryNodes' in cypher:
+            return cypher, False
+        if 'REPORTS_IN' not in cypher:
+            return cypher, False
+        if 'HAS_CHUNK' not in cypher:
+            return cypher, False
+        if not re.search(r'chunk\.text', cypher, re.IGNORECASE):
+            return cypher, False
+
+        was_modified = False
+
+        # Find or inject REPORTS_IN variable
+        m = re.search(r'\[(\w+):REPORTS_IN\]', cypher, re.IGNORECASE)
+        if m:
+            reports_var = m.group(1)
+        else:
+            cypher = re.sub(r'-\[:REPORTS_IN\]->', '-[r:REPORTS_IN]->', cypher, count=1, flags=re.IGNORECASE)
+            reports_var = 'r'
+            was_modified = True
+
+        # Skip if r.year already in query
+        if re.search(rf'\b{re.escape(reports_var)}\.year\b', cypher, re.IGNORECASE):
+            return cypher, was_modified
+
+        # Add r.year AS year to RETURN (before ORDER BY / LIMIT / end)
+        cypher_new = re.sub(
+            r'(RETURN\s+.+?)(\s+ORDER\s+BY|\s+LIMIT|\s*$)',
+            lambda m2: m2.group(1) + f', {reports_var}.year AS year' + m2.group(2),
+            cypher,
+            count=1,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if cypher_new != cypher:
+            cypher = cypher_new
+            was_modified = True
+
+        # Prefix r.year DESC to ORDER BY if not already leading
+        order_m = re.search(r'\bORDER\s+BY\s+', cypher, re.IGNORECASE)
+        if order_m:
+            after_order = cypher[order_m.end():]
+            if not re.match(rf'{re.escape(reports_var)}\.year', after_order, re.IGNORECASE):
+                cypher = re.sub(
+                    r'\bORDER\s+BY\s+',
+                    f'ORDER BY {reports_var}.year DESC, ',
+                    cypher,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                was_modified = True
+
+        return cypher, was_modified
+
+    @staticmethod
+    def inject_fund_provider_trust(cypher: str) -> tuple[str, bool]:
+        """Append Provider and Trust to Fund queries that don't already include them.
+
+        When a query returns properties of a specific Fund but omits who issues it,
+        this injects an OPTIONAL MATCH for the Provider→Trust→Fund chain and appends
+        prov.name AS provider, t.name AS trust to the RETURN clause.
+
+        Guards — skips when any of these are true:
+        - Vector / fulltext CALL queries
+        - :Provider or :Trust already in query
+        - Aggregation functions (COUNT, SUM, AVG, MIN, MAX) — would break GROUP BY
+        - No specific Fund filter ({ticker:} or {name:}) — global scans excluded
+        - More than one WITH clause — complex pipelines excluded
+        - DISTINCT across all columns — cardinality sensitive
+        """
+        if 'db.index.vector.queryNodes' in cypher or 'db.index.fulltext.queryNodes' in cypher:
+            return cypher, False
+        if ':Fund' not in cypher:
+            return cypher, False
+        # Provider or Trust already traversed
+        if re.search(r'\b:Provider\b|\b:Trust\b', cypher):
+            return cypher, False
+        # provider/trust already returned under any alias
+        if re.search(r'\bprov(?:ider)?\b\s*\.|t\.name\b|\btrustName\b|\bproviderName\b', cypher, re.IGNORECASE):
+            return cypher, False
+        # skip aggregations
+        if re.search(r'\b(?:COUNT|SUM|AVG|MIN|MAX)\s*\(', cypher, re.IGNORECASE):
+            return cypher, False
+        # require a specific fund filter — don't fire on global scans
+        if not re.search(r':Fund\s*\{\s*(?:ticker|name)\s*:', cypher, re.IGNORECASE):
+            return cypher, False
+        # skip complex multi-WITH pipelines
+        if len(re.findall(r'\bWITH\b', cypher, re.IGNORECASE)) > 1:
+            return cypher, False
+
+        fund_m = re.search(r'\(\s*(\w+)\s*:Fund\b', cypher, re.IGNORECASE)
+        if not fund_m:
+            return cypher, False
+        fund_var = fund_m.group(1)
+
+        return_m = re.search(r'\bRETURN\b', cypher, re.IGNORECASE)
+        if not return_m:
+            return cypher, False
+
+        before_return = cypher[:return_m.start()].rstrip()
+        return_and_after = cypher[return_m.start():]
+
+        # Split RETURN columns from trailing ORDER BY / LIMIT / SKIP / UNION
+        trailer_m = re.search(r'\b(?:ORDER\s+BY|LIMIT|SKIP|UNION)\b', return_and_after, re.IGNORECASE)
+        if trailer_m:
+            return_block = return_and_after[:trailer_m.start()].rstrip()
+            trailer = "\n" + return_and_after[trailer_m.start():]
+        else:
+            return_block = return_and_after.rstrip()
+            trailer = ""
+
+        opt_match = f"\nOPTIONAL MATCH (prov:Provider)-[:MANAGES]->(t:Trust)-[:ISSUES]->({fund_var})"
+        new_cypher = (
+            before_return
+            + opt_match
+            + "\n"
+            + return_block
+            + ", prov.name AS provider, t.name AS trust"
+            + trailer
+        )
+        return new_cypher, True
 
     def check_syntax_only(self, query: str) -> ValidationResult:
         """Only check Cypher syntax, no schema validation."""

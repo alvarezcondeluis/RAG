@@ -183,7 +183,7 @@ class Filing10K(BaseModel):
         return self.income_statements[max(self.income_statements.keys())]
 
 class InsiderTransaction(BaseModel):
-    date: Optional[str] = None
+    date: Optional[date] = None
     insider_name: Optional[str] = None
     position: Optional[str] = None
     transaction_type: Optional[str] = None  # "BUY", "SELL", "GRANT", "VESTING", "TAX"

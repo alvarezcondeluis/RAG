@@ -340,6 +340,7 @@ def run_loop(config: PipelineConfig):
         build_answer_prompt,
     )
     from simple_rag.rag.answer_generation.result_classifier import ResultClassifier, ResultType
+    from simple_rag.rag.answer_generation.result_enhancer import enhance
     from simple_rag.rag.context_enrichment import format_enrichment_context, resolve_document_provenance
 
     handler, answer_provider, driver = _init_pipeline(config)
@@ -397,26 +398,35 @@ def run_loop(config: PipelineConfig):
                     print("\n  \033[93mNo results returned from the database.\033[0m")
                     continue
 
+                # Step 2: Enhance results (empty check + truncation)
+                enhanced = enhance(result.data, query=query)
+                if enhanced.is_empty:
+                    print(f"\n  \033[93m{enhanced.empty_message}\033[0m")
+                    continue
+
                 if config.verbose:
-                    print(f"  \033[90mResults: {len(result.data)} rows\033[0m")
+                    print(f"  \033[90mResults: {enhanced.original_count} rows"
+                          + (f" (truncated to {len(enhanced.records)})" if enhanced.truncated else "")
+                          + "\033[0m")
 
-                # Step 2: Classify result type
-                result_type = classifier.classify(result.data, result.category)
+                # Step 3: Classify result type
+                result_type = classifier.classify(enhanced.records, result.category)
 
-                # Step 3: Build prompt and generate answer
+                # Step 4: Build prompt and generate answer
                 enrichment_text = format_enrichment_context(result.enrichment)
                 provenance_text = resolve_document_provenance(
                     cypher=result.cypher or "",
                     neo4j_driver=driver,
-                    main_results=result.data,
+                    main_results=enhanced.records,
                 )
                 user_prompt = build_answer_prompt(
                     user_query=query,
-                    neo4j_results=result.data,
+                    neo4j_results=enhanced.records,
                     result_type=result_type,
                     query_category=result.category,
                     enrichment_context=enrichment_text,
                     provenance_context=provenance_text,
+                    truncation_note=enhanced.truncation_note,
                 )
 
                 messages = [

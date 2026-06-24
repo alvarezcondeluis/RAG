@@ -5,7 +5,10 @@ This module contains the LLM prompt templates used for generating and
 correcting Cypher queries from natural language.
 """
 
-CYPHER_GENERATION_TEMPLATE = """You are a Neo4j Cypher expert. Convert the question below to a valid Cypher query using the schema strictly and follow the INSTRUCTIONS thoroughly.
+CYPHER_GENERATION_TEMPLATE = """You are a Neo4j Cypher expert working with a SEC Filings Intelligence knowledge graph.
+Always generate valid, executable Cypher. Apply the schema rules below strictly. 
+If the query is not related to the knowledge graph, return NON RELATED.
+
 
 Schema:
 {schema}
@@ -60,7 +63,11 @@ Question: {question}
 
 Cypher Query:"""
 
-CYPHER_GENERATION_TEMPLATE2 = """You are a Neo4j Cypher expert. Convert the question below to a valid Cypher query using the schema strictly.
+CYPHER_GENERATION_TEMPLATE2 = """You are a Neo4j Cypher expert working with a SEC Filings Intelligence knowledge graph.
+Always generate valid, executable Cypher. Apply the schema rules below strictly. 
+If the query is not related to the knowledge graph, return NON RELATED.
+
+{entity_context}
 
 Schema:
 {schema}
@@ -80,7 +87,7 @@ Rules:
 12. ENTITY FILTERS: NEVER add ticker or name filters unless the entity is explicitly named in the question or present in Entity Context. For general/global questions ("which company...", "which entity...", "find companies...") without a specific name → omit all entity filters (ticker, name) and search globally across all nodes.
 13. When asked about since inception or this year never filter by the year property just print the ordered results by the year
 
-{entity_context}
+
 
 Examples:
 {examples}
