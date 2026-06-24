@@ -514,17 +514,23 @@ class TenKParser:
             income_statement: Raw text of the income statement (stored for
                 RAG context).
         """
+        if "error" in income_statement_dict:
+            logger.warning(
+                f"Income statement extraction failed for {company.ticker}: "
+                f"{income_statement_dict['error']}"
+            )
+            return
+
         periods = income_statement_dict["periods"]
         line_items = income_statement_dict["line_items"]
 
         filing_date = filing_metadata.filing_date
         if filing_date not in company.filings_10k:
-            company.filings_10k[filing_date] = Filing10K(
-                filing_metadata=filing_metadata,
-                income_statement_text=income_statement,
-            )
+            company.filings_10k[filing_date] = Filing10K(filing_metadata=filing_metadata)
 
         filing_10k = company.filings_10k[filing_date]
+        if income_statement is not None:
+            filing_10k.income_statement_text = income_statement
 
         for period_date_str in periods:
             period_date = date.fromisoformat(period_date_str)

@@ -981,6 +981,7 @@ class FilingRetriever:
                     derivatives_df=derivatives_df,
                 )
 
+                fund.series_id = res.get("series_id")
                 fund.nport_metadata = res["nport_metadata"]
                 matched += 1
 

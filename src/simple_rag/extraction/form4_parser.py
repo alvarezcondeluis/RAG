@@ -115,7 +115,7 @@ class Form4Parser:
                 value = 0.0
 
             transaction_record = InsiderTransaction(
-                date=str(report_date),
+                date=report_date,
                 insider_name=str(insider_name),
                 position=str(position),
                 transaction_type=tx_type,
