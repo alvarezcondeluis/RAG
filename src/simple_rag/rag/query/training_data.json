@@ -373,7 +373,7 @@
       ]
     },
     {
-      "text": "Just curious — how many individual positions does the Total Stock Market fund hold?",
+      "text": "Just curious \u2014 how many individual positions does the Total Stock Market fund hold?",
       "labels": [
         "fund_portfolio"
       ]
@@ -934,7 +934,7 @@
       ]
     },
     {
-      "text": "I'm a conservative investor — which funds match that profile?",
+      "text": "I'm a conservative investor \u2014 which funds match that profile?",
       "labels": [
         "fund_profile"
       ]
@@ -952,7 +952,7 @@
       ]
     },
     {
-      "text": "I want high growth — which funds explicitly pursue that?",
+      "text": "I want high growth \u2014 which funds explicitly pursue that?",
       "labels": [
         "fund_profile"
       ]
@@ -1006,7 +1006,7 @@
       ]
     },
     {
-      "text": "I'm mainly worried about not losing money — which funds focus on capital preservation?",
+      "text": "I'm mainly worried about not losing money \u2014 which funds focus on capital preservation?",
       "labels": [
         "fund_profile"
       ]
@@ -1198,7 +1198,7 @@
       ]
     },
     {
-      "text": "I'm thinking of investing in Apple — what risks does their 10-K flag?",
+      "text": "I'm thinking of investing in Apple \u2014 what risks does their 10-K flag?",
       "labels": [
         "company_filing"
       ]
@@ -2311,7 +2311,7 @@
       ]
     },
     {
-      "text": "I want to understand how diversified the Total Stock Market fund really is — how many different holdings does it have?",
+      "text": "I want to understand how diversified the Total Stock Market fund really is \u2014 how many different holdings does it have?",
       "labels": [
         "fund_portfolio"
       ]
@@ -2563,7 +2563,7 @@
       ]
     },
     {
-      "text": "How is NVDA executive pay structured — salary, bonus, stock?",
+      "text": "How is NVDA executive pay structured \u2014 salary, bonus, stock?",
       "labels": [
         "company_people"
       ]
@@ -2587,7 +2587,7 @@
       ]
     },
     {
-      "text": "I heard a Vanguard fund manager oversees multiple funds — can I see which ones?",
+      "text": "I heard a Vanguard fund manager oversees multiple funds \u2014 can I see which ones?",
       "labels": [
         "company_people"
       ]
@@ -2783,7 +2783,7 @@
       ]
     },
     {
-      "text": "I'm comparing the Vanguard S&P 500 and Total Stock Market side by side — can you show me their expense ratios?",
+      "text": "I'm comparing the Vanguard S&P 500 and Total Stock Market side by side \u2014 can you show me their expense ratios?",
       "labels": [
         "fund_basic"
       ]
@@ -2826,6 +2826,66 @@
         "fund_portfolio",
         "company_filing",
         "company_people"
+      ]
+    },
+    {
+      "text": "Show me the reporting and filing dates of all documents for the VOO fund.",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "What are the accession numbers of the filings for VTSAX?",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "List all documents extracted for the VTI fund with their filing dates.",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "What is the most recent filing date for the VOO fund?",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "Show me the form type and URL of documents associated with VFIAX.",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "What N-CSR filings do we have for the Vanguard 500 Index fund?",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "Give me the reporting date of the latest document ingested for VBTLX.",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "Which filing dates are available for VEXAX?",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "Show me the source documents and their dates for all Vanguard ETFs.",
+      "labels": [
+        "fund_basic"
+      ]
+    },
+    {
+      "text": "What is the accession number and URL for the latest VOO document?",
+      "labels": [
+        "fund_basic"
       ]
     }
   ],

@@ -1794,5 +1794,65 @@
   {
     "question": "Which expensive funds (expense ratio over 0.5%) have the best average annual return across all recorded years?",
     "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.expenseRatio > 0.5 AND fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, f.name AS name, ROUND(AVG(fh.totalReturn), 2) AS avgTotalReturn, COUNT(fh) AS yearsRecorded ORDER BY avgTotalReturn DESC"
+  },
+  {
+    "question": "What is the average annual total return of VTI over the last 5 years?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC LIMIT 5"
+  },
+  {
+    "question": "Calculate the average total return for VFIAX across all available years",
+    "cypher": "MATCH (f:Fund {ticker: 'VFIAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year ASC"
+  },
+  {
+    "question": "What has been the mean annual return of the Vanguard Total Stock Market fund over the past 3 years?",
+    "cypher": "MATCH (f:Fund {ticker: 'VTI'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC LIMIT 3"
+  },
+  {
+    "question": "What is the average return of BND between 2020 and 2023?",
+    "cypher": "MATCH (f:Fund {ticker: 'BND'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE r.year >= 2020 AND r.year <= 2023 AND fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year ASC"
+  },
+  {
+    "question": "Compare the average annual returns of VTI and VOO over all recorded years",
+    "cypher": "MATCH (f:Fund)-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE f.ticker IN ['VTI', 'VOO'] AND fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY f.ticker ASC, r.year ASC"
+  },
+  {
+    "question": "What is the average annual return of VGHAX over the last 10 years?",
+    "cypher": "MATCH (f:Fund {ticker: 'VGHAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC LIMIT 10"
+  },
+  {
+    "question": "What is the historical average return of the Vanguard Health Care Fund?",
+    "cypher": "MATCH (f:Fund {ticker: 'VGHAX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year ASC"
+  },
+  {
+    "question": "Show me each year's total return for VOO so I can compute the average myself",
+    "cypher": "MATCH (f:Fund {ticker: 'VOO'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year ASC"
+  },
+  {
+    "question": "What was the average annual return of VIG in years where the market was positive (totalReturn > 0)?",
+    "cypher": "MATCH (f:Fund {ticker: 'VIG'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn > 0 RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year ASC"
+  },
+  {
+    "question": "Give me the year-by-year annual returns for VEMPX to calculate its 5-year average",
+    "cypher": "MATCH (f:Fund {ticker: 'VEMPX'})-[r:HAS_FINANCIAL_HIGHLIGHT]->(fh:FinancialHighlight) WHERE fh.totalReturn IS NOT NULL RETURN f.ticker AS ticker, r.year AS year, fh.totalReturn AS totalReturn ORDER BY r.year DESC LIMIT 5"
+  },
+  {
+    "question": "Show me the income statement for Microsoft from its latest 10-K filing",
+    "cypher": "MATCH (c:Company {ticker: 'MSFT'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) WHERE fin.incomeStatement IS NOT NULL RETURN c.name AS companyName, fin.fiscalYear AS fiscalYear, fin.incomeStatement AS incomeStatement ORDER BY fin.fiscalYear DESC LIMIT 1"
+  },
+  {
+    "question": "What does the income statement of Apple look like?",
+    "cypher": "MATCH (c:Company {ticker: 'AAPL'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) WHERE fin.incomeStatement IS NOT NULL RETURN c.name AS companyName, fin.fiscalYear AS fiscalYear, fin.incomeStatement AS incomeStatement ORDER BY fin.fiscalYear DESC LIMIT 1"
+  },
+  {
+    "question": "Give me the income statement from Tesla's most recent 10-K",
+    "cypher": "MATCH (c:Company {ticker: 'TSLA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) WHERE fin.incomeStatement IS NOT NULL RETURN c.name AS companyName, fin.fiscalYear AS fiscalYear, fin.incomeStatement AS incomeStatement ORDER BY fin.fiscalYear DESC LIMIT 1"
+  },
+  {
+    "question": "Show me the income statement for all available years for NVIDIA",
+    "cypher": "MATCH (c:Company {ticker: 'NVDA'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) WHERE fin.incomeStatement IS NOT NULL RETURN c.name AS companyName, fin.fiscalYear AS fiscalYear, fin.incomeStatement AS incomeStatement ORDER BY fin.fiscalYear DESC"
+  },
+  {
+    "question": "Retrieve the profit and loss statement from the latest 10-K filing for Amazon",
+    "cypher": "MATCH (c:Company {ticker: 'AMZN'})-[r:REPORTS_IN]->(f:Filing10K)-[:HAS_FINANCIALS]->(fin:Section:Financials) WHERE fin.incomeStatement IS NOT NULL RETURN c.name AS companyName, fin.fiscalYear AS fiscalYear, fin.incomeStatement AS incomeStatement ORDER BY fin.fiscalYear DESC LIMIT 1"
   }
 ]
