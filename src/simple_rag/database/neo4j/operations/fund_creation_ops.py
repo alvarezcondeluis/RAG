@@ -100,9 +100,12 @@ class FundCreationOperations(Neo4jDatabaseBase):
             MERGE (d:Document {accessionNumber: $accession_number})
             ON CREATE SET
                 d.filingDate = $filing_date,
+                d.reportingDate = $reporting_date,
                 d.type = $form,
                 d.url = $url
-            
+            ON MATCH SET
+                d.reportingDate = CASE WHEN d.reportingDate IS NULL THEN $reporting_date ELSE d.reportingDate END
+
             // Link Document to Fund
             MERGE (f)-[:EXTRACTED_FROM]->(d)
 
@@ -187,6 +190,7 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 # NCSR Document
                 "accession_number": metadata.accession_number,
                 "filing_date": metadata.filing_date,
+                "reporting_date": metadata.reporting_date,
                 "url": metadata.url,
                 "form": metadata.form,
                 
@@ -215,16 +219,13 @@ class FundCreationOperations(Neo4jDatabaseBase):
             print(f"❌ Error creating fund {fund.ticker}: {e}")
             return None
     
-    def add_managers(self, fund_ticker: str, managers: List[Dict[str, Any]], year: Optional[int] = None):
+    def add_managers(self, fund_ticker: str, managers: List[Any], year: Optional[int] = None):
         """
         Add managers to a fund by creating Person nodes and MANAGED_BY relationships.
-        
+
         Args:
             fund_ticker: The ticker of the fund to add managers to
-            managers: List of manager dictionaries with keys:
-                     - name: Manager name (required)
-                     - role: Manager role (optional)
-                     - since: Start date (optional)
+            managers: List of manager names (str) or dicts with at least a "name" key
             year: Year associated with this management record
         """
         try:
@@ -235,7 +236,11 @@ class FundCreationOperations(Neo4jDatabaseBase):
                     print(f"⚠️ Skipping manager without name: {manager}")
                     continue
 
-                manager = {**manager, "name": _normalize_person_name(manager["name"])}
+                if isinstance(manager, str):
+                    manager_name = _normalize_person_name(manager)
+                else:
+                    manager_name = _normalize_person_name(manager.get("name", str(manager)))
+
                 # Create Person node and link to fund
                 query = """
                 MATCH (f:Fund {ticker: $fund_ticker})
@@ -248,18 +253,18 @@ class FundCreationOperations(Neo4jDatabaseBase):
                 SET r.year = $year
                 RETURN p, f, r
                 """
-                
+
                 params = {
                     "fund_ticker": fund_ticker,
-                    "manager_name": manager,
+                    "manager_name": manager_name,
                     "year": year,
                 }
-                
+
                 result = self._execute_write(query, params)
                 if result:
-                    print(f"✅ Added manager: {manager} to {fund_ticker}")
+                    print(f"✅ Added manager: {manager_name} to {fund_ticker}")
                 else:
-                    print(f"⚠️ Failed to add manager: {manager}")
+                    print(f"⚠️ Failed to add manager: {manager_name}")
             
         except Exception as e:
             print(f"❌ Error adding managers to fund {fund_ticker}: {e}")
@@ -407,9 +412,9 @@ class FundCreationOperations(Neo4jDatabaseBase):
             params = {
                 "fund_ticker": fund_ticker,
                 "sectors": sectors_data,
-                "year": int(report_date[:4]) if isinstance(report_date, str) else report_date,
+                "year": int(report_date[:4]) if isinstance(report_date, str) else report_date.year if hasattr(report_date, 'year') else int(report_date),
             }
-            
+
             result = self._execute_write(query, params)
             if result:
                 count = result[0]["count"]
@@ -484,9 +489,9 @@ class FundCreationOperations(Neo4jDatabaseBase):
             params = {
                 "fund_ticker": fund_ticker,
                 "regions": regions_data,
-                "year": int(report_date[:4]) if isinstance(report_date, str) else report_date,
+                "year": int(report_date[:4]) if isinstance(report_date, str) else report_date.year if hasattr(report_date, 'year') else int(report_date),
             }
-            
+
             result = self._execute_write(query, params)
             if result:
                 count = result[0]["count"]

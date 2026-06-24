@@ -256,8 +256,7 @@ class SchemaManager(Neo4jDatabaseBase):
             "CREATE INDEX portfolio_date_index IF NOT EXISTS FOR (p:Portfolio) ON (p.date)",
         ]
 
-        # 3. RELATIONSHIP-PROPERTY INDEXES (Year-keyed traversal performance)
-        # Most fund-side queries filter by year on these relationships.
+        # 3. RELATIONSHIP-PROPERTY INDEXES (Year-keyed traversal + portfolio performance)
         relationship_queries = [
             "CREATE INDEX rel_reports_in_year IF NOT EXISTS FOR ()-[r:REPORTS_IN]-() ON (r.year)",
             "CREATE INDEX rel_defined_by_year IF NOT EXISTS FOR ()-[r:DEFINED_BY]-() ON (r.year)",
@@ -268,6 +267,9 @@ class SchemaManager(Neo4jDatabaseBase):
             "CREATE INDEX rel_has_average_returns_year IF NOT EXISTS FOR ()-[r:HAS_AVERAGE_RETURNS]-() ON (r.year)",
             "CREATE INDEX rel_has_chart_year IF NOT EXISTS FOR ()-[r:HAS_CHART]-() ON (r.year)",
             "CREATE INDEX rel_has_table_year IF NOT EXISTS FOR ()-[r:HAS_TABLE]-() ON (r.year)",
+            # HAS_HOLDING weight index — 323K relationships; enables ORDER BY r.weight DESC
+            # without a full relationship scan once toFloat() is removed from generated queries.
+            "CREATE INDEX rel_has_holding_weight IF NOT EXISTS FOR ()-[r:HAS_HOLDING]-() ON (r.weight)",
         ]
 
         # 4. FULLTEXT INDEXES (Keyword Search)
