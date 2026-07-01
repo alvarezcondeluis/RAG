@@ -209,18 +209,24 @@ def render_config_page() -> None:
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         use_schema_injection = st.toggle("Schema Injection", value=True, key="_schema_toggle")
+        st.caption("Injects schema subset into prompt. More accurate, more tokens.")
     with col2:
         enable_entity_resolution = st.toggle("Entity Resolution", value=True, key="_entity_toggle")
+        st.caption("Fuzzy-matches fund names & tickers before translation.")
     with col3:
         enable_few_shot = st.toggle("Few-Shot Examples", value=True, key="_fewshot_toggle")
+        st.caption("Retrieves similar Cypher examples via FAISS to guide generation.")
     with col4:
         verbose = st.toggle("Verbose Mode", value=False, key="_verbose_toggle")
+        st.caption("Logs Cypher, category and timings to the server console.")
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         retry_module = st.toggle("Retry on Error", value=True, key="_retry_toggle")
+        st.caption("Re-sends failed Cypher + error to the LLM (up to 3 attempts).")
     with col2:
         embed_vector_queries = st.toggle("Embed Vector Queries", value=False, key="_embed_toggle")
+        st.caption("Reuses the query embedding across steps — saves one inference call.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -230,6 +236,7 @@ def render_config_page() -> None:
             index=0,
             key="_retry_strategy_select",
         )
+        st.caption("full — resends schema + examples. lean — sends only the error (faster).")
     with col2:
         few_shot_model = st.selectbox(
             "Few-Shot Model",
@@ -240,28 +247,9 @@ def render_config_page() -> None:
             index=0,
             key="_fewshot_model_select",
         )
-
-    # ── Summary ──────────────────────────────────────────────────────────────
-
-    _show_server = cypher_backend == "openai" or answer_provider_name == "openai_local"
-    server_info = f"`{openai_host}:{openai_port}`" if _show_server else "—"
-    summary_md = f"""
-| Setting | Value |
-|---|---|
-| **Text2Cypher** | `{backend_options.get(cypher_backend, cypher_backend)}` / `{cypher_model}` |
-| **Server** | {server_info} |
-| **Answer LLM** | `{answer_provider_name}` / `{answer_model}` |
-| **Schema Injection** | {'ON' if use_schema_injection else 'OFF'} |
-| **Entity Resolution** | {'ON' if enable_entity_resolution else 'OFF'} |
-| **Few-Shot** | {'ON' if enable_few_shot else 'OFF'} (`{few_shot_model.split('/')[-1]}`) |
-| **Retry on Error** | {'ON' if retry_module else 'OFF'} (`{retry_strategy}`) |
-| **Embed Vector Queries** | {'ON' if embed_vector_queries else 'OFF'} |
-| **Verbose** | {'ON' if verbose else 'OFF'} |
-"""
-    st.markdown(summary_md)
+        st.caption("MiniLM is faster. Nomic gives higher-quality matches (1536d).")
 
     # ── Launch Button ────────────────────────────────────────────────────────
-    st.markdown("")
 
     if st.button("Launch Pipeline", type="primary", use_container_width=True, key="_launch_btn"):
         config = PipelineConfig(

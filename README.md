@@ -1,18 +1,39 @@
 # SEC Filings Intelligence — Hybrid RAG System
 
-Final Master's Thesis (TFM) project: a production-grade RAG system that combines a **Neo4j knowledge graph** with **LLM-powered natural language querying** over SEC financial data — mutual funds, ETFs, and company 10-K filings. Users ask questions in plain English; the system translates them into Cypher queries, executes them against the knowledge graph, and streams analyst-grade answers with source citations.
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![Neo4j](https://img.shields.io/badge/Neo4j-5.27-008CC1?logo=neo4j&logoColor=white)
+![LangChain](https://img.shields.io/badge/LangChain-1.0+-1C3C3C?logo=langchain&logoColor=white)
+![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.13+-6B4FBB?logoColor=white)
+![HuggingFace](https://img.shields.io/badge/HuggingFace-SetFit%20%7C%20Nomic-FFD21E?logo=huggingface&logoColor=black)
+![Docker](https://img.shields.io/badge/Docker-Neo4j%20%7C%20APOC-2496ED?logo=docker&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.57+-FF4B4B?logo=streamlit&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-local%20inference-black)
+![Groq](https://img.shields.io/badge/Groq-fast%20inference-F55036)
+![LM Studio](https://img.shields.io/badge/LM%20Studio-OpenAI%20compatible-8A2BE2)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+> **Master's Thesis (TFM)** — A hybrid RAG system that combines a **Neo4j knowledge graph** with **LLM-powered natural language querying** over SEC financial data, supporting both semantic search and multi-hop graph traversal. Users ask questions in plain English; the system translates them to Cypher, executes them against the knowledge graph, and streams analyst-grade answers with source citations.
+>
+> The entire pipeline runs locally on an **RTX 4070 8 GB GPU**, demonstrating that open-source models are capable of domain-specific financial reasoning — offering a cost-efficient alternative for businesses looking to build similar chatbots over financial or numerical documents.
+>
+> Covers **899 mutual funds and ETFs** (Vanguard, iShares, Fidelity) and **20 S&P 500 companies** extracted from SEC EDGAR — 110K nodes, 490K relationships.
+
+<!-- TODO: add a screenshot of the Streamlit chat UI here -->
+<!-- ![Demo](docs/images/demo.gif) -->
 
 ## Pipeline
 
 ```
 User Query
-  → SetFit Classifier (9 categories)
-  → Schema Slice Selection
-  → Entity Resolution (fuzzy name/ticker matching via rapidfuzz)
-  → Few-Shot Example Retrieval (FAISS, nomic-embed-text-v1.5)
-  → Text2Cypher LLM (Ollama / Groq / OpenAI-compatible)
-  → Cypher Validation + Retry Loop (up to 3 attempts with error-specific feedback)
+  → SetFit Classifier (6 categories: fund_basic | fund_portfolio | fund_profile |
+                                      company_filing | company_people | not_related)
+  → Schema Slice Selection (per-category schema subset injected into prompt)
+  → Entity Resolution (fuzzy fund name / ticker matching via rapidfuzz)
+  → Few-Shot Example Retrieval (FAISS index, all-MiniLM-L6-v2 / nomic-embed-text-v1.5)
+  → Text2Cypher LLM (Ollama / Groq / LM Studio / llama.cpp / vLLM)
+  → Cypher Validation + Syntax Retry Loop (up to 3 attempts, error-specific feedback)
   → Neo4j Execution
+  → Result Validation (data-quality check — retries if results are anomalous, e.g. all zeros)
   → Result Classification (table / scalar / text / chart / empty)
   → Context Enrichment (supplementary queries + document provenance)
   → Answer Generation LLM (Groq / Gemini / OpenRouter / Ollama)
@@ -29,16 +50,34 @@ User Query
 | **LLM Orchestration** | LangChain |
 | **Text2Cypher Models** | Ollama (local), Groq API, OpenAI-compatible (llama.cpp / LM Studio / vLLM) |
 | **Answer Generation** | Groq, OpenRouter, Google Gemini, Ollama (pluggable via `ProviderRegistry`) |
+| **Tested Models** | Text2Cypher: `Qwen2.5-Coder-7B-Instruct-Q4_K` (LM Studio) · Answer gen: `Qwen3.5-9B` (LM Studio), `llama-3.3-70b-versatile` (Groq) |
 | **Embeddings** | `nomic-ai/nomic-embed-text-v1.5` (1536d) for queries; `all-MiniLM-L6-v2` for few-shot selector |
 | **Query Classification** | SetFit (`sentence-transformers/paraphrase-mpnet-base-v2`) |
 | **Data Source** | SEC EDGAR (10-K, DEF 14A, Form 4, N-CSR, N-PORT, 497K via `edgartools`) |
 | **Frontend** | Streamlit |
-| **Visualization** | Plotly, Seaborn |
+
 
 ## Project Structure
 
 ```
-src/simple_rag/
+# Project root
+├── neo4j/
+│   ├── docker-compose.yml       # Neo4j 5.27 + APOC plugin container
+│   ├── .env                     # Neo4j container env vars (passwords, ports)
+│   ├── plugins/apoc.jar         # APOC plugin binary (gitignored)
+│   ├── data/                    # Neo4j data directory (gitignored)
+│   └── dumps/                   # Database dump files (gitignored)
+├── scripts/
+│   ├── load_database.sh         # Stop Neo4j, load dump, restart
+│   ├── dump_database.sh         # Dump running Neo4j to neo4j/dumps/
+│   └── export_sample_data.py    # Export a data sample for testing
+├── notebooks/                   # Data extraction & ingestion (run in order)
+│   ├── vanguard.ipynb           # Notebook 1 — Vanguard funds
+│   ├── edgar.ipynb              # Notebook 2 — iShares & Fidelity funds
+│   └── neo4j.ipynb              # Notebook 3 — Company 10-K + full ingestion
+└── src/simple_rag/
+
+# src/simple_rag/
 ├── database/neo4j/              # Neo4j connection, schema, CRUD operations
 │   ├── base.py                  # Base connection & query execution
 │   ├── database.py              # Unified controller (mixin pattern)
@@ -150,6 +189,24 @@ docker-compose up -d
 
 - **Browser UI**: [http://localhost:7474](http://localhost:7474)
 - **Bolt**: `bolt://localhost:7687`
+
+### Load the Pre-built Graph Snapshot (recommended)
+
+A complete database snapshot is available as a release asset — **188 MB**, covers all 899 funds and 20 companies. This skips the ingestion notebooks entirely.
+
+1. **Download** `neo4j.dump` from the [latest release](../../releases/latest)
+
+2. **Place** it at `neo4j/dumps/neo4j.dump`
+
+3. **Load** it (requires Neo4j to be running via Docker Compose first):
+   ```bash
+   ./scripts/load_database.sh
+   ```
+   This stops Neo4j, loads the dump, and restarts it. Takes ~30 seconds.
+
+4. **Verify** at [http://localhost:7474](http://localhost:7474) — you should see nodes in the graph browser.
+
+> If you prefer to build the graph from scratch by ingesting directly from SEC EDGAR, follow the [Data Extraction & Ingestion Workflow](#data-extraction--ingestion-workflow) below instead.
 
 ---
 

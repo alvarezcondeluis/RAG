@@ -28,20 +28,31 @@ def get_cache_path(ticker: str, form: str, accession: str) -> Path:
     return ticker_dir / f"{form}_{safe_accession}.pkl"
 
 def is_cached(ticker: str, form: str, accession: str) -> bool:
-    """Check if a filing is already cached."""
-    return get_cache_path(ticker, form, accession).exists()
+    """Check if a filing is already cached (and not empty/corrupt)."""
+    p = get_cache_path(ticker, form, accession)
+    return p.exists() and p.stat().st_size > 0
 
 def save_to_cache(ticker: str, form: str, accession: str, filing_obj):
-    """Save a filing object to disk cache."""
+    """Save a filing object to disk cache using an atomic write (tmp → rename)."""
     cache_path = get_cache_path(ticker, form, accession)
-    with open(cache_path, 'wb') as f:
-        pickle.dump(filing_obj, f)
+    tmp = cache_path.with_suffix(".tmp")
+    try:
+        with open(tmp, 'wb') as f:
+            pickle.dump(filing_obj, f)
+        tmp.rename(cache_path)  # ponytail: atomic on Linux/macOS; avoids corrupt half-writes
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 def load_from_cache(ticker: str, form: str, accession: str):
-    """Load a filing object from disk cache."""
+    """Load a filing object from disk cache. Deletes and returns None if corrupt."""
     cache_path = get_cache_path(ticker, form, accession)
-    with open(cache_path, 'rb') as f:
-        return pickle.load(f)
+    try:
+        with open(cache_path, 'rb') as f:
+            return pickle.load(f)
+    except (pickle.UnpicklingError, EOFError, Exception):
+        cache_path.unlink(missing_ok=True)
+        return None
 
 def warm_cache_with_persistence(tickers: list):
     """

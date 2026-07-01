@@ -3,6 +3,12 @@
 .env.local
 .env.*.local
 
+# Tool config (local only — contain env-specific settings)
+opencode.json
+opencode/
+.claude/
+.devin/
+
 # Add this to .gitignore
 checkpoints/
 *.pt
@@ -16,6 +22,7 @@ checkpoints/
 neo4j/import/
 neo4j/data/
 neo4j/plugins/
+neo4j/dumps/
 /rag
 src/simple_rag/evaluation/embeddings/reports
 .rag
@@ -23,6 +30,7 @@ example.pdf
 *.pkl
 *.pdf
 /data
+!/data/sample/
 /RAG//notebooks/extracted_content
 /extracted_content
 # Vector database storage

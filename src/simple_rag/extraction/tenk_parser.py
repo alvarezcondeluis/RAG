@@ -356,11 +356,6 @@ class TenKParser:
             print(f"[{ticker}] No DEF 14A found.")
             return
 
-        print(f"\n{'='*70}")
-        print(f"DEF 14A DEBUG — {ticker}  ({filing.accession_number})")
-        print(f"URL: {filing.url}")
-        print(f"{'='*70}")
-
         obj = filing.obj()
 
         # ── All attributes on the proxy object ──────────────────────────

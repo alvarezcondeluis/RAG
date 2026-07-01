@@ -163,6 +163,15 @@
     padding: 0 1rem;
 }
 
+/* Response timing metadata */
+.response-timing {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-2);
+    margin-top: 0.6rem;
+    letter-spacing: 0.02em;
+}
+
 /* Streamlit native chat messages */
 .stChatMessage {
     animation: fadeUp .4s ease-out both;
@@ -722,6 +731,13 @@ button[data-testid="stBaseButton-primary"]:hover {
    ============================================================ */
 [data-testid="stBottomBlockContainer"] {
     padding-bottom: 0rem !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+/* inner wrapper Streamlit adds around the sticky bar */
+[data-testid="stBottomBlockContainer"] > div,
+[data-testid="stBottomBlockContainer"] > div > div {
+    background: transparent !important;
 }
 [data-testid="stBottomBlockContainer"]::after {
     content: "⚠ This is an AI and can make mistakes, including with financial and legal information. Verify all responses against official SEC filings.";

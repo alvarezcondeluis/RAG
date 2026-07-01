@@ -88,7 +88,6 @@ Rules:
 13. When asked about since inception or this year never filter by the year property just print the ordered results by the year
 
 
-
 Examples:
 {examples}
 
